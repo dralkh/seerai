@@ -3,6 +3,8 @@
 /* eslint-disable */
 // @ts-nocheck
 export type FluentMessageId =
+  | 'assistant-header-label'
+  | 'assistant-sidenav-tooltip'
   | 'item-info-row-example-label'
   | 'item-section-example1-head-text'
   | 'item-section-example1-sidenav-tooltip'
@@ -13,9 +15,18 @@ export type FluentMessageId =
   | 'menuitem-label'
   | 'menuitem-submenulabel'
   | 'menupopup-label'
+  | 'pref-datalab-title'
+  | 'pref-datalabApiKey'
+  | 'pref-datalabMaxConcurrent'
   | 'pref-enable'
   | 'pref-help'
   | 'pref-input'
+  | 'pref-models-add'
+  | 'pref-models-delete'
+  | 'pref-models-edit'
+  | 'pref-models-empty'
+  | 'pref-models-set-default'
+  | 'pref-models-title'
   | 'pref-title'
   | 'prefs-table-detail'
   | 'prefs-table-title'

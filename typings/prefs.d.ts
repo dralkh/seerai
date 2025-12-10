@@ -9,6 +9,13 @@ declare namespace _ZoteroTypes {
     PluginPrefsMap: {
       "enable": boolean;
       "input": string;
+      "apiURL": string;
+      "apiKey": string;
+      "model": string;
+      "datalabApiKey": string;
+      "datalabMaxConcurrent": number;
+      "modelConfigs": string;
+      "activeModelId": string;
     };
   }
 }

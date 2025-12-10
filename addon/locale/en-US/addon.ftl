@@ -9,3 +9,5 @@ prefs-table-title = Title
 prefs-table-detail = Detail
 tabpanel-lib-tab-label = Lib Tab
 tabpanel-reader-tab-label = Reader Tab
+assistant-header-label = Smart Assistant
+assistant-sidenav-tooltip = Open Smart Assistant
