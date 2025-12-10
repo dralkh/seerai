@@ -388,7 +388,7 @@ export class Assistant {
     }
 
     /**
-     * Show tag picker dialog
+     * Show tag picker dialog with optional collection filtering
      */
     private static async showTagPicker(doc: Document, stateManager: ReturnType<typeof getChatStateManager>) {
         // Remove existing picker if any
@@ -398,27 +398,80 @@ export class Assistant {
             return;
         }
 
-        // Get all tags from all libraries (personal + group)
-        const allTags: { tag: string }[] = [];
+        // Get all collections for the filter dropdown
+        const allCollections = await this.getAllCollections();
         const libraries = Zotero.Libraries.getAll();
 
-        for (const library of libraries) {
-            try {
-                const libraryTags = await Zotero.Tags.getAll(library.libraryID);
-                if (libraryTags && libraryTags.length > 0) {
-                    for (const t of libraryTags) {
-                        // Avoid duplicates
-                        if (!allTags.some(existing => existing.tag === t.tag)) {
-                            allTags.push({ tag: t.tag });
+        // Track selected collection/library filter
+        let selectedCollectionId: number | null = null;
+        let selectedLibraryId: number | null = null;
+
+        // Function to get tags based on current filter
+        const getFilteredTags = async (): Promise<{ tag: string }[]> => {
+            const tags: { tag: string }[] = [];
+
+            if (selectedCollectionId !== null) {
+                // Get tags only from items in the selected collection
+                try {
+                    const collection = Zotero.Collections.get(selectedCollectionId);
+                    if (collection) {
+                        const itemIDs = collection.getChildItems(true);
+                        const tagSet = new Set<string>();
+                        for (const itemId of itemIDs) {
+                            const item = Zotero.Items.get(itemId);
+                            if (item && item.isRegularItem()) {
+                                const itemTags = item.getTags();
+                                for (const t of itemTags) {
+                                    tagSet.add(t.tag);
+                                }
+                            }
+                        }
+                        for (const tag of tagSet) {
+                            tags.push({ tag });
                         }
                     }
+                } catch (e) {
+                    Zotero.debug(`[Seer AI] Error loading tags from collection: ${e}`);
                 }
-            } catch (e) {
-                Zotero.debug(`[Seer AI] Error loading tags from library ${library.name}: ${e}`);
+            } else if (selectedLibraryId !== null) {
+                // Get tags from a specific library
+                try {
+                    const libraryTags = await Zotero.Tags.getAll(selectedLibraryId);
+                    if (libraryTags && libraryTags.length > 0) {
+                        for (const t of libraryTags) {
+                            if (!tags.some(existing => existing.tag === t.tag)) {
+                                tags.push({ tag: t.tag });
+                            }
+                        }
+                    }
+                } catch (e) {
+                    Zotero.debug(`[Seer AI] Error loading tags from library: ${e}`);
+                }
+            } else {
+                // Get all tags from all libraries (default)
+                for (const library of libraries) {
+                    try {
+                        const libraryTags = await Zotero.Tags.getAll(library.libraryID);
+                        if (libraryTags && libraryTags.length > 0) {
+                            for (const t of libraryTags) {
+                                if (!tags.some(existing => existing.tag === t.tag)) {
+                                    tags.push({ tag: t.tag });
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        Zotero.debug(`[Seer AI] Error loading tags from library ${library.name}: ${e}`);
+                    }
+                }
             }
-        }
 
-        if (allTags.length === 0) {
+            return tags.sort((a, b) => a.tag.localeCompare(b.tag));
+        };
+
+        // Initial tag load
+        let allTags = await getFilteredTags();
+
+        if (allTags.length === 0 && selectedCollectionId === null && selectedLibraryId === null) {
             Zotero.debug("[Seer AI] No tags found in any library");
             return;
         }
@@ -445,8 +498,9 @@ export class Assistant {
                 backgroundColor: "#fff",
                 borderRadius: "12px",
                 padding: "20px",
-                maxWidth: "400px",
-                maxHeight: "70vh",
+                maxWidth: "450px",
+                width: "90%",
+                maxHeight: "80vh",
                 display: "flex",
                 flexDirection: "column",
                 gap: "12px",
@@ -457,8 +511,68 @@ export class Assistant {
         // Title
         const title = ztoolkit.UI.createElement(doc, "div", {
             properties: { innerText: "🏷️ Select Tags" },
-            styles: { fontSize: "16px", fontWeight: "600", marginBottom: "8px" }
+            styles: { fontSize: "16px", fontWeight: "600", marginBottom: "4px" }
         });
+
+        // Collection filter dropdown
+        const filterContainer = ztoolkit.UI.createElement(doc, "div", {
+            styles: {
+                display: "flex",
+                flexDirection: "column",
+                gap: "4px",
+                marginBottom: "8px"
+            }
+        });
+
+        const filterLabel = ztoolkit.UI.createElement(doc, "label", {
+            properties: { innerText: "📁 Filter by collection:" },
+            styles: { fontSize: "12px", color: "#666" }
+        });
+
+        const filterSelect = ztoolkit.UI.createElement(doc, "select", {
+            styles: {
+                padding: "8px 12px",
+                border: "1px solid #ddd",
+                borderRadius: "6px",
+                fontSize: "13px",
+                backgroundColor: "#fff",
+                cursor: "pointer"
+            }
+        }) as HTMLSelectElement;
+
+        // Add "All Libraries" option
+        const allOption = ztoolkit.UI.createElement(doc, "option", {
+            properties: { value: "all", innerText: "All Libraries" }
+        });
+        filterSelect.appendChild(allOption);
+
+        // Add library options with their collections
+        for (const library of libraries) {
+            // Library option
+            const libOption = ztoolkit.UI.createElement(doc, "option", {
+                properties: {
+                    value: `lib_${library.libraryID}`,
+                    innerText: `📚 ${library.name}`
+                }
+            });
+            filterSelect.appendChild(libOption);
+
+            // Collection options for this library
+            const libraryCollections = allCollections.filter(c => c.libraryId === library.libraryID);
+            for (const col of libraryCollections) {
+                const indent = "    ".repeat(col.depth + 1);
+                const colOption = ztoolkit.UI.createElement(doc, "option", {
+                    properties: {
+                        value: `col_${col.id}`,
+                        innerText: `${indent}📁 ${col.name}`
+                    }
+                });
+                filterSelect.appendChild(colOption);
+            }
+        }
+
+        filterContainer.appendChild(filterLabel);
+        filterContainer.appendChild(filterSelect);
 
         // Search input
         const searchInput = ztoolkit.UI.createElement(doc, "input", {
@@ -474,7 +588,7 @@ export class Assistant {
         // Tag list container
         const tagList = ztoolkit.UI.createElement(doc, "div", {
             styles: {
-                maxHeight: "300px",
+                maxHeight: "280px",
                 overflowY: "auto",
                 display: "flex",
                 flexDirection: "column",
@@ -488,9 +602,28 @@ export class Assistant {
         // Render tag options
         const renderTags = (filter: string = "") => {
             tagList.innerHTML = "";
+
+            if (allTags.length === 0) {
+                const noTags = ztoolkit.UI.createElement(doc, "div", {
+                    properties: { innerText: "No tags found in selected scope" },
+                    styles: { padding: "12px", color: "#666", textAlign: "center" }
+                });
+                tagList.appendChild(noTags);
+                return;
+            }
+
             const filteredTags = allTags
                 .filter((t: { tag: string }) => t.tag.toLowerCase().includes(filter.toLowerCase()))
                 .slice(0, 50); // Limit to 50 for performance
+
+            if (filteredTags.length === 0) {
+                const noResults = ztoolkit.UI.createElement(doc, "div", {
+                    properties: { innerText: filter ? "No tags match your search" : "No tags available" },
+                    styles: { padding: "12px", color: "#666", textAlign: "center" }
+                });
+                tagList.appendChild(noResults);
+                return;
+            }
 
             filteredTags.forEach((tagData: { tag: string }) => {
                 const tagName = tagData.tag;
@@ -532,9 +665,35 @@ export class Assistant {
                 tagRow.appendChild(label);
                 tagList.appendChild(tagRow);
             });
+
+            // Show count
+            const countEl = ztoolkit.UI.createElement(doc, "div", {
+                properties: { innerText: `Showing ${filteredTags.length} of ${allTags.length} tags` },
+                styles: { fontSize: "11px", color: "#888", padding: "8px", textAlign: "center" }
+            });
+            tagList.appendChild(countEl);
         };
 
         renderTags();
+
+        // Filter change event
+        filterSelect.addEventListener("change", async () => {
+            const value = filterSelect.value;
+            if (value === "all") {
+                selectedCollectionId = null;
+                selectedLibraryId = null;
+            } else if (value.startsWith("lib_")) {
+                selectedCollectionId = null;
+                selectedLibraryId = parseInt(value.replace("lib_", ""), 10);
+            } else if (value.startsWith("col_")) {
+                selectedCollectionId = parseInt(value.replace("col_", ""), 10);
+                selectedLibraryId = null;
+            }
+
+            // Reload tags for new filter
+            allTags = await getFilteredTags();
+            renderTags(searchInput.value);
+        });
 
         // Search event
         searchInput.addEventListener("input", () => {
@@ -589,8 +748,8 @@ export class Assistant {
                         });
                     }
 
-                    // Find and add all items with these tags
-                    await this.addItemsByTags(Array.from(selectedTags));
+                    // Find and add all items with these tags (respecting the filter)
+                    await this.addItemsByTags(Array.from(selectedTags), selectedCollectionId, selectedLibraryId);
 
                     overlay.remove();
                     this.reRenderSelectionArea();
@@ -602,6 +761,7 @@ export class Assistant {
         buttonRow.appendChild(addTagsBtn);
 
         dialog.appendChild(title);
+        dialog.appendChild(filterContainer);
         dialog.appendChild(searchInput);
         dialog.appendChild(tagList);
         dialog.appendChild(buttonRow);
@@ -623,7 +783,7 @@ export class Assistant {
     }
 
     /**
-     * Show paper picker dialog with searchable list of library items
+     * Show paper picker dialog with searchable list of library items and collection filtering
      */
     private static async showPaperPicker(doc: Document, stateManager: ReturnType<typeof getChatStateManager>) {
         // Remove existing picker if any
@@ -633,41 +793,102 @@ export class Assistant {
             return;
         }
 
-        // Get all regular items from all libraries (personal + group)
-        const allItems: { id: number; title: string; creators: string; year: string; libraryName: string }[] = [];
+        // Get all collections for the filter dropdown
+        const allCollections = await this.getAllCollections();
         const libraries = Zotero.Libraries.getAll();
 
-        for (const library of libraries) {
-            try {
-                const search = new Zotero.Search();
-                search.addCondition('libraryID', 'is', library.libraryID.toString());
-                search.addCondition('itemType', 'isNot', 'attachment');
-                search.addCondition('itemType', 'isNot', 'note');
-                const itemIDs = await search.search();
+        // Track selected collection/library filter
+        let selectedCollectionId: number | null = null;
+        let selectedLibraryId: number | null = null;
 
-                if (itemIDs && itemIDs.length > 0) {
-                    // Limit per library but total across all
-                    const maxPerLibrary = Math.min(itemIDs.length, Math.floor(500 / libraries.length));
-                    for (const id of itemIDs.slice(0, maxPerLibrary)) {
-                        const item = Zotero.Items.get(id);
-                        if (item && item.isRegularItem()) {
-                            const creators = item.getCreators().map((c: any) => c.lastName || c.name || '').slice(0, 2).join(', ');
-                            allItems.push({
-                                id: item.id,
-                                title: item.getField("title") as string || "Untitled",
-                                creators: creators || "Unknown",
-                                year: item.getField("year") as string || "",
-                                libraryName: library.name
-                            });
+        // Function to get items based on current filter
+        const getFilteredItems = async (): Promise<{ id: number; title: string; creators: string; year: string; libraryName: string; collectionName?: string }[]> => {
+            const items: { id: number; title: string; creators: string; year: string; libraryName: string; collectionName?: string }[] = [];
+
+            const addItem = (item: Zotero.Item, libraryName: string, collectionName?: string) => {
+                const creators = item.getCreators().map((c: any) => c.lastName || c.name || '').slice(0, 2).join(', ');
+                items.push({
+                    id: item.id,
+                    title: item.getField("title") as string || "Untitled",
+                    creators: creators || "Unknown",
+                    year: item.getField("year") as string || "",
+                    libraryName: libraryName,
+                    collectionName: collectionName
+                });
+            };
+
+            if (selectedCollectionId !== null) {
+                // Get items from the selected collection only
+                try {
+                    const collection = Zotero.Collections.get(selectedCollectionId);
+                    if (collection) {
+                        const libraryResult = Zotero.Libraries.get(collection.libraryID);
+                        const libraryName = libraryResult ? libraryResult.name : "Unknown";
+                        const itemIDs = collection.getChildItems(true);
+                        for (const id of itemIDs.slice(0, 500)) {
+                            const item = Zotero.Items.get(id);
+                            if (item && item.isRegularItem()) {
+                                addItem(item, libraryName, collection.name);
+                            }
                         }
                     }
+                } catch (e) {
+                    Zotero.debug(`[Seer AI] Error loading items from collection: ${e}`);
                 }
-            } catch (e) {
-                Zotero.debug(`[Seer AI] Error loading items from library ${library.name}: ${e}`);
-            }
-        }
+            } else if (selectedLibraryId !== null) {
+                // Get items from a specific library
+                try {
+                    const libraryResult = Zotero.Libraries.get(selectedLibraryId);
+                    const libraryName = libraryResult ? libraryResult.name : "Unknown";
+                    const search = new Zotero.Search();
+                    search.addCondition('libraryID', 'is', selectedLibraryId.toString());
+                    search.addCondition('itemType', 'isNot', 'attachment');
+                    search.addCondition('itemType', 'isNot', 'note');
+                    const itemIDs = await search.search();
 
-        if (allItems.length === 0) {
+                    if (itemIDs && itemIDs.length > 0) {
+                        for (const id of itemIDs.slice(0, 500)) {
+                            const item = Zotero.Items.get(id);
+                            if (item && item.isRegularItem()) {
+                                addItem(item, libraryName);
+                            }
+                        }
+                    }
+                } catch (e) {
+                    Zotero.debug(`[Seer AI] Error loading items from library: ${e}`);
+                }
+            } else {
+                // Get all items from all libraries (default)
+                for (const library of libraries) {
+                    try {
+                        const search = new Zotero.Search();
+                        search.addCondition('libraryID', 'is', library.libraryID.toString());
+                        search.addCondition('itemType', 'isNot', 'attachment');
+                        search.addCondition('itemType', 'isNot', 'note');
+                        const itemIDs = await search.search();
+
+                        if (itemIDs && itemIDs.length > 0) {
+                            const maxPerLibrary = Math.min(itemIDs.length, Math.floor(500 / libraries.length));
+                            for (const id of itemIDs.slice(0, maxPerLibrary)) {
+                                const item = Zotero.Items.get(id);
+                                if (item && item.isRegularItem()) {
+                                    addItem(item, library.name);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        Zotero.debug(`[Seer AI] Error loading items from library ${library.name}: ${e}`);
+                    }
+                }
+            }
+
+            return items;
+        };
+
+        // Initial item load
+        let allItems = await getFilteredItems();
+
+        if (allItems.length === 0 && selectedCollectionId === null && selectedLibraryId === null) {
             Zotero.debug("[Seer AI] No items found in any library");
             return;
         }
@@ -694,9 +915,9 @@ export class Assistant {
                 backgroundColor: "#fff",
                 borderRadius: "12px",
                 padding: "20px",
-                maxWidth: "500px",
+                maxWidth: "550px",
                 width: "90%",
-                maxHeight: "70vh",
+                maxHeight: "85vh",
                 display: "flex",
                 flexDirection: "column",
                 gap: "12px",
@@ -707,8 +928,68 @@ export class Assistant {
         // Title
         const title = ztoolkit.UI.createElement(doc, "div", {
             properties: { innerText: "📄 Select Papers" },
-            styles: { fontSize: "16px", fontWeight: "600", marginBottom: "8px" }
+            styles: { fontSize: "16px", fontWeight: "600", marginBottom: "4px" }
         });
+
+        // Collection filter dropdown
+        const filterContainer = ztoolkit.UI.createElement(doc, "div", {
+            styles: {
+                display: "flex",
+                flexDirection: "column",
+                gap: "4px",
+                marginBottom: "8px"
+            }
+        });
+
+        const filterLabel = ztoolkit.UI.createElement(doc, "label", {
+            properties: { innerText: "📁 Filter by collection:" },
+            styles: { fontSize: "12px", color: "#666" }
+        });
+
+        const filterSelect = ztoolkit.UI.createElement(doc, "select", {
+            styles: {
+                padding: "8px 12px",
+                border: "1px solid #ddd",
+                borderRadius: "6px",
+                fontSize: "13px",
+                backgroundColor: "#fff",
+                cursor: "pointer"
+            }
+        }) as HTMLSelectElement;
+
+        // Add "All Libraries" option
+        const allOption = ztoolkit.UI.createElement(doc, "option", {
+            properties: { value: "all", innerText: "All Libraries" }
+        });
+        filterSelect.appendChild(allOption);
+
+        // Add library options with their collections
+        for (const library of libraries) {
+            // Library option
+            const libOption = ztoolkit.UI.createElement(doc, "option", {
+                properties: {
+                    value: `lib_${library.libraryID}`,
+                    innerText: `📚 ${library.name}`
+                }
+            });
+            filterSelect.appendChild(libOption);
+
+            // Collection options for this library
+            const libraryCollections = allCollections.filter(c => c.libraryId === library.libraryID);
+            for (const col of libraryCollections) {
+                const indent = "    ".repeat(col.depth + 1);
+                const colOption = ztoolkit.UI.createElement(doc, "option", {
+                    properties: {
+                        value: `col_${col.id}`,
+                        innerText: `${indent}📁 ${col.name}`
+                    }
+                });
+                filterSelect.appendChild(colOption);
+            }
+        }
+
+        filterContainer.appendChild(filterLabel);
+        filterContainer.appendChild(filterSelect);
 
         // Search input
         const searchInput = ztoolkit.UI.createElement(doc, "input", {
@@ -724,7 +1005,7 @@ export class Assistant {
         // Paper list container
         const paperList = ztoolkit.UI.createElement(doc, "div", {
             styles: {
-                maxHeight: "350px",
+                maxHeight: "320px",
                 overflowY: "auto",
                 display: "flex",
                 flexDirection: "column",
@@ -738,6 +1019,16 @@ export class Assistant {
         // Render paper options
         const renderPapers = (filter: string = "") => {
             paperList.innerHTML = "";
+
+            if (allItems.length === 0) {
+                const noItems = ztoolkit.UI.createElement(doc, "div", {
+                    properties: { innerText: "No papers found in selected scope" },
+                    styles: { padding: "12px", color: "#666", textAlign: "center" }
+                });
+                paperList.appendChild(noItems);
+                return;
+            }
+
             const filterLower = filter.toLowerCase();
             const filteredItems = allItems
                 .filter(item =>
@@ -749,7 +1040,7 @@ export class Assistant {
 
             if (filteredItems.length === 0) {
                 const noResults = ztoolkit.UI.createElement(doc, "div", {
-                    properties: { innerText: filter ? "No papers match your search" : "No papers in library" },
+                    properties: { innerText: filter ? "No papers match your search" : "No papers available" },
                     styles: { padding: "12px", color: "#666", textAlign: "center" }
                 });
                 paperList.appendChild(noResults);
@@ -799,8 +1090,13 @@ export class Assistant {
                     styles: { fontSize: "13px", fontWeight: "500" }
                 });
 
+                // Show collection name if filtering by collection
+                const metaText = item.collectionName
+                    ? `${item.creators}${item.year ? ` (${item.year})` : ''} • ${item.collectionName}${alreadyAdded ? ' — already added' : ''}`
+                    : `${item.creators}${item.year ? ` (${item.year})` : ''}${alreadyAdded ? ' — already added' : ''}`;
+
                 const metaEl = ztoolkit.UI.createElement(doc, "div", {
-                    properties: { innerText: `${item.creators}${item.year ? ` (${item.year})` : ''}${alreadyAdded ? ' — already added' : ''}` },
+                    properties: { innerText: metaText },
                     styles: { fontSize: "11px", color: "#666" }
                 });
 
@@ -820,6 +1116,25 @@ export class Assistant {
         };
 
         renderPapers();
+
+        // Filter change event
+        filterSelect.addEventListener("change", async () => {
+            const value = filterSelect.value;
+            if (value === "all") {
+                selectedCollectionId = null;
+                selectedLibraryId = null;
+            } else if (value.startsWith("lib_")) {
+                selectedCollectionId = null;
+                selectedLibraryId = parseInt(value.replace("lib_", ""), 10);
+            } else if (value.startsWith("col_")) {
+                selectedCollectionId = parseInt(value.replace("col_", ""), 10);
+                selectedLibraryId = null;
+            }
+
+            // Reload items for new filter
+            allItems = await getFilteredItems();
+            renderPapers(searchInput.value);
+        });
 
         // Search event
         searchInput.addEventListener("input", () => {
@@ -884,6 +1199,7 @@ export class Assistant {
         buttonRow.appendChild(addPapersBtn);
 
         dialog.appendChild(title);
+        dialog.appendChild(filterContainer);
         dialog.appendChild(searchInput);
         dialog.appendChild(paperList);
         dialog.appendChild(buttonRow);
@@ -905,23 +1221,54 @@ export class Assistant {
     }
 
     /**
-     * Add all items matching the given tags
+     * Add all items matching the given tags, optionally filtered by collection/library
      */
-    private static async addItemsByTags(tagNames: string[]) {
-        const libraryID = Zotero.Libraries.userLibraryID;
+    private static async addItemsByTags(tagNames: string[], collectionId?: number | null, libraryId?: number | null) {
         let addedCount = 0;
 
-        for (const tagName of tagNames) {
-            // Get items with this tag
-            const tagID = Zotero.Tags.getID(tagName);
-            if (!tagID) continue;
+        // If a collection is specified, get items from that collection
+        if (collectionId) {
+            try {
+                const collection = Zotero.Collections.get(collectionId);
+                if (collection) {
+                    const itemIDs = collection.getChildItems(true);
+                    const itemTagSet = new Set(tagNames);
 
-            const itemIDs = await Zotero.Tags.getTagItems(libraryID, tagID);
-            for (const itemID of itemIDs) {
-                const item = Zotero.Items.get(itemID);
-                if (item && item.isRegularItem()) {
-                    await this.addItemWithNotes(item);
-                    addedCount++;
+                    for (const itemId of itemIDs) {
+                        const item = Zotero.Items.get(itemId);
+                        if (item && item.isRegularItem()) {
+                            const itemTags = item.getTags().map((t: { tag: string }) => t.tag);
+                            // Check if item has any of the selected tags
+                            if (itemTags.some((tag: string) => itemTagSet.has(tag))) {
+                                await this.addItemWithNotes(item);
+                                addedCount++;
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                Zotero.debug(`[Seer AI] Error adding items from collection: ${e}`);
+            }
+        } else {
+            // Get items from specified library or all libraries
+            const libraries = libraryId
+                ? [{ libraryID: libraryId }]
+                : Zotero.Libraries.getAll();
+
+            for (const library of libraries) {
+                for (const tagName of tagNames) {
+                    // Get items with this tag
+                    const tagID = Zotero.Tags.getID(tagName);
+                    if (!tagID) continue;
+
+                    const itemIDs = await Zotero.Tags.getTagItems(library.libraryID, tagID);
+                    for (const itemID of itemIDs) {
+                        const item = Zotero.Items.get(itemID);
+                        if (item && item.isRegularItem()) {
+                            await this.addItemWithNotes(item);
+                            addedCount++;
+                        }
+                    }
                 }
             }
         }
@@ -949,6 +1296,44 @@ export class Assistant {
         }
 
         Zotero.debug(`[Seer AI] Added ${added} items with notes to chat context`);
+    }
+
+    /**
+     * Get all collections from all libraries for filtering
+     */
+    private static async getAllCollections(): Promise<{ id: number; name: string; libraryName: string; libraryId: number; depth: number }[]> {
+        const allCollections: { id: number; name: string; libraryName: string; libraryId: number; depth: number }[] = [];
+        const libraries = Zotero.Libraries.getAll();
+
+        for (const library of libraries) {
+            try {
+                const collections = Zotero.Collections.getByLibrary(library.libraryID);
+                if (collections && collections.length > 0) {
+                    // Build a hierarchical list with proper indentation
+                    const addCollectionsRecursive = (parentId: number | null, depth: number) => {
+                        for (const collection of collections) {
+                            const collectionParentId = collection.parentID || null;
+                            if (collectionParentId === parentId) {
+                                allCollections.push({
+                                    id: collection.id,
+                                    name: collection.name,
+                                    libraryName: library.name,
+                                    libraryId: library.libraryID,
+                                    depth: depth
+                                });
+                                // Recursively add children
+                                addCollectionsRecursive(collection.id, depth + 1);
+                            }
+                        }
+                    };
+                    addCollectionsRecursive(null, 0);
+                }
+            } catch (e) {
+                Zotero.debug(`[Seer AI] Error loading collections from library ${library.name}: ${e}`);
+            }
+        }
+
+        return allCollections;
     }
 
     /**

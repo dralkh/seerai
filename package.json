@@ -1,8 +1,8 @@
 {
   "name": "seer-ai",
   "type": "module",
-  "version": "3.1.0",
-  "description": "Zotero Plugin Template",
+  "version": "1.0.0",
+  "description": "Seer AI - Intelligent Research Assistant for Zotero",
   "config": {
     "addonName": "Seer AI",
     "addonID": "seer-ai@zotero.org",
@@ -12,17 +12,17 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/windingwind/zotero-plugin-template.git"
+    "url": "git+https://github.com/dralkh/Seer-AI.git"
   },
-  "author": "windingwind",
+  "author": "dralkh",
   "bugs": {
-    "url": "https://github.com/windingwind/zotero-plugin-template/issues"
+    "url": "https://github.com/dralkh/Seer-AI/issues"
   },
-  "homepage": "https://github.com/windingwind/zotero-plugin-template#readme",
-  "license": "AGPL-3.0-or-later",
+  "homepage": "https://github.com/dralkh/Seer-AI#readme",
+  "license": "MIT",
   "scripts": {
     "start": "zotero-plugin serve",
-    "build": "zotero-plugin build && tsc --noEmit",
+    "build": "zotero-plugin build && tsc --noEmit && cp .scaffold/build/*.xpi .",
     "lint:check": "prettier --check . && eslint .",
     "lint:fix": "prettier --write . && eslint . --fix",
     "release": "zotero-plugin release",
