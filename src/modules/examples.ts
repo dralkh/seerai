@@ -73,7 +73,7 @@ export class BasicExampleFactory {
       pluginID: addon.data.config.addonID,
       src: rootURI + "content/preferences.xhtml",
       label: getString("prefs-title"),
-      image: `chrome://${addon.data.config.addonRef}/content/icons/favicon.png`,
+      image: `chrome://${addon.data.config.addonRef}/content/icons/icon-20.png`,
     });
   }
 }
@@ -142,7 +142,7 @@ export class UIExampleFactory {
     // item menuitem with icon
     ztoolkit.Menu.register("item", {
       tag: "menuitem",
-      id: "zotero-itemmenu-addontemplate-test",
+      id: `zotero-itemmenu-${addon.data.config.addonRef}-test`,
       label: getString("menuitem-label"),
       commandListener: (ev) => addon.hooks.onDialogEvents("dialogExample"),
       icon: menuIcon,
@@ -166,7 +166,7 @@ export class UIExampleFactory {
       },
       "before",
       win.document?.querySelector(
-        "#zotero-itemmenu-addontemplate-test",
+        `#zotero-itemmenu-${addon.data.config.addonRef}-test`,
       ) as XUL.MenuItem,
     );
   }

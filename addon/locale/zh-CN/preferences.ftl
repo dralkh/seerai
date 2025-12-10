@@ -1,5 +1,14 @@
-pref-title = 插件模板设置示例
+pref-title = Seer AI 设置
 pref-enable =
     .label = 开启
 pref-input = 输入
 pref-help = { $name } Build { $version } { $time }
+pref-datalab-title = DataLab OCR
+pref-datalabApiKey = API 密钥
+pref-datalabMaxConcurrent = 最大并发数
+pref-models-title = AI 模型配置
+pref-models-add = 添加配置
+pref-models-edit = 编辑
+pref-models-delete = 删除
+pref-models-set-default = 设为默认
+pref-models-empty = 暂无模型配置。点击"添加配置"创建一个。

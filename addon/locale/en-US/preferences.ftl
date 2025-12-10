@@ -1,5 +1,11 @@
-pref-title = Addon Template Example
-pref-enable =
-    .label = Enable
-pref-input = Input
+pref-title = Seer AI Settings
+pref-datalab-title = DataLab OCR
+pref-datalabApiKey = API Key
+pref-datalabMaxConcurrent = Max Concurrent
 pref-help = { $name } Build { $version } { $time }
+pref-models-title = AI Model Configurations
+pref-models-add = Add Configuration
+pref-models-edit = Edit
+pref-models-delete = Delete
+pref-models-set-default = Set as Default
+pref-models-empty = No model configurations. Click "Add Configuration" to create one.

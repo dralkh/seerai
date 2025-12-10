@@ -1,13 +1,11 @@
-import {
-  BasicExampleFactory,
-  HelperExampleFactory,
-  KeyExampleFactory,
-  PromptExampleFactory,
-  UIExampleFactory,
-} from "./modules/examples";
+import { Assistant } from "./modules/assistant";
+import { BasicExampleFactory } from "./modules/examples";
 import { getString, initLocale } from "./utils/locale";
 import { registerPrefsScripts } from "./modules/preferenceScript";
 import { createZToolkit } from "./utils/ztoolkit";
+import { DataLabService } from "./modules/datalab";
+
+const dataLabService = new DataLabService();
 
 async function onStartup() {
   await Promise.all([
@@ -18,21 +16,8 @@ async function onStartup() {
 
   initLocale();
 
+  Assistant.register();
   BasicExampleFactory.registerPrefs();
-
-  BasicExampleFactory.registerNotifier();
-
-  KeyExampleFactory.registerShortcuts();
-
-  await UIExampleFactory.registerExtraColumn();
-
-  await UIExampleFactory.registerExtraColumnWithCustomCell();
-
-  UIExampleFactory.registerItemPaneCustomInfoRow();
-
-  UIExampleFactory.registerItemPaneSection();
-
-  UIExampleFactory.registerReaderItemPaneSection();
 
   await Promise.all(
     Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
@@ -51,61 +36,196 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
     `${addon.data.config.addonRef}-mainWindow.ftl`,
   );
 
-  const popupWin = new ztoolkit.ProgressWindow(addon.data.config.addonName, {
-    closeOnClick: true,
-    closeTime: -1,
-  })
-    .createLine({
-      text: getString("startup-begin"),
-      type: "default",
-      progress: 0,
-    })
-    .show();
+  // === Context Menu Item ===
+  const menuId = "zotero-itemmenu";
+  const menu = win.document.getElementById(menuId);
+  if (menu) {
+    const menuItemId = "seer-ai-datalab-ocr";
+    let menuItem = win.document.getElementById(menuItemId) as XUL.MenuItem;
+    if (!menuItem) {
+      menuItem = win.document.createXULElement("menuitem") as XUL.MenuItem;
+      menuItem.setAttribute("id", menuItemId);
+      menuItem.setAttribute("label", "Extract with DataLab");
+      menuItem.setAttribute("class", "menuitem-iconic");
+      menuItem.addEventListener("command", async () => {
+        await processSelectedItems();
+      });
+      menu.appendChild(menuItem);
+    }
 
-  await Zotero.Promise.delay(1000);
-  popupWin.changeLine({
-    progress: 30,
-    text: `[30%] ${getString("startup-begin")}`,
-  });
+    // Handle visibility
+    menu.addEventListener("popupshowing", () => {
+      const items = Zotero.getActiveZoteroPane().getSelectedItems();
+      const hasPdf = items.some(item => {
+        if (item.isAttachment() && item.attachmentPath?.toLowerCase().endsWith(".pdf")) return true;
+        if (item.isRegularItem()) {
+          const pdf = dataLabService.getFirstPdfAttachment(item);
+          return pdf !== null;
+        }
+        return false;
+      });
+      menuItem.hidden = !hasPdf;
+    });
+  }
 
-  UIExampleFactory.registerStyleSheet(win);
-
-  UIExampleFactory.registerRightClickMenuItem();
-
-  UIExampleFactory.registerRightClickMenuPopup(win);
-
-  UIExampleFactory.registerWindowMenuWithSeparator();
-
-  PromptExampleFactory.registerNormalCommandExample();
-
-  PromptExampleFactory.registerAnonymousCommandExample(win);
-
-  PromptExampleFactory.registerConditionalCommandExample();
-
-  await Zotero.Promise.delay(1000);
-
-  popupWin.changeLine({
-    progress: 100,
-    text: `[100%] ${getString("startup-finish")}`,
-  });
-  popupWin.startCloseTimer(5000);
-
-  addon.hooks.onDialogEvents("dialogExample");
+  // === Toolbar Button ===
+  const toolbarId = "zotero-items-toolbar";
+  const toolbar = win.document.getElementById(toolbarId);
+  if (toolbar) {
+    const buttonId = "seer-ai-process-all-btn";
+    let button = win.document.getElementById(buttonId) as XUL.ToolBarButton;
+    if (!button) {
+      button = win.document.createXULElement("toolbarbutton") as XUL.ToolBarButton;
+      button.setAttribute("id", buttonId);
+      button.setAttribute("label", "Process All PDFs");
+      button.setAttribute("tooltiptext", "Extract text from all unprocessed PDFs in this library");
+      button.addEventListener("command", async () => {
+        await processAllLibraryItems();
+      });
+      toolbar.appendChild(button);
+    }
+  }
 }
 
+/**
+ * Process selected items: collect unique parent items, skip those with existing notes.
+ */
+async function processSelectedItems() {
+  const items = Zotero.getActiveZoteroPane().getSelectedItems();
+  ztoolkit.log(`DataLab: Selected ${items.length} items`);
+
+  // Collect unique parent items
+  const parentIdSet = new Set<number>();
+  const parentItems: Zotero.Item[] = [];
+
+  for (const item of items) {
+    let parentItem: Zotero.Item | null = null;
+    let parentId: number | null = null;
+
+    if (item.isAttachment() && item.attachmentPath?.toLowerCase().endsWith(".pdf")) {
+      // Get parent of PDF
+      if (item.parentID) {
+        parentId = item.parentID;
+        parentItem = Zotero.Items.get(parentId) as Zotero.Item;
+        ztoolkit.log(`DataLab: PDF ${item.id} has parentID ${parentId}`);
+      } else {
+        // Top-level PDF - skip for now
+        ztoolkit.log(`DataLab: PDF ${item.id} is top-level, skipping`);
+        continue;
+      }
+    } else if (item.isRegularItem()) {
+      parentId = item.id;
+      parentItem = item;
+      ztoolkit.log(`DataLab: Regular item ${item.id}`);
+    }
+
+    if (parentId && parentItem && !parentIdSet.has(parentId)) {
+      ztoolkit.log(`DataLab: Checking parent ${parentId} (not yet in set)`);
+      // Check if already has a note with matching title
+      if (!dataLabService.hasExistingNote(parentItem)) {
+        const pdf = dataLabService.getFirstPdfAttachment(parentItem);
+        if (pdf) {
+          parentIdSet.add(parentId);
+          parentItems.push(parentItem);
+          ztoolkit.log(`DataLab: Queued parent ${parentId} (${parentItem.getField("title")})`);
+        }
+      } else {
+        // Still add to set to prevent re-checking
+        parentIdSet.add(parentId);
+        ztoolkit.log(`DataLab: Skipping ${parentId} - note already exists`);
+      }
+    } else if (parentId) {
+      ztoolkit.log(`DataLab: Parent ${parentId} already in set, skipping`);
+    }
+  }
+
+  ztoolkit.log(`DataLab: ${parentItems.length} unique parents to process`);
+  if (parentItems.length === 0) {
+    new ztoolkit.ProgressWindow("DataLab OCR").createLine({
+      text: "No unprocessed items to extract.",
+      progress: 100
+    }).show();
+    return;
+  }
+
+  await processParentItemsInBatches(parentItems);
+}
+
+/**
+ * Process all items in the current library that have PDF attachments but no existing note.
+ */
+async function processAllLibraryItems() {
+  const libraryID = Zotero.Libraries.userLibraryID;
+  ztoolkit.log(`DataLab: Processing all PDFs in library ${libraryID}`);
+
+  // Get all regular items in the library
+  // @ts-ignore
+  const allItems = await Zotero.Items.getAll(libraryID) as Zotero.Item[];
+  const parentItems: Zotero.Item[] = [];
+
+  for (const item of allItems) {
+    if (!item.isRegularItem()) continue;
+
+    // Check if has PDF and no existing note
+    const pdf = dataLabService.getFirstPdfAttachment(item);
+    if (pdf && !dataLabService.hasExistingNote(item)) {
+      parentItems.push(item);
+    }
+  }
+
+  ztoolkit.log(`DataLab: Found ${parentItems.length} items to process in library`);
+  if (parentItems.length === 0) {
+    new ztoolkit.ProgressWindow("DataLab OCR").createLine({
+      text: "No unprocessed items found in library.",
+      progress: 100
+    }).show();
+    return;
+  }
+
+  // Confirm with user
+  const proceed = Zotero.getMainWindow().confirm(`Process ${parentItems.length} items? This may take a while.`);
+  if (!proceed) return;
+
+  await processParentItemsInBatches(parentItems);
+}
+
+/**
+ * Process parent items in parallel batches.
+ */
+async function processParentItemsInBatches(parentItems: Zotero.Item[]) {
+  const maxConcurrent = (Zotero.Prefs.get(`${addon.data.config.prefsPrefix}.datalabMaxConcurrent`) as number) || 5;
+  ztoolkit.log(`DataLab: Processing ${parentItems.length} items with max concurrent ${maxConcurrent}`);
+
+  for (let i = 0; i < parentItems.length; i += maxConcurrent) {
+    const batch = parentItems.slice(i, i + maxConcurrent);
+    ztoolkit.log(`DataLab: Processing batch ${Math.floor(i / maxConcurrent) + 1}`);
+    await Promise.all(batch.map(parent => {
+      const pdf = dataLabService.getFirstPdfAttachment(parent);
+      if (pdf) {
+        return dataLabService.convertToMarkdown(pdf);
+      }
+      return Promise.resolve();
+    }));
+  }
+  ztoolkit.log(`DataLab: All batches complete`);
+}
+
+
 async function onMainWindowUnload(win: Window): Promise<void> {
-  ztoolkit.unregisterAll();
+  addon.data.ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
 }
 
 function onShutdown(): void {
-  ztoolkit.unregisterAll();
+  addon.data.ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
   // Remove addon object
   addon.data.alive = false;
   // @ts-expect-error - Plugin instance is not typed
   delete Zotero[addon.data.config.addonInstance];
 }
+
+// ... existing code ...
 
 /**
  * This function is just an example of dispatcher for Notify events.
@@ -118,16 +238,7 @@ async function onNotify(
   extraData: { [key: string]: any },
 ) {
   // You can add your code to the corresponding notify type
-  ztoolkit.log("notify", event, type, ids, extraData);
-  if (
-    event == "select" &&
-    type == "tab" &&
-    extraData[ids[0]].type == "reader"
-  ) {
-    BasicExampleFactory.exampleNotifierCallback();
-  } else {
-    return;
-  }
+  addon.data.ztoolkit.log("notify", event, type, ids, extraData);
 }
 
 /**
@@ -147,38 +258,11 @@ async function onPrefsEvent(type: string, data: { [key: string]: any }) {
 }
 
 function onShortcuts(type: string) {
-  switch (type) {
-    case "larger":
-      KeyExampleFactory.exampleShortcutLargerCallback();
-      break;
-    case "smaller":
-      KeyExampleFactory.exampleShortcutSmallerCallback();
-      break;
-    default:
-      break;
-  }
+  // Handle shortcuts
 }
 
 function onDialogEvents(type: string) {
-  switch (type) {
-    case "dialogExample":
-      HelperExampleFactory.dialogExample();
-      break;
-    case "clipboardExample":
-      HelperExampleFactory.clipboardExample();
-      break;
-    case "filePickerExample":
-      HelperExampleFactory.filePickerExample();
-      break;
-    case "progressWindowExample":
-      HelperExampleFactory.progressWindowExample();
-      break;
-    case "vtableExample":
-      HelperExampleFactory.vtableExample();
-      break;
-    default:
-      break;
-  }
+  // Handle dialog events
 }
 
 // Add your hooks here. For element click, etc.
