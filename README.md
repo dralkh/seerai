@@ -219,12 +219,20 @@ Moving beyond keyword matching to understanding the meaning of your queries.
 - **Chat with Workspace** — seamless integration to use your defined workspace (table data, added papers) as context for chat conversations.
 - **Workspace-Aware Prompts** — Prompts that can reference structured data from your tables.
 
+### 6. Semantic Scholar Search Agent Tab
+A dedicated tab for searching and exploring papers using Semantic Scholar's API.
+- **Agentic Search**: Autonomous agent that searches, filters, and recommends papers based on your criteria.
+- **Graph Exploration**: Visualize citation networks and find connected papers.
+- **Direct Import**: One-click import of discovered papers directly into your Zotero library.
+- **Firecrawl Integration**: Extract pdf url from semantic scholar and import it to zotero.
+
 ### Others
 Citations refrencing
 MCP
 Connectors
 Commands
 UI
+Datalab local OCR API
 
 ---
 
