@@ -130,13 +130,16 @@ export interface Conversation {
     states: ChatStates;
 }
 
+// Selection mode for navigation behavior
+export type SelectionMode = 'lock' | 'default' | 'explore';
+
 // Chat options/preferences
 export interface ChatOptions {
     includeNotes: boolean;
     includeFullText: boolean;
     includeAbstracts: boolean;
     includeImages: boolean;  // Include image attachments for vision models
-    lockExploration: boolean; // Prevent auto-adding items on selection
+    selectionMode: SelectionMode; // Navigation behavior: lock (no add), default (single focus), explore (multi-add)
     maxTokens?: number;
     model?: string;
 }
@@ -146,7 +149,7 @@ export const defaultChatOptions: ChatOptions = {
     includeFullText: true,
     includeAbstracts: true,
     includeImages: true,  // Enabled by default for vision models
-    lockExploration: false,
+    selectionMode: 'default',
 };
 
 // Selection chip display config

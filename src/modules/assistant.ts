@@ -212,12 +212,23 @@ export class Assistant {
             }
         }
 
-        // Auto-add current item with its notes if not already selected (unless locked)
+        // Auto-add current item with its notes based on selection mode
         const options = stateManager.getOptions();
-        if (!options.lockExploration && !stateManager.isSelected('items', item.id)) {
-            // Use async but don't await - will re-render when done
-            this.addItemWithNotes(item);
+        const mode = options.selectionMode;
+
+        if (mode === 'explore') {
+            // Explore mode: add items without clearing (multi-add)
+            if (!stateManager.isSelected('items', item.id)) {
+                this.addItemWithNotes(item);
+            }
+        } else if (mode === 'default') {
+            // Default mode: switch to single item (clear others, focus on this one)
+            if (!stateManager.isSelected('items', item.id)) {
+                stateManager.clearAll();
+                this.addItemWithNotes(item);
+            }
         }
+        // Lock mode: do nothing - don't add any items automatically
         // Main Container with tabs
         const mainContainer = ztoolkit.UI.createElement(doc, "div", {
             styles: {
@@ -2957,8 +2968,9 @@ Task: ${columnPrompt}`;
                     type: "click",
                     listener: async () => {
                         stateManager.clearAll();
-                        // Re-add current item ONLY if NOT locked
-                        if (!stateManager.getOptions().lockExploration && currentItem) {
+                        // Re-add current item based on selection mode (not in lock mode)
+                        const mode = stateManager.getOptions().selectionMode;
+                        if (mode !== 'lock' && currentItem) {
                             await this.addItemWithNotes(currentItem);
                         }
                     }
@@ -4032,38 +4044,65 @@ Task: ${columnPrompt}`;
         // Populate model options
         this.populateModelSelector(modelSelect);
 
-        // Lock Context Toggle
+        // Selection Mode Selector
         const stateManager = getChatStateManager();
-        const lockToggle = ztoolkit.UI.createElement(doc, "div", {
-            styles: { display: "flex", alignItems: "center", gap: "4px", marginLeft: "4px" }
+        const modeContainer = ztoolkit.UI.createElement(doc, "div", {
+            styles: { display: "flex", alignItems: "center", gap: "4px", marginLeft: "8px" }
         });
 
-        const toggleCheckbox = ztoolkit.UI.createElement(doc, "input", {
-            attributes: { type: "checkbox", id: "lock-toggle" },
-            properties: { checked: stateManager.getOptions().lockExploration },
+        const modeLabel = ztoolkit.UI.createElement(doc, "span", {
+            properties: { innerText: "Mode:" },
+            styles: { fontSize: "11px", opacity: "0.8" }
+        });
+
+        const modeSelect = ztoolkit.UI.createElement(doc, "select", {
+            properties: { id: "selection-mode" },
+            styles: {
+                padding: "3px 6px",
+                fontSize: "11px",
+                border: "1px solid var(--border-primary)",
+                borderRadius: "4px",
+                backgroundColor: "var(--select-background)",
+                color: "var(--text-primary)",
+                cursor: "pointer"
+            },
             listeners: [{
                 type: "change",
                 listener: async (e: Event) => {
-                    const checked = (e.target as HTMLInputElement).checked;
-                    stateManager.setOptions({ lockExploration: checked });
-                    // If unlocked and we have a current item, auto-add it (resume follow mode)
-                    if (!checked && currentItem) {
+                    const mode = (e.target as HTMLSelectElement).value as 'lock' | 'default' | 'explore';
+                    stateManager.setOptions({ selectionMode: mode });
+                    // If switching to default or explore mode, auto-add current item
+                    if (mode !== 'lock' && currentItem) {
+                        if (mode === 'default') {
+                            stateManager.clearAll();
+                        }
                         await this.addItemWithNotes(currentItem);
                     }
                 }
             }]
+        }) as HTMLSelectElement;
+
+        // Populate mode options
+        const currentMode = stateManager.getOptions().selectionMode;
+        const modes = [
+            { value: 'lock', label: '🔒 Lock', title: 'No items added automatically' },
+            { value: 'default', label: '📌 Focus', title: 'Single item focus (switches)' },
+            { value: 'explore', label: '📚 Explore', title: 'Add multiple items' }
+        ];
+        modes.forEach(m => {
+            const opt = doc.createElement("option");
+            opt.value = m.value;
+            opt.textContent = m.label;
+            opt.title = m.title;
+            if (m.value === currentMode) opt.selected = true;
+            modeSelect.appendChild(opt);
         });
 
-        const toggleLabel = ztoolkit.UI.createElement(doc, "label", {
-            properties: { htmlFor: "lock-toggle", innerText: "🔒 Lock" },
-            styles: { fontSize: "11px", cursor: "pointer", userSelect: "none" }
-        });
-
-        lockToggle.appendChild(toggleCheckbox);
-        lockToggle.appendChild(toggleLabel);
+        modeContainer.appendChild(modeLabel);
+        modeContainer.appendChild(modeSelect);
 
         leftControls.appendChild(modelSelect);
-        leftControls.appendChild(lockToggle);
+        leftControls.appendChild(modeContainer);
 
         // Right side: Action buttons
         const rightControls = ztoolkit.UI.createElement(doc, "div", {
