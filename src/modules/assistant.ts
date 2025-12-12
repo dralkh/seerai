@@ -556,7 +556,8 @@ export class Assistant {
 
         // Generate All button (for AI columns)
         const generateBtn = ztoolkit.UI.createElement(doc, "button", {
-            properties: { className: "table-btn", innerText: "⚡ Generate All" },
+            properties: { className: "table-btn generate-all-btn", innerText: "⚡ Generate All" },
+            attributes: { id: "generate-all-btn" },
             styles: {
                 padding: "6px 12px",
                 fontSize: "11px",
@@ -1297,57 +1298,90 @@ export class Assistant {
 
         if (!currentTableConfig) return;
 
-        const addedIds = currentTableConfig.addedPaperIds || [];
-        if (addedIds.length === 0) {
-            Zotero.debug("[Seer AI] No papers added to table");
-            return;
-        }
-
+        // Get visible columns and computed columns
         const columns = currentTableConfig.columns || defaultColumns;
-        const computedColumns = columns.filter(col => col.type === 'computed' && col.visible);
+        const visibleCols = columns.filter(col => col.visible);
+        const computedCols = visibleCols.filter(col => col.type === 'computed');
 
-        if (computedColumns.length === 0) {
+        if (computedCols.length === 0) {
             Zotero.debug("[Seer AI] No computed columns visible");
             return;
         }
 
-        // Get max concurrent from settings (AI-specific setting for table generation)
+        // Map column ID to its index in the row (0-based)
+        const colIndices = new Map<string, number>();
+        computedCols.forEach(col => {
+            const idx = visibleCols.findIndex(c => c.id === col.id);
+            if (idx !== -1) colIndices.set(col.id, idx);
+        });
+
+        // Find all visible rows
+        const table = doc.querySelector('.papers-table');
+        if (!table) return;
+
+        const rows = table.querySelectorAll('tr[data-paper-id]');
+        if (rows.length === 0) return;
+
+        // Get max concurrent from settings
         const maxConcurrent = (Zotero.Prefs.get(`${addon.data.config.prefsPrefix}.aiMaxConcurrent`) as number) || 5;
         Zotero.debug(`[Seer AI] AI Max concurrent queries: ${maxConcurrent}`);
 
-        // Build list of generation tasks: { paperId, col, noteIds }
+        // Build tasks by scanning DOM
         interface GenerationTask {
             paperId: number;
             col: TableColumn;
-            noteIds: number[];
+            td: HTMLElement;
             item: Zotero.Item;
         }
         const tasks: GenerationTask[] = [];
 
-        for (const paperId of addedIds) {
+        for (let i = 0; i < rows.length; i++) {
+            const tr = rows[i] as HTMLElement;
+            const paperId = parseInt(tr.getAttribute('data-paper-id') || "0", 10);
+            if (!paperId) continue;
+
+            // Get paper item
             const paperItem = Zotero.Items.get(paperId);
             if (!paperItem || !paperItem.isRegularItem()) continue;
 
-            const noteIds = paperItem.getNotes();
+            const existingRowData = currentTableData?.rows.find(r => r.paperId === paperId);
 
-            for (const col of computedColumns) {
-                // Check if already has value
-                const existingValue = (currentTableData?.rows.find(r => r.paperId === paperId)?.data[col.id]) || '';
-                if (existingValue.trim()) continue; // Skip if already has content
+            // Check each computed column
+            for (const col of computedCols) {
+                const colIdx = colIndices.get(col.id);
+                if (colIdx === undefined) continue;
 
-                tasks.push({ paperId, col, noteIds, item: paperItem });
+                // Check if cell is empty in DATA
+                const val = existingRowData?.data[col.id];
+                if (val && val.toString().trim().length > 0) continue;
+
+                // Target the specific TD
+                const td = tr.children[colIdx] as HTMLElement;
+                if (!td) continue;
+
+                // Add to tasks
+                tasks.push({
+                    paperId,
+                    col,
+                    td,
+                    item: paperItem
+                });
+
+                // Immediate visual feedback
+                td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">⏳ Generating...</span>`;
+                td.style.cursor = "wait";
             }
         }
 
         if (tasks.length === 0) {
-            Zotero.debug("[Seer AI] No empty cells to generate");
+            Zotero.debug("[Seer AI] No empty cells to generate in visible rows");
             return;
         }
 
-        Zotero.debug(`[Seer AI] ${tasks.length} cells to generate`);
+        Zotero.debug(`[Seer AI] ${tasks.length} visible cells to generate`);
 
-        // Find and update the Generate All button to show progress
-        const generateBtn = doc.querySelector('.table-btn') as HTMLButtonElement | null;
+        // Update button status
+        const generateBtn = doc.getElementById('generate-all-btn') as HTMLButtonElement | null;
         const originalBtnText = generateBtn?.innerText || "⚡ Generate All";
         let completed = 0;
         let generated = 0;
@@ -1364,17 +1398,58 @@ export class Assistant {
         // Process a single task
         const processTask = async (task: GenerationTask): Promise<void> => {
             try {
-                const content = await this.generateColumnContent(task.item, task.col, task.noteIds);
+                // Get note IDs fresh (might have changed? unlikely but safe)
+                const noteIds = task.item.getNotes();
+
+                // First try generating from notes
+                let content = await this.generateColumnContent(task.item, task.col, noteIds);
+
+                // If no notes, try PDF extraction
+                if (!content) {
+                    const attachmentIds = task.item.getAttachments();
+                    for (const attId of attachmentIds) {
+                        const att = Zotero.Items.get(attId);
+                        if (att && att.attachmentContentType === 'application/pdf') {
+                            try {
+                                let fullText = "";
+                                if ((Zotero.Fulltext as any).getItemContent) {
+                                    const pdfContent = await (Zotero.Fulltext as any).getItemContent(att.id);
+                                    fullText = pdfContent?.content || "";
+                                } else if ((Zotero.Fulltext as any).getTextForItem) {
+                                    fullText = await (Zotero.Fulltext as any).getTextForItem(att.id) || "";
+                                }
+                                if (fullText) {
+                                    content = await this.generateColumnContentFromText(task.item, task.col, fullText.substring(0, 15000));
+                                    break;
+                                }
+                            } catch (pdfErr) {
+                                Zotero.debug(`[Seer AI] PDF extraction failed: ${pdfErr}`);
+                            }
+                        }
+                    }
+                }
+
                 if (content) {
-                    // Update in currentTableData
+                    // Update DOM immediately
+                    task.td.innerHTML = parseMarkdown(content);
+                    task.td.style.cursor = "pointer";
+                    task.td.style.backgroundColor = ""; // Remove any special bg
+
+                    // Update Data
                     const row = currentTableData?.rows.find(r => r.paperId === task.paperId);
                     if (row) {
                         row.data[task.col.id] = content;
                     }
                     generated++;
+                } else {
+                    // No content generated
+                    task.td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">Empty - no notes/PDF</span>`;
+                    task.td.style.cursor = "default";
                 }
             } catch (e) {
                 Zotero.debug(`[Seer AI] Error generating for ${task.paperId}/${task.col.id}: ${e}`);
+                task.td.innerHTML = `<span style="color: #c62828; font-size: 11px;">Error</span>`;
+                task.td.title = String(e);
                 failed++;
             } finally {
                 completed++;
@@ -1386,18 +1461,14 @@ export class Assistant {
         updateProgress();
         for (let i = 0; i < tasks.length; i += maxConcurrent) {
             const batch = tasks.slice(i, i + maxConcurrent);
-            Zotero.debug(`[Seer AI] Processing batch ${Math.floor(i / maxConcurrent) + 1} (${batch.length} tasks)`);
             await Promise.all(batch.map(processTask));
-
-            // Refresh table periodically to show progress
-            if (i + maxConcurrent < tasks.length) {
-                this.debounceTableRefresh(doc, item);
-            }
         }
 
-        // Save the updated table data
+        // Save at the end
         const tableStore = getTableStore();
-        await tableStore.saveConfig(currentTableConfig!);
+        if (currentTableConfig) {
+            await tableStore.saveConfig(currentTableConfig);
+        }
 
         // Restore button
         if (generateBtn) {
@@ -1408,9 +1479,6 @@ export class Assistant {
                 generateBtn.innerText = originalBtnText;
             }, 2000);
         }
-
-        // Final refresh
-        this.debounceTableRefresh(doc, item);
 
         Zotero.debug(`[Seer AI] Generation complete: ${generated} generated, ${failed} failed`);
     }
@@ -2442,6 +2510,7 @@ Task: ${columnPrompt}`;
         tableData.rows.forEach(row => {
             const tr = ztoolkit.UI.createElement(doc, "tr", {
                 properties: { className: tableData.selectedRowIds.has(row.paperId) ? "selected" : "" },
+                attributes: { "data-paper-id": String(row.paperId) },
                 listeners: [{
                     type: "click",
                     listener: () => {
