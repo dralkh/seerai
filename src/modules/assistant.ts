@@ -885,8 +885,40 @@ export class Assistant {
                 });
                 const titleEl = ztoolkit.UI.createElement(doc, "div", {
                     properties: { innerText: paperTitle },
-                    styles: { fontSize: "13px", fontWeight: "500", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
+                    styles: {
+                        fontSize: "13px",
+                        fontWeight: "500",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        cursor: "pointer",
+                        color: "var(--highlight-primary)"
+                    },
+                    listeners: [{
+                        type: "click",
+                        listener: async (e: Event) => {
+                            e.stopPropagation(); // Don't add the paper, just open PDF
+                            // Find PDF attachment and open it
+                            const attachmentIds = paperItem.getAttachments();
+                            for (const attachId of attachmentIds) {
+                                const attachment = Zotero.Items.get(attachId);
+                                if (attachment && attachment.isPDFAttachment && attachment.isPDFAttachment()) {
+                                    // Open the PDF in Zotero's reader
+                                    await Zotero.Reader.open(attachment.id);
+                                    return;
+                                }
+                            }
+                            // Fallback: if no PDF, just select the item in the library
+                            const zp = Zotero.getActiveZoteroPane();
+                            if (zp) {
+                                zp.selectItem(paperItem.id);
+                            }
+                        }
+                    }]
                 });
+                // Add hover underline effect
+                titleEl.addEventListener("mouseenter", () => { (titleEl as HTMLElement).style.textDecoration = "underline"; });
+                titleEl.addEventListener("mouseleave", () => { (titleEl as HTMLElement).style.textDecoration = "none"; });
                 const metaEl = ztoolkit.UI.createElement(doc, "div", {
                     properties: { innerText: `${authorStr}${year ? ` (${year})` : ''}` },
                     styles: { fontSize: "11px", color: "var(--text-secondary)" }
@@ -2185,9 +2217,17 @@ Task: ${columnPrompt}`;
                         maxHeight: "60px",              // Limit to ~3 lines
                         lineHeight: "1.4",
                         verticalAlign: "top",
-                        cursor: "pointer"
+                        cursor: "pointer",
+                        // Style title column as a link
+                        color: col.id === 'title' ? "var(--highlight-primary)" : "inherit"
                     }
                 });
+
+                // Add hover effect for title column
+                if (col.id === 'title') {
+                    td.addEventListener("mouseenter", () => { td.style.textDecoration = "underline"; });
+                    td.addEventListener("mouseleave", () => { td.style.textDecoration = "none"; });
+                }
 
                 // Show content or empty indicator
                 if (isEmpty && isComputed) {
@@ -2215,6 +2255,28 @@ Task: ${columnPrompt}`;
                 // Click behavior depends on CURRENT cell content (not render-time state)
                 td.addEventListener("click", async (e) => {
                     e.stopPropagation();
+
+                    // Special handling for title column - open PDF
+                    if (col.id === 'title') {
+                        const item = Zotero.Items.get(row.paperId);
+                        if (item) {
+                            const attachmentIds = item.getAttachments();
+                            for (const attachId of attachmentIds) {
+                                const attachment = Zotero.Items.get(attachId);
+                                if (attachment && attachment.isPDFAttachment && attachment.isPDFAttachment()) {
+                                    // Open the PDF in Zotero's reader
+                                    await Zotero.Reader.open(attachment.id);
+                                    return;
+                                }
+                            }
+                            // Fallback: if no PDF, just select the item in the library
+                            const zp = Zotero.getActiveZoteroPane();
+                            if (zp) {
+                                zp.selectItem(item.id);
+                            }
+                        }
+                        return;
+                    }
 
                     // Check current state at click time (not the captured isEmpty)
                     const currentValue = row.data[col.id] || "";
