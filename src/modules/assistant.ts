@@ -3837,847 +3837,656 @@ ${tableRows}  </tbody>
     }
 
     /**
-     * Show tag picker dialog with optional collection filtering
+     * Show tag picker as a beautiful inline dropdown panel for Chat
      */
-    private static async showTagPicker(doc: Document, stateManager: ReturnType<typeof getChatStateManager>) {
-        // Remove existing picker if any
-        const existing = doc.getElementById("tag-picker-dialog");
+    private static async showTagPicker(doc: Document, stateManager: ReturnType<typeof getChatStateManager>): Promise<void> {
+        // Toggle existing dropdown
+        const existing = doc.getElementById("chat-tag-picker-dropdown") as HTMLElement;
         if (existing) {
-            existing.remove();
+            existing.style.opacity = "0";
+            existing.style.transform = "translateY(-10px)";
+            setTimeout(() => existing.remove(), 200);
             return;
         }
 
-        // Get all collections for the filter dropdown
-        const allCollections = await this.getAllCollections();
-        const libraries = Zotero.Libraries.getAll();
+        const selectionArea = doc.getElementById("selection-area");
+        if (!selectionArea || !selectionArea.parentNode) return;
 
-        // Track selected collection/library filter
-        let selectedCollectionId: number | null = null;
-        let selectedLibraryId: number | null = null;
-
-        // Function to get tags based on current filter
-        const getFilteredTags = async (): Promise<{ tag: string }[]> => {
-            const tags: { tag: string }[] = [];
-
-            if (selectedCollectionId !== null) {
-                // Get tags only from items in the selected collection
-                try {
-                    const collection = Zotero.Collections.get(selectedCollectionId);
-                    if (collection) {
-                        const itemIDs = collection.getChildItems(true);
-                        const tagSet = new Set<string>();
-                        for (const itemId of itemIDs) {
-                            const item = Zotero.Items.get(itemId);
-                            if (item && item.isRegularItem()) {
-                                const itemTags = item.getTags();
-                                for (const t of itemTags) {
-                                    tagSet.add(t.tag);
-                                }
-                            }
-                        }
-                        for (const tag of tagSet) {
-                            tags.push({ tag });
-                        }
-                    }
-                } catch (e) {
-                    Zotero.debug(`[Seer AI] Error loading tags from collection: ${e}`);
-                }
-            } else if (selectedLibraryId !== null) {
-                // Get tags from a specific library
-                try {
-                    const libraryTags = await Zotero.Tags.getAll(selectedLibraryId);
-                    if (libraryTags && libraryTags.length > 0) {
-                        for (const t of libraryTags) {
-                            if (!tags.some(existing => existing.tag === t.tag)) {
-                                tags.push({ tag: t.tag });
-                            }
-                        }
-                    }
-                } catch (e) {
-                    Zotero.debug(`[Seer AI] Error loading tags from library: ${e}`);
-                }
-            } else {
-                // Get all tags from all libraries (default)
-                for (const library of libraries) {
-                    try {
-                        const libraryTags = await Zotero.Tags.getAll(library.libraryID);
-                        if (libraryTags && libraryTags.length > 0) {
-                            for (const t of libraryTags) {
-                                if (!tags.some(existing => existing.tag === t.tag)) {
-                                    tags.push({ tag: t.tag });
-                                }
-                            }
-                        }
-                    } catch (e) {
-                        Zotero.debug(`[Seer AI] Error loading tags from library ${library.name}: ${e}`);
-                    }
-                }
-            }
-
-            return tags.sort((a, b) => a.tag.localeCompare(b.tag));
-        };
-
-        // Initial tag load
-        let allTags = await getFilteredTags();
-
-        if (allTags.length === 0 && selectedCollectionId === null && selectedLibraryId === null) {
-            Zotero.debug("[Seer AI] No tags found in any library");
-            return;
-        }
-
-        // Create modal dialog
-        const overlay = ztoolkit.UI.createElement(doc, "div", {
-            properties: { id: "tag-picker-dialog" },
+        // Create dropdown
+        const dropdown = ztoolkit.UI.createElement(doc, "div", {
+            properties: { id: "chat-tag-picker-dropdown" },
             styles: {
-                position: "fixed",
-                top: "0",
-                left: "0",
-                width: "100%",
-                height: "100%",
-                backgroundColor: "rgba(0,0,0,0.5)",
+                backgroundColor: "var(--background-primary)",
+                borderRadius: "8px",
+                padding: "0",
+                boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+                overflow: "hidden",
+                border: "1px solid var(--border-primary)",
+                transition: "all 0.2s ease-out",
+                opacity: "0",
+                transform: "translateY(-10px)",
+                marginTop: "8px",
+                marginLeft: "8px",
+                marginRight: "8px"
+            }
+        });
+
+        // Header
+        const header = ztoolkit.UI.createElement(doc, "div", {
+            styles: {
+                background: "linear-gradient(135deg, var(--highlight-primary) 0%, color-mix(in srgb, var(--highlight-primary) 80%, orange) 100%)", // Orange hint for tags
+                padding: "10px 14px",
                 display: "flex",
-                justifyContent: "center",
+                justifyContent: "space-between",
                 alignItems: "center",
-                zIndex: "10000"
+                gap: "12px"
             }
         });
 
-
-
-        const win = doc.defaultView;
-        const isDarkMode = (win as any)?.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
-        const dialog = ztoolkit.UI.createElement(doc, "div", {
+        const headerTitle = ztoolkit.UI.createElement(doc, "div", {
+            properties: { innerText: "🏷️ Add Tags to Chat" },
             styles: {
-                backgroundColor: `var(--background-primary, ${isDarkMode ? '#333333' : '#fafafa'})`,
-                color: `var(--text-primary, ${isDarkMode ? '#eeeeee' : '#212121'})`,
-                borderRadius: "12px",
-                padding: "20px",
-                maxWidth: "450px",
-                width: "90%",
-                maxHeight: "80vh",
-                display: "flex",
-                flexDirection: "column",
-                gap: "12px",
-                boxShadow: "0 8px 32px rgba(0,0,0,0.2)"
+                fontSize: "13px",
+                fontWeight: "600",
+                color: "var(--highlight-text)",
+                textShadow: "0 1px 2px rgba(0,0,0,0.1)"
             }
         });
+        header.appendChild(headerTitle);
 
-        // Title
-        const title = ztoolkit.UI.createElement(doc, "div", {
-            properties: { innerText: "🏷️ Select Tags" },
-            styles: { fontSize: "16px", fontWeight: "600", marginBottom: "4px" }
-        });
-
-        // Collection filter dropdown
-        const filterContainer = ztoolkit.UI.createElement(doc, "div", {
+        const closeBtn = ztoolkit.UI.createElement(doc, "button", {
+            properties: { innerText: "✕" },
             styles: {
+                background: "rgba(0,0,0,0.1)",
+                border: "none",
+                borderRadius: "50%",
+                width: "22px",
+                height: "22px",
+                cursor: "pointer",
+                color: "var(--highlight-text)",
+                fontSize: "11px",
                 display: "flex",
-                flexDirection: "column",
-                gap: "4px",
-                marginBottom: "8px"
-            }
+                alignItems: "center",
+                justifyContent: "center"
+            },
+            listeners: [{
+                type: "click", listener: () => {
+                    dropdown.style.opacity = "0";
+                    setTimeout(() => dropdown.remove(), 200);
+                }
+            }]
+        });
+        header.appendChild(closeBtn);
+        dropdown.appendChild(header);
+
+        // Content
+        const content = ztoolkit.UI.createElement(doc, "div", {
+            styles: { padding: "10px 14px", display: "flex", flexDirection: "column", gap: "8px" }
         });
 
-        const filterLabel = ztoolkit.UI.createElement(doc, "label", {
-            properties: { innerText: "📁 Filter by collection:" },
-            styles: { fontSize: "12px", color: "var(--text-secondary)" }
+        // Controls
+        const controlsRow = ztoolkit.UI.createElement(doc, "div", {
+            styles: { display: "flex", gap: "6px", alignItems: "center" }
         });
 
+        // Filter Select
         const filterSelect = ztoolkit.UI.createElement(doc, "select", {
             styles: {
-                padding: "8px 12px",
+                flex: "0 0 auto",
+                minWidth: "120px",
+                padding: "6px 10px",
                 border: "1px solid var(--border-primary)",
                 borderRadius: "6px",
-                fontSize: "13px",
-                backgroundColor: "var(--background-primary)",
-                cursor: "pointer"
+                fontSize: "12px",
+                backgroundColor: "var(--background-secondary)",
+                color: "var(--text-primary)",
+                cursor: "pointer",
+                outline: "none"
             }
         }) as HTMLSelectElement;
 
-        // Add "All Libraries" option
-        const allOption = ztoolkit.UI.createElement(doc, "option", {
-            properties: { value: "all", innerText: "All Libraries" }
-        });
-        filterSelect.appendChild(allOption);
+        // Populate filter (using getAllCollections helper or populateFilterSelect)
+        // Note: populateFilterSelect adds "All Libraries" etc. works well.
+        this.populateFilterSelect(filterSelect);
+        controlsRow.appendChild(filterSelect);
 
-        // Add library options with their collections
-        for (const library of libraries) {
-            // Library option
-            const libOption = ztoolkit.UI.createElement(doc, "option", {
-                properties: {
-                    value: `lib_${library.libraryID}`,
-                    innerText: `📚 ${library.name}`
-                }
-            });
-            filterSelect.appendChild(libOption);
-
-            // Collection options for this library
-            const libraryCollections = allCollections.filter(c => c.libraryId === library.libraryID);
-            for (const col of libraryCollections) {
-                const indent = "    ".repeat(col.depth + 1);
-                const colOption = ztoolkit.UI.createElement(doc, "option", {
-                    properties: {
-                        value: `col_${col.id}`,
-                        innerText: `${indent}📁 ${col.name}`
-                    }
-                });
-                filterSelect.appendChild(colOption);
-            }
-        }
-
-        filterContainer.appendChild(filterLabel);
-        filterContainer.appendChild(filterSelect);
-
-        // Search input
+        // Search
         const searchInput = ztoolkit.UI.createElement(doc, "input", {
-            attributes: { type: "text", placeholder: "Search tags..." },
+            attributes: { type: "text", placeholder: "🔍 Search tags..." },
             styles: {
-                padding: "8px 12px",
+                flex: "1",
+                padding: "6px 10px",
                 border: "1px solid var(--border-primary)",
                 borderRadius: "6px",
-                fontSize: "13px"
+                fontSize: "12px",
+                backgroundColor: "var(--background-secondary)",
+                color: "var(--text-primary)",
+                outline: "none"
             }
         }) as HTMLInputElement;
+        controlsRow.appendChild(searchInput);
+        content.appendChild(controlsRow);
 
-        // Tag list container
-        const tagList = ztoolkit.UI.createElement(doc, "div", {
+        // List
+        const listContainer = ztoolkit.UI.createElement(doc, "div", {
             styles: {
-                maxHeight: "280px",
+                maxHeight: "240px",
                 overflowY: "auto",
-                display: "flex",
-                flexDirection: "column",
-                gap: "4px"
-            }
-        });
-
-        // Selected tags tracker
-        const selectedTags: Set<string> = new Set();
-
-        // Render tag options
-        const renderTags = (filter: string = "") => {
-            tagList.innerHTML = "";
-
-            if (allTags.length === 0) {
-                const noTags = ztoolkit.UI.createElement(doc, "div", {
-                    properties: { innerText: "No tags found in selected scope" },
-                    styles: { padding: "12px", color: "var(--text-secondary)", textAlign: "center" }
-                });
-                tagList.appendChild(noTags);
-                return;
-            }
-
-            const filteredTags = allTags
-                .filter((t: { tag: string }) => t.tag.toLowerCase().includes(filter.toLowerCase()))
-                .slice(0, 50); // Limit to 50 for performance
-
-            if (filteredTags.length === 0) {
-                const noResults = ztoolkit.UI.createElement(doc, "div", {
-                    properties: { innerText: filter ? "No tags match your search" : "No tags available" },
-                    styles: { padding: "12px", color: "var(--text-secondary)", textAlign: "center" }
-                });
-                tagList.appendChild(noResults);
-                return;
-            }
-
-            filteredTags.forEach((tagData: { tag: string }) => {
-                const tagName = tagData.tag;
-                const isChecked = selectedTags.has(tagName);
-
-                const tagRow = ztoolkit.UI.createElement(doc, "label", {
-                    styles: {
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        padding: "6px 8px",
-                        borderRadius: "4px",
-                        cursor: "pointer",
-                        backgroundColor: isChecked ? "var(--tag-checked-background)" : "transparent"
-                    }
-                });
-
-                const checkbox = ztoolkit.UI.createElement(doc, "input", {
-                    attributes: { type: "checkbox" }
-                }) as HTMLInputElement;
-                checkbox.checked = isChecked;
-
-                checkbox.addEventListener("change", () => {
-                    if (checkbox.checked) {
-                        selectedTags.add(tagName);
-                        tagRow.style.backgroundColor = "var(--tag-checked-background)";
-                    } else {
-                        selectedTags.delete(tagName);
-                        tagRow.style.backgroundColor = "transparent";
-                    }
-                });
-
-                const label = ztoolkit.UI.createElement(doc, "span", {
-                    properties: { innerText: tagName },
-                    styles: { fontSize: "13px" }
-                });
-
-                tagRow.appendChild(checkbox);
-                tagRow.appendChild(label);
-                tagList.appendChild(tagRow);
-            });
-
-            // Show count
-            const countEl = ztoolkit.UI.createElement(doc, "div", {
-                properties: { innerText: `Showing ${filteredTags.length} of ${allTags.length} tags` },
-                styles: { fontSize: "11px", color: "var(--text-tertiary)", padding: "8px", textAlign: "center" }
-            });
-            tagList.appendChild(countEl);
-        };
-
-        renderTags();
-
-        // Filter change event
-        filterSelect.addEventListener("change", async () => {
-            const value = filterSelect.value;
-            if (value === "all") {
-                selectedCollectionId = null;
-                selectedLibraryId = null;
-            } else if (value.startsWith("lib_")) {
-                selectedCollectionId = null;
-                selectedLibraryId = parseInt(value.replace("lib_", ""), 10);
-            } else if (value.startsWith("col_")) {
-                selectedCollectionId = parseInt(value.replace("col_", ""), 10);
-                selectedLibraryId = null;
-            }
-
-            // Reload tags for new filter
-            allTags = await getFilteredTags();
-            renderTags(searchInput.value);
-        });
-
-        // Search event
-        searchInput.addEventListener("input", () => {
-            renderTags(searchInput.value);
-        });
-
-        // Button row
-        const buttonRow = ztoolkit.UI.createElement(doc, "div", {
-            styles: { display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "8px" }
-        });
-
-        const cancelBtn = ztoolkit.UI.createElement(doc, "button", {
-            properties: { innerText: "Cancel" },
-            styles: {
-                padding: "8px 16px",
                 border: "1px solid var(--border-primary)",
                 borderRadius: "6px",
-                backgroundColor: "var(--background-secondary)",
-                cursor: "pointer"
-            },
-            listeners: [{
-                type: "click",
-                listener: () => overlay.remove()
-            }]
+                backgroundColor: "var(--background-secondary)"
+            }
         });
+        content.appendChild(listContainer);
+        dropdown.appendChild(content);
 
-        const addTagsBtn = ztoolkit.UI.createElement(doc, "button", {
-            properties: { innerText: "Add Items with Tags" },
-            styles: {
-                padding: "8px 16px",
-                border: "none",
-                borderRadius: "6px",
-                backgroundColor: "var(--button-dashed-border-orange)",
-                color: "var(--highlight-text)",
-                cursor: "pointer",
-                fontWeight: "600"
-            },
-            listeners: [{
-                type: "click",
-                listener: async () => {
-                    if (selectedTags.size === 0) {
-                        overlay.remove();
-                        return;
+        // Tags Logic
+        let allTags: { tag: string }[] = [];
+
+        const renderTags = () => {
+            listContainer.innerHTML = "";
+            const searchQuery = searchInput.value.toLowerCase();
+            const filtered = allTags.filter(t => t.tag.toLowerCase().includes(searchQuery)).slice(0, 50);
+
+            if (filtered.length === 0) {
+                listContainer.appendChild(ztoolkit.UI.createElement(doc, "div", { properties: { innerText: "No tags found." }, styles: { padding: "20px", textAlign: "center", color: "var(--text-secondary)", fontSize: "12px" } }));
+                return;
+            }
+
+            filtered.forEach(t => {
+                const row = ztoolkit.UI.createElement(doc, "div", {
+                    styles: {
+                        padding: "8px 10px",
+                        borderBottom: "1px solid var(--border-primary)",
+                        cursor: "pointer",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center"
                     }
+                });
+                row.addEventListener("mouseenter", () => { row.style.backgroundColor = "var(--background-primary)"; });
+                row.addEventListener("mouseleave", () => { row.style.backgroundColor = ""; });
 
-                    // Add selected tags to state
-                    for (const tagName of selectedTags) {
-                        stateManager.addSelection('tags', {
-                            id: tagName,
-                            type: 'tag',
-                            title: tagName
-                        });
+                const label = ztoolkit.UI.createElement(doc, "div", {
+                    properties: { innerText: t.tag },
+                    styles: { fontSize: "12px", color: "var(--text-primary)", fontWeight: "500" }
+                });
+                row.appendChild(label);
+
+                const addBtn = ztoolkit.UI.createElement(doc, "button", {
+                    properties: { innerText: "+" },
+                    styles: {
+                        width: "24px",
+                        height: "24px",
+                        borderRadius: "50%",
+                        border: "1px solid var(--highlight-primary)",
+                        backgroundColor: "transparent",
+                        color: "var(--highlight-primary)",
+                        fontSize: "16px",
+                        fontWeight: "bold",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        transition: "all 0.15s"
+                    },
+                    listeners: [{
+                        type: "click",
+                        listener: async (e: Event) => {
+                            e.stopPropagation();
+                            // Add tag to state
+                            stateManager.addSelection('tags', { id: t.tag, type: 'tag', title: t.tag });
+
+                            // Add items with this tag
+                            const filterVal = filterSelect.value;
+                            let libId: number | null = null;
+                            let colId: number | null = null;
+                            if (filterVal.startsWith("lib_")) libId = parseInt(filterVal.replace("lib_", ""));
+                            if (filterVal.startsWith("col_")) colId = parseInt(filterVal.replace("col_", ""));
+
+                            await this.addItemsByTags([t.tag], colId, libId);
+                            this.reRenderSelectionArea();
+
+                            // Feedback
+                            row.style.backgroundColor = "var(--background-hover)";
+                            addBtn.replaceWith(ztoolkit.UI.createElement(doc, "span", {
+                                properties: { innerText: "✓" },
+                                styles: { fontSize: "14px", color: "green", fontWeight: "bold" }
+                            }));
+                        }
+                    }]
+                });
+                addBtn.addEventListener("mouseenter", () => {
+                    addBtn.style.backgroundColor = "var(--highlight-primary)";
+                    addBtn.style.color = "var(--highlight-text)";
+                });
+                addBtn.addEventListener("mouseleave", () => {
+                    addBtn.style.backgroundColor = "transparent";
+                    addBtn.style.color = "var(--highlight-primary)";
+                });
+
+                row.appendChild(addBtn);
+                listContainer.appendChild(row);
+            });
+        };
+
+        const loadTags = async () => {
+            // ... Fetch tags logic ...
+            listContainer.innerHTML = "";
+            listContainer.appendChild(ztoolkit.UI.createElement(doc, "div", { properties: { innerText: "Loading tags..." }, styles: { padding: "20px", textAlign: "center", color: "var(--text-secondary)", fontSize: "12px" } }));
+
+            const filterValue = filterSelect.value;
+            try {
+                let tags: { tag: string }[] = [];
+                if (filterValue === "all") {
+                    const libraries = Zotero.Libraries.getAll();
+                    for (const lib of libraries) {
+                        const libTags = await Zotero.Tags.getAll(lib.libraryID);
+                        tags.push(...libTags.map((t: any) => ({ tag: t.tag })));
                     }
-
-                    // Find and add all items with these tags (respecting the filter)
-                    await this.addItemsByTags(Array.from(selectedTags), selectedCollectionId, selectedLibraryId);
-
-                    overlay.remove();
-                    this.reRenderSelectionArea();
+                } else if (filterValue.startsWith("lib_")) {
+                    const libId = parseInt(filterValue.replace("lib_", ""), 10);
+                    const libTags = await Zotero.Tags.getAll(libId);
+                    tags = libTags.map((t: any) => ({ tag: t.tag }));
+                } else if (filterValue.startsWith("col_")) {
+                    const colId = parseInt(filterValue.replace("col_", ""), 10);
+                    const col = Zotero.Collections.get(colId);
+                    if (col) {
+                        const itemIDs = col.getChildItems(true);
+                        const tagSet = new Set<string>();
+                        for (const id of itemIDs) {
+                            const it = Zotero.Items.get(id);
+                            if (it && it.isRegularItem()) {
+                                it.getTags().forEach((t: any) => tagSet.add(t.tag));
+                            }
+                        }
+                        tags = Array.from(tagSet).map(t => ({ tag: t }));
+                    }
                 }
-            }]
-        });
+                // Deduplicate
+                const uniqueTags = new Map();
+                tags.forEach(t => uniqueTags.set(t.tag, t));
+                allTags = Array.from(uniqueTags.values()).sort((a, b) => a.tag.localeCompare(b.tag));
 
-        buttonRow.appendChild(cancelBtn);
-        buttonRow.appendChild(addTagsBtn);
+                renderTags();
+            } catch (e) {
+                Zotero.debug(`Error loading tags: ${e}`);
+                listContainer.innerText = "Error loading tags.";
+            }
+        };
 
-        dialog.appendChild(title);
-        dialog.appendChild(filterContainer);
-        dialog.appendChild(searchInput);
-        dialog.appendChild(tagList);
-        dialog.appendChild(buttonRow);
-        overlay.appendChild(dialog);
+        filterSelect.addEventListener("change", loadTags);
+        searchInput.addEventListener("input", renderTags);
 
-        // Close on overlay click
-        overlay.addEventListener("click", (e) => {
-            if (e.target === overlay) overlay.remove();
-        });
+        selectionArea.parentNode.insertBefore(dropdown, selectionArea.nextSibling);
 
-        // Append to body to inherit styles (Zotero adds 'dark' class to body)
-        if (doc.body) {
-            doc.body.appendChild(overlay);
-            searchInput.focus();
-        } else {
-            (doc.documentElement || doc).appendChild(overlay);
-            searchInput.focus();
-        }
+        // Init
+        // Auto focus
+        setTimeout(() => searchInput.focus(), 100);
+        setTimeout(() => { dropdown.style.opacity = "1"; dropdown.style.transform = "translateY(0)"; }, 10);
+        loadTags();
     }
 
     /**
-     * Show paper picker dialog with searchable list of library items and collection filtering
+     * Show paper picker as a beautiful inline dropdown panel for Chat
      */
-    private static async showPaperPicker(doc: Document, stateManager: ReturnType<typeof getChatStateManager>) {
-        // Remove existing picker if any
-        const existing = doc.getElementById("paper-picker-dialog");
+    private static async showPaperPicker(doc: Document, stateManager: ReturnType<typeof getChatStateManager>): Promise<void> {
+        // Toggle existing dropdown
+        const existing = doc.getElementById("chat-paper-picker-dropdown") as HTMLElement;
         if (existing) {
-            existing.remove();
+            existing.style.opacity = "0";
+            existing.style.transform = "translateY(-10px)";
+            setTimeout(() => existing.remove(), 200);
             return;
         }
 
-        // Get all collections for the filter dropdown
-        const allCollections = await this.getAllCollections();
-        const libraries = Zotero.Libraries.getAll();
+        const selectionArea = doc.getElementById("selection-area");
+        if (!selectionArea || !selectionArea.parentNode) return;
 
-        // Track selected collection/library filter
-        let selectedCollectionId: number | null = null;
-        let selectedLibraryId: number | null = null;
-
-        // Function to get items based on current filter
-        const getFilteredItems = async (): Promise<{ id: number; title: string; creators: string; year: string; libraryName: string; collectionName?: string }[]> => {
-            const items: { id: number; title: string; creators: string; year: string; libraryName: string; collectionName?: string }[] = [];
-
-            const addItem = (item: Zotero.Item, libraryName: string, collectionName?: string) => {
-                const creators = item.getCreators().map((c: any) => c.lastName || c.name || '').slice(0, 2).join(', ');
-                items.push({
-                    id: item.id,
-                    title: item.getField("title") as string || "Untitled",
-                    creators: creators || "Unknown",
-                    year: item.getField("year") as string || "",
-                    libraryName: libraryName,
-                    collectionName: collectionName
-                });
-            };
-
-            if (selectedCollectionId !== null) {
-                // Get items from the selected collection only
-                try {
-                    const collection = Zotero.Collections.get(selectedCollectionId);
-                    if (collection) {
-                        const libraryResult = Zotero.Libraries.get(collection.libraryID);
-                        const libraryName = libraryResult ? libraryResult.name : "Unknown";
-                        const itemIDs = collection.getChildItems(true);
-                        for (const id of itemIDs.slice(0, 500)) {
-                            const item = Zotero.Items.get(id);
-                            if (item && item.isRegularItem()) {
-                                addItem(item, libraryName, collection.name);
-                            }
-                        }
-                    }
-                } catch (e) {
-                    Zotero.debug(`[Seer AI] Error loading items from collection: ${e}`);
-                }
-            } else if (selectedLibraryId !== null) {
-                // Get items from a specific library
-                try {
-                    const libraryResult = Zotero.Libraries.get(selectedLibraryId);
-                    const libraryName = libraryResult ? libraryResult.name : "Unknown";
-                    const search = new Zotero.Search();
-                    search.addCondition('libraryID', 'is', selectedLibraryId.toString());
-                    search.addCondition('itemType', 'isNot', 'attachment');
-                    search.addCondition('itemType', 'isNot', 'note');
-                    const itemIDs = await search.search();
-
-                    if (itemIDs && itemIDs.length > 0) {
-                        for (const id of itemIDs.slice(0, 500)) {
-                            const item = Zotero.Items.get(id);
-                            if (item && item.isRegularItem()) {
-                                addItem(item, libraryName);
-                            }
-                        }
-                    }
-                } catch (e) {
-                    Zotero.debug(`[Seer AI] Error loading items from library: ${e}`);
-                }
-            } else {
-                // Get all items from all libraries (default)
-                for (const library of libraries) {
-                    try {
-                        const search = new Zotero.Search();
-                        search.addCondition('libraryID', 'is', library.libraryID.toString());
-                        search.addCondition('itemType', 'isNot', 'attachment');
-                        search.addCondition('itemType', 'isNot', 'note');
-                        const itemIDs = await search.search();
-
-                        if (itemIDs && itemIDs.length > 0) {
-                            const maxPerLibrary = Math.min(itemIDs.length, Math.floor(500 / libraries.length));
-                            for (const id of itemIDs.slice(0, maxPerLibrary)) {
-                                const item = Zotero.Items.get(id);
-                                if (item && item.isRegularItem()) {
-                                    addItem(item, library.name);
-                                }
-                            }
-                        }
-                    } catch (e) {
-                        Zotero.debug(`[Seer AI] Error loading items from library ${library.name}: ${e}`);
-                    }
-                }
-            }
-
-            return items;
-        };
-
-        // Initial item load
-        let allItems = await getFilteredItems();
-
-        if (allItems.length === 0 && selectedCollectionId === null && selectedLibraryId === null) {
-            Zotero.debug("[Seer AI] No items found in any library");
-            return;
-        }
-
-        // Create modal dialog
-        const overlay = ztoolkit.UI.createElement(doc, "div", {
-            properties: { id: "paper-picker-dialog" },
+        // Create dropdown panel
+        const dropdown = ztoolkit.UI.createElement(doc, "div", {
+            properties: { id: "chat-paper-picker-dropdown" },
             styles: {
-                position: "fixed",
-                top: "0",
-                left: "0",
-                width: "100%",
-                height: "100%",
-                backgroundColor: "rgba(0,0,0,0.5)",
+                backgroundColor: "var(--background-primary)",
+                borderRadius: "8px",
+                padding: "0",
+                boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
+                overflow: "hidden",
+                border: "1px solid var(--border-primary)",
+                transition: "all 0.2s ease-out",
+                opacity: "0",
+                transform: "translateY(-10px)",
+                marginTop: "8px",
+                marginLeft: "8px",
+                marginRight: "8px"
+            }
+        });
+
+        // Header
+        const header = ztoolkit.UI.createElement(doc, "div", {
+            styles: {
+                background: "linear-gradient(135deg, var(--highlight-primary) 0%, color-mix(in srgb, var(--highlight-primary) 80%, purple) 100%)",
+                padding: "10px 14px",
                 display: "flex",
-                justifyContent: "center",
+                justifyContent: "space-between",
                 alignItems: "center",
-                zIndex: "10000"
+                gap: "12px"
             }
         });
 
-
-
-        const win = doc.defaultView;
-        const isDarkMode = (win as any)?.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
-        const dialog = ztoolkit.UI.createElement(doc, "div", {
+        const headerTitle = ztoolkit.UI.createElement(doc, "div", {
+            properties: { innerText: "📚 Add Papers to Chat" },
             styles: {
-                backgroundColor: `var(--background-primary, ${isDarkMode ? '#333333' : '#fafafa'})`,
-                color: `var(--text-primary, ${isDarkMode ? '#eeeeee' : '#212121'})`,
-                borderRadius: "12px",
-                padding: "20px",
-                maxWidth: "550px",
-                width: "90%",
-                maxHeight: "85vh",
-                display: "flex",
-                flexDirection: "column",
-                gap: "12px",
-                boxShadow: "0 8px 32px rgba(0,0,0,0.2)"
+                fontSize: "13px",
+                fontWeight: "600",
+                color: "var(--highlight-text)",
+                textShadow: "0 1px 2px rgba(0,0,0,0.1)"
             }
         });
+        header.appendChild(headerTitle);
 
-        // Title
-        const title = ztoolkit.UI.createElement(doc, "div", {
-            properties: { innerText: "📄 Select Papers" },
-            styles: { fontSize: "16px", fontWeight: "600", marginBottom: "4px" }
-        });
-
-        // Collection filter dropdown
-        const filterContainer = ztoolkit.UI.createElement(doc, "div", {
+        const closeBtn = ztoolkit.UI.createElement(doc, "button", {
+            properties: { innerText: "✕" },
             styles: {
+                background: "rgba(0,0,0,0.1)",
+                border: "none",
+                borderRadius: "50%",
+                width: "22px",
+                height: "22px",
+                cursor: "pointer",
+                color: "var(--highlight-text)",
+                fontSize: "11px",
                 display: "flex",
-                flexDirection: "column",
-                gap: "4px",
-                marginBottom: "8px"
-            }
+                alignItems: "center",
+                justifyContent: "center"
+            },
+            listeners: [{
+                type: "click",
+                listener: () => {
+                    dropdown.style.opacity = "0";
+                    dropdown.style.transform = "translateY(-10px)";
+                    setTimeout(() => dropdown.remove(), 200);
+                }
+            }]
+        });
+        header.appendChild(closeBtn);
+        dropdown.appendChild(header);
+
+        // Content
+        const content = ztoolkit.UI.createElement(doc, "div", {
+            styles: { padding: "10px 14px", display: "flex", flexDirection: "column", gap: "8px" }
         });
 
-        const filterLabel = ztoolkit.UI.createElement(doc, "label", {
-            properties: { innerText: "📁 Filter by collection:" },
-            styles: { fontSize: "12px", color: "var(--text-secondary)" }
+        // Controls
+        const controlsRow = ztoolkit.UI.createElement(doc, "div", {
+            styles: { display: "flex", gap: "6px", alignItems: "center" }
         });
 
+        // Filter Select
         const filterSelect = ztoolkit.UI.createElement(doc, "select", {
             styles: {
-                padding: "8px 12px",
+                flex: "0 0 auto",
+                minWidth: "120px",
+                padding: "6px 10px",
                 border: "1px solid var(--border-primary)",
                 borderRadius: "6px",
-                fontSize: "13px",
-                backgroundColor: "var(--background-primary)",
-                cursor: "pointer"
+                fontSize: "12px",
+                backgroundColor: "var(--background-secondary)",
+                color: "var(--text-primary)",
+                cursor: "pointer",
+                outline: "none"
             }
         }) as HTMLSelectElement;
+        this.populateFilterSelect(filterSelect);
+        controlsRow.appendChild(filterSelect);
 
-        // Add "All Libraries" option
-        const allOption = ztoolkit.UI.createElement(doc, "option", {
-            properties: { value: "all", innerText: "All Libraries" }
-        });
-        filterSelect.appendChild(allOption);
-
-        // Add library options with their collections
-        for (const library of libraries) {
-            // Library option
-            const libOption = ztoolkit.UI.createElement(doc, "option", {
-                properties: {
-                    value: `lib_${library.libraryID}`,
-                    innerText: `📚 ${library.name}`
-                }
-            });
-            filterSelect.appendChild(libOption);
-
-            // Collection options for this library
-            const libraryCollections = allCollections.filter(c => c.libraryId === library.libraryID);
-            for (const col of libraryCollections) {
-                const indent = "    ".repeat(col.depth + 1);
-                const colOption = ztoolkit.UI.createElement(doc, "option", {
-                    properties: {
-                        value: `col_${col.id}`,
-                        innerText: `${indent}📁 ${col.name}`
-                    }
-                });
-                filterSelect.appendChild(colOption);
-            }
-        }
-
-        filterContainer.appendChild(filterLabel);
-        filterContainer.appendChild(filterSelect);
-
-        // Search input
+        // Search Input
         const searchInput = ztoolkit.UI.createElement(doc, "input", {
-            attributes: { type: "text", placeholder: "Search by title, author, or year..." },
+            attributes: { type: "text", placeholder: "🔍 Search papers..." },
             styles: {
-                padding: "8px 12px",
+                flex: "1",
+                padding: "6px 10px",
                 border: "1px solid var(--border-primary)",
                 borderRadius: "6px",
-                fontSize: "13px"
+                fontSize: "12px",
+                backgroundColor: "var(--background-secondary)",
+                color: "var(--text-primary)",
+                outline: "none"
             }
         }) as HTMLInputElement;
+        controlsRow.appendChild(searchInput);
+        content.appendChild(controlsRow);
 
-        // Paper list container
-        const paperList = ztoolkit.UI.createElement(doc, "div", {
+        // List Container
+        const listContainer = ztoolkit.UI.createElement(doc, "div", {
             styles: {
-                maxHeight: "320px",
+                maxHeight: "240px",
                 overflowY: "auto",
-                display: "flex",
-                flexDirection: "column",
-                gap: "4px"
+                border: "1px solid var(--border-primary)",
+                borderRadius: "6px",
+                backgroundColor: "var(--background-secondary)"
             }
         });
+        content.appendChild(listContainer);
 
-        // Selected papers tracker
-        const selectedPapers: Set<number> = new Set();
+        // State
+        let allFilteredItems: Zotero.Item[] = [];
+        let displayedCount = 0;
+        const BATCH_SIZE = 50;
 
-        // Render paper options
-        const renderPapers = (filter: string = "") => {
-            paperList.innerHTML = "";
+        const renderPaperBatch = (items: Zotero.Item[], startIndex: number, count: number) => {
+            const endIndex = Math.min(startIndex + count, items.length);
+            for (let i = startIndex; i < endIndex; i++) {
+                const paperItem = items[i];
+                const paperTitle = (paperItem.getField('title') as string) || 'Untitled';
+                const creators = paperItem.getCreators();
+                const authorStr = creators.length > 0 ? creators.map(c => c.lastName).join(', ') : 'Unknown';
+                const year = paperItem.getField('year') || '';
 
-            if (allItems.length === 0) {
-                const noItems = ztoolkit.UI.createElement(doc, "div", {
-                    properties: { innerText: "No papers found in selected scope" },
-                    styles: { padding: "12px", color: "var(--text-secondary)", textAlign: "center" }
-                });
-                paperList.appendChild(noItems);
-                return;
-            }
-
-            const filterLower = filter.toLowerCase();
-            const filteredItems = allItems
-                .filter(item =>
-                    item.title.toLowerCase().includes(filterLower) ||
-                    item.creators.toLowerCase().includes(filterLower) ||
-                    item.year.includes(filter)
-                )
-                .slice(0, 50); // Limit to 50 for performance
-
-            if (filteredItems.length === 0) {
-                const noResults = ztoolkit.UI.createElement(doc, "div", {
-                    properties: { innerText: filter ? "No papers match your search" : "No papers available" },
-                    styles: { padding: "12px", color: "var(--text-secondary)", textAlign: "center" }
-                });
-                paperList.appendChild(noResults);
-                return;
-            }
-
-            filteredItems.forEach(item => {
-                const isChecked = selectedPapers.has(item.id);
-                const alreadyAdded = stateManager.isSelected('items', item.id);
-
-                const paperRow = ztoolkit.UI.createElement(doc, "label", {
+                const row = ztoolkit.UI.createElement(doc, "div", {
                     styles: {
+                        padding: "8px 10px",
+                        borderBottom: "1px solid var(--border-primary)",
+                        cursor: "pointer",
                         display: "flex",
-                        alignItems: "flex-start",
-                        gap: "8px",
-                        padding: "8px",
-                        borderRadius: "6px",
-                        cursor: alreadyAdded ? "default" : "pointer",
-                        backgroundColor: isChecked ? "var(--paper-checked-background)" : (alreadyAdded ? "var(--paper-added-background)" : "transparent"),
-                        opacity: alreadyAdded ? "0.6" : "1"
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        transition: "background-color 0.1s"
                     }
                 });
+                row.addEventListener("mouseenter", () => { row.style.backgroundColor = "var(--background-primary)"; });
+                row.addEventListener("mouseleave", () => { row.style.backgroundColor = ""; });
 
-                const checkbox = ztoolkit.UI.createElement(doc, "input", {
-                    attributes: { type: "checkbox" }
-                }) as HTMLInputElement;
-                checkbox.checked = isChecked || alreadyAdded;
-                checkbox.disabled = alreadyAdded;
-
-                checkbox.addEventListener("change", () => {
-                    if (alreadyAdded) return;
-                    if (checkbox.checked) {
-                        selectedPapers.add(item.id);
-                        (paperRow as HTMLElement).style.backgroundColor = "var(--paper-checked-background)";
-                    } else {
-                        selectedPapers.delete(item.id);
-                        (paperRow as HTMLElement).style.backgroundColor = "transparent";
-                    }
-                });
-
-                const labelContent = ztoolkit.UI.createElement(doc, "div", {
-                    styles: { flex: "1", overflow: "hidden" }
+                const info = ztoolkit.UI.createElement(doc, "div", {
+                    styles: { flex: "1", overflow: "hidden", marginRight: "10px" }
                 });
 
                 const titleEl = ztoolkit.UI.createElement(doc, "div", {
-                    properties: { innerText: item.title.length > 60 ? item.title.slice(0, 60) + "..." : item.title },
-                    styles: { fontSize: "13px", fontWeight: "500" }
+                    properties: { innerText: paperTitle },
+                    styles: {
+                        fontSize: "12px",
+                        fontWeight: "500",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        color: "var(--text-primary)"
+                    }
                 });
-
-                // Show collection name if filtering by collection
-                const metaText = item.collectionName
-                    ? `${item.creators}${item.year ? ` (${item.year})` : ''} • ${item.collectionName}${alreadyAdded ? ' — already added' : ''}`
-                    : `${item.creators}${item.year ? ` (${item.year})` : ''}${alreadyAdded ? ' — already added' : ''}`;
 
                 const metaEl = ztoolkit.UI.createElement(doc, "div", {
-                    properties: { innerText: metaText },
-                    styles: { fontSize: "11px", color: "var(--text-secondary)" }
+                    properties: { innerText: `${authorStr}${year ? ` • ${year}` : ''}` },
+                    styles: { fontSize: "11px", color: "var(--text-secondary)", marginTop: "1px" }
                 });
+                info.appendChild(titleEl);
+                info.appendChild(metaEl);
+                row.appendChild(info);
 
-                labelContent.appendChild(titleEl);
-                labelContent.appendChild(metaEl);
-                paperRow.appendChild(checkbox);
-                paperRow.appendChild(labelContent);
-                paperList.appendChild(paperRow);
-            });
+                // Check if already added
+                const isAdded = stateManager.getStates().items.some(it => it.id === paperItem.id);
 
-            // Show count
-            const countEl = ztoolkit.UI.createElement(doc, "div", {
-                properties: { innerText: `Showing ${filteredItems.length} of ${allItems.length} papers` },
-                styles: { fontSize: "11px", color: "var(--text-tertiary)", padding: "8px", textAlign: "center" }
-            });
-            paperList.appendChild(countEl);
+                if (isAdded) {
+                    const addedLabel = ztoolkit.UI.createElement(doc, "span", {
+                        properties: { innerText: "Added" },
+                        styles: { fontSize: "10px", color: "var(--text-secondary)", fontStyle: "italic" }
+                    });
+                    row.appendChild(addedLabel);
+                } else {
+                    const addBtn = ztoolkit.UI.createElement(doc, "button", {
+                        properties: { innerText: "+" },
+                        styles: {
+                            width: "24px",
+                            height: "24px",
+                            borderRadius: "50%",
+                            border: "1px solid var(--highlight-primary)",
+                            backgroundColor: "transparent",
+                            color: "var(--highlight-primary)",
+                            fontSize: "16px",
+                            fontWeight: "bold",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            transition: "all 0.15s"
+                        },
+                        listeners: [{
+                            type: "click",
+                            listener: async (e: Event) => {
+                                e.stopPropagation();
+                                await this.addItemWithNotes(paperItem);
+                                // Animate removal or change to added
+                                row.style.backgroundColor = "var(--background-hover)";
+                                addBtn.replaceWith(ztoolkit.UI.createElement(doc, "span", {
+                                    properties: { innerText: "✓" },
+                                    styles: { fontSize: "14px", color: "green", fontWeight: "bold" }
+                                }));
+                                setTimeout(() => {
+                                    row.style.opacity = "0.5";
+                                }, 200);
+                            }
+                        }]
+                    });
+                    addBtn.addEventListener("mouseenter", () => {
+                        addBtn.style.backgroundColor = "var(--highlight-primary)";
+                        addBtn.style.color = "var(--highlight-text)";
+                    });
+                    addBtn.addEventListener("mouseleave", () => {
+                        addBtn.style.backgroundColor = "transparent";
+                        addBtn.style.color = "var(--highlight-primary)";
+                    });
+                    row.appendChild(addBtn);
+                }
+                listContainer.appendChild(row);
+            }
+            displayedCount = endIndex;
         };
 
-        renderPapers();
+        const loadMorePapers = () => {
+            renderPaperBatch(allFilteredItems, displayedCount, BATCH_SIZE);
+        };
 
-        // Filter change event
-        filterSelect.addEventListener("change", async () => {
-            const value = filterSelect.value;
-            if (value === "all") {
-                selectedCollectionId = null;
-                selectedLibraryId = null;
-            } else if (value.startsWith("lib_")) {
-                selectedCollectionId = null;
-                selectedLibraryId = parseInt(value.replace("lib_", ""), 10);
-            } else if (value.startsWith("col_")) {
-                selectedCollectionId = parseInt(value.replace("col_", ""), 10);
-                selectedLibraryId = null;
+        listContainer.addEventListener("scroll", () => {
+            const { scrollTop, scrollHeight, clientHeight } = listContainer;
+            if (scrollHeight - scrollTop - clientHeight < 50) {
+                loadMorePapers();
             }
-
-            // Reload items for new filter
-            allItems = await getFilteredItems();
-            renderPapers(searchInput.value);
         });
 
-        // Search event
+        const loadPapers = async () => {
+            listContainer.innerHTML = "";
+            const loading = ztoolkit.UI.createElement(doc, "div", { properties: { innerText: "Loading..." }, styles: { padding: "20px", textAlign: "center", color: "var(--text-secondary)", fontSize: "12px" } });
+            listContainer.appendChild(loading);
+
+            allFilteredItems = [];
+            displayedCount = 0;
+            const filterValue = filterSelect.value;
+            const searchQuery = searchInput.value.toLowerCase();
+
+            try {
+                let items: Zotero.Item[] = [];
+                if (filterValue === "all") {
+                    const libraries = Zotero.Libraries.getAll();
+                    for (const lib of libraries) {
+                        const libItems = await Zotero.Items.getAll(lib.libraryID);
+                        items.push(...libItems.filter((i: Zotero.Item) => i.isRegularItem()));
+                    }
+                } else if (filterValue.startsWith("lib_")) {
+                    const libraryId = parseInt(filterValue.replace("lib_", ""), 10);
+                    items = await Zotero.Items.getAll(libraryId);
+                    items = items.filter(i => i.isRegularItem());
+                } else if (filterValue.startsWith("col_")) {
+                    const collectionId = parseInt(filterValue.replace("col_", ""), 10);
+                    const collection = Zotero.Collections.get(collectionId);
+                    if (collection) {
+                        const itemIDs = collection.getChildItems(true);
+                        for (const id of itemIDs) {
+                            const item = Zotero.Items.get(id);
+                            if (item && item.isRegularItem()) items.push(item);
+                        }
+                    }
+                }
+
+                allFilteredItems = items.filter(i => {
+                    const title = (i.getField('title') as string || '').toLowerCase();
+                    const creators = i.getCreators().map((c: any) => (c.lastName || c.name || '').toLowerCase()).join(' ');
+                    return title.includes(searchQuery) || creators.includes(searchQuery);
+                });
+
+                listContainer.innerHTML = "";
+                if (allFilteredItems.length === 0) {
+                    listContainer.appendChild(ztoolkit.UI.createElement(doc, "div", { properties: { innerText: "No papers found." }, styles: { padding: "20px", textAlign: "center", color: "var(--text-secondary)", fontSize: "12px" } }));
+                } else {
+                    renderPaperBatch(allFilteredItems, 0, BATCH_SIZE);
+                }
+
+            } catch (e) {
+                listContainer.innerHTML = "";
+                listContainer.appendChild(ztoolkit.UI.createElement(doc, "div", { properties: { innerText: "Error loading papers." }, styles: { color: "red", padding: "10px" } }));
+                Zotero.debug(`[Seer AI] Error loading papers: ${e}`);
+            }
+        };
+
+        filterSelect.addEventListener("change", loadPapers);
         searchInput.addEventListener("input", () => {
-            renderPapers(searchInput.value);
+            clearTimeout((searchInput as any)._debounce);
+            (searchInput as any)._debounce = setTimeout(loadPapers, 300);
         });
 
-        // Button row
+        dropdown.appendChild(content);
+
+        // Done button logic (optional, users can just close)
         const buttonRow = ztoolkit.UI.createElement(doc, "div", {
-            styles: { display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "8px" }
+            styles: { padding: "8px 14px", borderTop: "1px solid var(--border-primary)", display: "flex", justifyContent: "flex-end" }
         });
-
-        const cancelBtn = ztoolkit.UI.createElement(doc, "button", {
-            properties: { innerText: "Cancel" },
+        const doneBtn = ztoolkit.UI.createElement(doc, "button", {
+            properties: { innerText: "Done" },
             styles: {
-                padding: "8px 16px",
+                padding: "6px 14px",
                 border: "1px solid var(--border-primary)",
                 borderRadius: "6px",
+                fontSize: "12px",
                 backgroundColor: "var(--background-secondary)",
                 cursor: "pointer"
             },
             listeners: [{
                 type: "click",
-                listener: () => overlay.remove()
-            }]
-        });
-
-        const addPapersBtn = ztoolkit.UI.createElement(doc, "button", {
-            properties: { innerText: "Add Selected Papers" },
-            styles: {
-                padding: "8px 16px",
-                border: "none",
-                borderRadius: "6px",
-                backgroundColor: "var(--button-dashed-border-blue)",
-                color: "var(--highlight-text)",
-                cursor: "pointer",
-                fontWeight: "600"
-            },
-            listeners: [{
-                type: "click",
-                listener: async () => {
-                    if (selectedPapers.size === 0) {
-                        overlay.remove();
-                        return;
-                    }
-
-                    // Add selected papers to state
-                    for (const itemId of selectedPapers) {
-                        const item = Zotero.Items.get(itemId);
-                        if (item) {
-                            await this.addItemWithNotes(item);
-                        }
-                    }
-
-                    overlay.remove();
-                    this.reRenderSelectionArea();
-                    Zotero.debug(`[Seer AI] Added ${selectedPapers.size} papers from picker`);
+                listener: () => {
+                    dropdown.style.opacity = "0";
+                    setTimeout(() => dropdown.remove(), 200);
                 }
             }]
         });
+        buttonRow.appendChild(doneBtn);
+        dropdown.appendChild(buttonRow);
 
-        buttonRow.appendChild(cancelBtn);
-        buttonRow.appendChild(addPapersBtn);
+        selectionArea.parentNode.insertBefore(dropdown, selectionArea.nextSibling);
 
-        dialog.appendChild(title);
-        dialog.appendChild(filterContainer);
-        dialog.appendChild(searchInput);
-        dialog.appendChild(paperList);
-        dialog.appendChild(buttonRow);
-        overlay.appendChild(dialog);
+        // Auto focus
+        setTimeout(() => searchInput.focus(), 100);
+        setTimeout(() => { dropdown.style.opacity = "1"; dropdown.style.transform = "translateY(0)"; }, 10);
 
-        // Close on overlay click
-        overlay.addEventListener("click", (e) => {
-            if (e.target === overlay) overlay.remove();
-        });
-
-        // Append to body to inherit styles (Zotero adds 'dark' class to body)
-        if (doc.body) {
-            doc.body.appendChild(overlay);
-            searchInput.focus();
-        } else {
-            (doc.documentElement || doc).appendChild(overlay);
-            searchInput.focus();
-        }
+        loadPapers();
     }
+    // Remove existing picker if any
 
     /**
      * Add all items matching the given tags, optionally filtered by collection/library
