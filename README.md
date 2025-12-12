@@ -45,7 +45,7 @@ https://github.com/user-attachments/assets/b0847022-d1ab-4e98-8e3a-607d1073db8f
 - **AI-Powered Columns** — Define custom columns with AI prompts to extract exactly what you need (e.g., "Methodology", "Sample Size")
 - **One-Click Generation** — Generate data for individual cells or entire columns with a single click
 - **Column Presets** — Save and load your favorite column configurations for different research projects
-- **Auto-Processing** — Automatically processes PDFs with DataLabs if notes are missing
+- **Auto-Processing** — Automatically processes PDFs with OCR if notes are missing
 
 
 ### Conversation Management

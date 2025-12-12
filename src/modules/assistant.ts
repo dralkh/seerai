@@ -830,9 +830,109 @@ export class Assistant {
         });
         dialog.appendChild(listContainer);
 
+        // State for infinite scroll and Add All functionality
+        let allFilteredItems: Zotero.Item[] = [];
+        let displayedCount = 0;
+        const BATCH_SIZE = 50;
+        let isLoadingMore = false;
+
+        // Render a batch of papers to the list
+        const renderPaperBatch = (items: Zotero.Item[], startIndex: number, count: number) => {
+            const endIndex = Math.min(startIndex + count, items.length);
+            for (let i = startIndex; i < endIndex; i++) {
+                const paperItem = items[i];
+                const paperTitle = (paperItem.getField('title') as string) || 'Untitled';
+                const creators = paperItem.getCreators();
+                const authorStr = creators.length > 0 ? creators.map(c => c.lastName).join(', ') : 'Unknown';
+                const year = paperItem.getField('year') || '';
+
+                const row = ztoolkit.UI.createElement(doc, "div", {
+                    attributes: { "data-paper-id": String(paperItem.id) },
+                    styles: {
+                        padding: "8px 12px",
+                        borderBottom: "1px solid var(--border-primary)",
+                        cursor: "pointer",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center"
+                    },
+                    listeners: [{
+                        type: "click",
+                        listener: async () => {
+                            if (currentTableConfig) {
+                                if (!currentTableConfig.addedPaperIds) {
+                                    currentTableConfig.addedPaperIds = [];
+                                }
+                                if (!currentTableConfig.addedPaperIds.includes(paperItem.id)) {
+                                    currentTableConfig.addedPaperIds.push(paperItem.id);
+                                    const tableStore = getTableStore();
+                                    await tableStore.saveConfig(currentTableConfig);
+                                    row.remove();
+                                    // Remove from allFilteredItems
+                                    const idx = allFilteredItems.findIndex(item => item.id === paperItem.id);
+                                    if (idx !== -1) {
+                                        allFilteredItems.splice(idx, 1);
+                                        displayedCount--;
+                                    }
+                                }
+                            }
+                        }
+                    }]
+                });
+
+                const info = ztoolkit.UI.createElement(doc, "div", {
+                    styles: { flex: "1", overflow: "hidden" }
+                });
+                const titleEl = ztoolkit.UI.createElement(doc, "div", {
+                    properties: { innerText: paperTitle },
+                    styles: { fontSize: "13px", fontWeight: "500", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
+                });
+                const metaEl = ztoolkit.UI.createElement(doc, "div", {
+                    properties: { innerText: `${authorStr}${year ? ` (${year})` : ''}` },
+                    styles: { fontSize: "11px", color: "var(--text-secondary)" }
+                });
+                info.appendChild(titleEl);
+                info.appendChild(metaEl);
+                row.appendChild(info);
+
+                const addBtn = ztoolkit.UI.createElement(doc, "span", {
+                    properties: { innerText: "+" },
+                    styles: { fontSize: "18px", fontWeight: "bold", color: "var(--highlight-primary)" }
+                });
+                row.appendChild(addBtn);
+
+                row.addEventListener("mouseenter", () => { row.style.backgroundColor = "var(--background-secondary)"; });
+                row.addEventListener("mouseleave", () => { row.style.backgroundColor = ""; });
+
+                listContainer.appendChild(row);
+            }
+            displayedCount = endIndex;
+        };
+
+        // Load more papers when scrolling near the end
+        const loadMorePapers = () => {
+            if (isLoadingMore || displayedCount >= allFilteredItems.length) return;
+            isLoadingMore = true;
+            renderPaperBatch(allFilteredItems, displayedCount, BATCH_SIZE);
+            isLoadingMore = false;
+        };
+
+        // Infinite scroll handler
+        listContainer.addEventListener("scroll", () => {
+            const scrollTop = listContainer.scrollTop;
+            const scrollHeight = listContainer.scrollHeight;
+            const clientHeight = listContainer.clientHeight;
+            // Load more when within 50px of the bottom
+            if (scrollHeight - scrollTop - clientHeight < 50) {
+                loadMorePapers();
+            }
+        });
+
         // Load papers based on filter
         const loadPapers = async () => {
             listContainer.innerHTML = "";
+            allFilteredItems = [];
+            displayedCount = 0;
             const filterValue = filterSelect.value;
             const searchQuery = searchInput.value.toLowerCase();
 
@@ -856,17 +956,17 @@ export class Assistant {
                     }
                 }
 
-                // Filter by search and already added
+                // Filter by search and already added (keep all matching, not limited to 50)
                 const addedIds = new Set(currentTableConfig?.addedPaperIds || []);
-                items = items.filter(i => {
+                allFilteredItems = items.filter(i => {
                     if (addedIds.has(i.id)) return false;
                     if (!searchQuery) return true;
                     const itemTitle = (i.getField('title') as string || '').toLowerCase();
                     const creators = i.getCreators().map(c => `${c.firstName} ${c.lastName}`.toLowerCase()).join(' ');
                     return itemTitle.includes(searchQuery) || creators.includes(searchQuery);
-                }).slice(0, 50); // Limit results
+                });
 
-                if (items.length === 0) {
+                if (allFilteredItems.length === 0) {
                     const emptyMsg = ztoolkit.UI.createElement(doc, "div", {
                         properties: { innerText: "No papers found" },
                         styles: { padding: "20px", textAlign: "center", color: "var(--text-tertiary)" }
@@ -875,66 +975,8 @@ export class Assistant {
                     return;
                 }
 
-                for (const paperItem of items) {
-                    const paperTitle = (paperItem.getField('title') as string) || 'Untitled';
-                    const creators = paperItem.getCreators();
-                    const authorStr = creators.length > 0 ? creators.map(c => c.lastName).join(', ') : 'Unknown';
-                    const year = paperItem.getField('year') || '';
-
-                    const row = ztoolkit.UI.createElement(doc, "div", {
-                        attributes: { "data-paper-id": String(paperItem.id) },
-                        styles: {
-                            padding: "8px 12px",
-                            borderBottom: "1px solid var(--border-primary)",
-                            cursor: "pointer",
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center"
-                        },
-                        listeners: [{
-                            type: "click",
-                            listener: async () => {
-                                if (currentTableConfig) {
-                                    if (!currentTableConfig.addedPaperIds) {
-                                        currentTableConfig.addedPaperIds = [];
-                                    }
-                                    if (!currentTableConfig.addedPaperIds.includes(paperItem.id)) {
-                                        currentTableConfig.addedPaperIds.push(paperItem.id);
-                                        const tableStore = getTableStore();
-                                        await tableStore.saveConfig(currentTableConfig);
-                                        row.remove();
-                                    }
-                                }
-                            }
-                        }]
-                    });
-
-                    const info = ztoolkit.UI.createElement(doc, "div", {
-                        styles: { flex: "1", overflow: "hidden" }
-                    });
-                    const titleEl = ztoolkit.UI.createElement(doc, "div", {
-                        properties: { innerText: paperTitle },
-                        styles: { fontSize: "13px", fontWeight: "500", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
-                    });
-                    const metaEl = ztoolkit.UI.createElement(doc, "div", {
-                        properties: { innerText: `${authorStr}${year ? ` (${year})` : ''}` },
-                        styles: { fontSize: "11px", color: "var(--text-secondary)" }
-                    });
-                    info.appendChild(titleEl);
-                    info.appendChild(metaEl);
-                    row.appendChild(info);
-
-                    const addBtn = ztoolkit.UI.createElement(doc, "span", {
-                        properties: { innerText: "+" },
-                        styles: { fontSize: "18px", fontWeight: "bold", color: "var(--highlight-primary)" }
-                    });
-                    row.appendChild(addBtn);
-
-                    row.addEventListener("mouseenter", () => { row.style.backgroundColor = "var(--background-secondary)"; });
-                    row.addEventListener("mouseleave", () => { row.style.backgroundColor = ""; });
-
-                    listContainer.appendChild(row);
-                }
+                // Render first batch
+                renderPaperBatch(allFilteredItems, 0, BATCH_SIZE);
             } catch (e) {
                 Zotero.debug(`[Seer AI] Error loading papers: ${e}`);
             }
@@ -954,9 +996,9 @@ export class Assistant {
             styles: { display: "flex", justifyContent: "space-between", gap: "8px" }
         });
 
-        // Add All button
+        // Add All button - adds ALL matching papers, not just visible ones
         const addAllBtn = ztoolkit.UI.createElement(doc, "button", {
-            properties: { innerText: "Add All Visible" },
+            properties: { innerText: "Add All" },
             styles: {
                 padding: "8px 16px",
                 border: "1px solid var(--border-primary)",
@@ -968,22 +1010,31 @@ export class Assistant {
             listeners: [{
                 type: "click",
                 listener: async () => {
-                    // Add all visible papers in the list
-                    const rows = listContainer.querySelectorAll('[data-paper-id]');
+                    // Add ALL matching papers (not just visible ones)
                     let count = 0;
-                    rows.forEach((row: Element) => {
-                        const paperId = parseInt(row.getAttribute('data-paper-id') || '0', 10);
-                        if (paperId && currentTableConfig && !currentTableConfig.addedPaperIds.includes(paperId)) {
-                            currentTableConfig.addedPaperIds.push(paperId);
-                            row.remove(); // Remove from list
+                    for (const paperItem of allFilteredItems) {
+                        if (currentTableConfig && !currentTableConfig.addedPaperIds.includes(paperItem.id)) {
+                            currentTableConfig.addedPaperIds.push(paperItem.id);
                             count++;
                         }
+                    }
+                    // Clear the list since all are added
+                    listContainer.innerHTML = "";
+                    allFilteredItems = [];
+                    displayedCount = 0;
+
+                    // Show empty state
+                    const emptyMsg = ztoolkit.UI.createElement(doc, "div", {
+                        properties: { innerText: "No papers found" },
+                        styles: { padding: "20px", textAlign: "center", color: "var(--text-tertiary)" }
                     });
+                    listContainer.appendChild(emptyMsg);
+
                     // Show count feedback inline
                     if (count > 0) {
                         (addAllBtn as HTMLElement).innerText = `✓ Added ${count}`;
                         setTimeout(() => {
-                            (addAllBtn as HTMLElement).innerText = "Add All Visible";
+                            (addAllBtn as HTMLElement).innerText = "Add All";
                         }, 1500);
                     }
                 }
@@ -1608,7 +1659,7 @@ Task: ${columnPrompt}`;
         }
 
         // Process PDF with DataLabs - this creates a note
-        Zotero.debug("[Seer AI] Processing PDF with DataLabs...");
+        Zotero.debug("[Seer AI] Processing PDF with OCR...");
         await ocrService.convertToMarkdown(pdf);
 
         // Wait a moment for the note to be saved
@@ -2182,7 +2233,7 @@ Task: ${columnPrompt}`;
                         // Empty computed cell - auto-generate immediately
                         if (hasNotes || hasPDF) {
                             // Show generating indicator
-                            td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">⏳ ${hasNotes ? 'Generating...' : 'Processing PDF with DataLabs...'}</span>`;
+                            td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">⏳ ${hasNotes ? 'Generating...' : 'Processing PDF with OCR...'}</span>`;
                             td.style.cursor = "wait";
 
                             try {
