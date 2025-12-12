@@ -107,12 +107,52 @@ npm run build
 | OpenRouter | `https://openrouter.ai/api/v1/` | Various models |
 | Local (Ollama) | `http://localhost:11434/v1/` | `qwen3`, `mistral`, etc. |
 
-### DataLab OCR Setup (Recommended)
+### DataLab OCR Setup
+
+Seer AI supports two modes for PDF-to-markdown conversion:
+
+#### Option A: Cloud (DataLab.to)
 
 1. Get an API key from [datalab.to](https://datalab.to)
 2. Go to **Zotero → Settings → Seer AI**
-3. Enter your DataLab API Key
-4. Set the max concurrent processes (default: 5)
+3. Select **Cloud (DataLab.to)** from the OCR Service dropdown
+4. Enter your DataLab API Key
+5. Optional settings:
+   - **Force OCR**: Enable for scanned PDFs
+   - **Use LLM**: Enable AI-enhanced extraction (uses more credits)
+
+#### Option B: Local Marker Server
+
+Run your own local OCR server for unlimited processing without API costs.
+
+**Prerequisites:**
+- Python installed
+- `uv` installed (fast Python package installer)
+
+**Installation & Running:**
+
+```bash
+# Create a virtual environment
+uv venv
+
+# Install Marker with full dependencies
+uv pip install marker-pdf[full]
+
+# Install API server dependencies
+uv pip install -U uvicorn fastapi python-multipart
+
+# Run the Marker API Server
+uv run marker_server --port 8001
+```
+
+The server will start at `http://localhost:8001`.
+
+**Configuring Seer AI for Local Marker:**
+
+1. Go to **Zotero → Settings → Seer AI**
+2. Select **Local Marker Server** from the OCR Service dropdown
+3. Set Server URL to `http://localhost:8001`
+4. Optional: Enable **Force OCR** for scanned PDFs
 
 ---
 
@@ -140,7 +180,7 @@ Click the settings icon in the chat controls to access:
 
 1. Right-click on a PDF attachment in Zotero
 2. Select **Extract Text with DataLab OCR**
-3. The extracted text will be saved as a note and used by the ai chat
+3. The extracted text will be saved as a note and used by the AI chat
 
 ---
 
@@ -231,12 +271,11 @@ A dedicated tab for searching and exploring papers using Semantic Scholar's API.
 - **Data Traceability**: Ability to save individual table items as notes attached directly to the source item.
 
 ### Others
-Citations refrencing
+Citations referencing
 MCP
 Connectors
 Commands
 UI
-Datalab local OCR API
 
 ---
 

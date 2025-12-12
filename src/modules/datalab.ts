@@ -33,10 +33,10 @@ export class DataLabService {
     }
 
     /**
-     * Build a multipart/form-data body manually.
+     * Build a multipart/form-data body manually for Cloud DataLab API.
      * Returns { body: Uint8Array, contentType: string }
      */
-    private buildMultipartBody(fileData: Uint8Array, fileName: string): { body: Uint8Array, contentType: string } {
+    private buildMultipartBody(fileData: Uint8Array, fileName: string, forceOcr: boolean, useLlm: boolean): { body: Uint8Array, contentType: string } {
         const boundary = "----ZoteroDataLabBoundary" + Date.now();
         const encoder = new TextEncoder();
 
@@ -47,9 +47,19 @@ export class DataLabService {
         preFile += `Content-Type: application/pdf\r\n\r\n`;
 
         let postFile = "";
+        // force_ocr parameter
         postFile += `\r\n--${boundary}\r\n`;
         postFile += `Content-Disposition: form-data; name="force_ocr"\r\n\r\n`;
-        postFile += `true`;
+        postFile += forceOcr ? "true" : "false";
+        // use_llm parameter
+        postFile += `\r\n--${boundary}\r\n`;
+        postFile += `Content-Disposition: form-data; name="use_llm"\r\n\r\n`;
+        postFile += useLlm ? "true" : "false";
+        // output_format parameter
+        postFile += `\r\n--${boundary}\r\n`;
+        postFile += `Content-Disposition: form-data; name="output_format"\r\n\r\n`;
+        postFile += "markdown";
+        // End boundary
         postFile += `\r\n--${boundary}--\r\n`;
 
         const preFileBytes = encoder.encode(preFile);
@@ -106,8 +116,10 @@ export class DataLabService {
 
     public async convertToMarkdown(item: Zotero.Item) {
         this.apiKey = Zotero.Prefs.get(`${config.prefsPrefix}.datalabApiKey`) as string;
+        const useLocalMarker = Zotero.Prefs.get(`${config.prefsPrefix}.datalabUseLocal`) as boolean;
 
-        if (!this.apiKey) {
+        // Check API key for cloud mode only
+        if (!useLocalMarker && !this.apiKey) {
             new ztoolkit.ProgressWindow("DataLab OCR").createLine({
                 text: "Error: DataLab API Key is missing. Please set it in preferences.",
                 icon: "warning",
@@ -184,59 +196,131 @@ export class DataLabService {
 
             ztoolkit.log("DataLab: Final resolved filePath", filePath);
 
-            // Read the file using IOUtils
-            // @ts-ignore
-            const fileData: Uint8Array = await IOUtils.read(filePath);
-            ztoolkit.log(`DataLab: Read ${fileData.length} bytes from file`);
+            if (useLocalMarker) {
+                // --- Local Marker Server Mode ---
+                // Uses the simple API: filepath, page_range, force_ocr, paginate_output, output_format
 
-            progressLine.changeLine({
-                text: "Uploading PDF to DataLab...",
-                progress: 30
-            });
+                let localApiUrl = Zotero.Prefs.get(`${config.prefsPrefix}.datalabUrl`) as string || "http://localhost:8001";
+                // Normalize URL: remove trailing slash
+                localApiUrl = localApiUrl.replace(/\/$/, "");
 
-            // Build multipart body manually
-            const { body, contentType } = this.buildMultipartBody(fileData, "document.pdf");
+                const localForceOcr = Zotero.Prefs.get(`${config.prefsPrefix}.localForceOcr`) as boolean ?? true;
 
-            // Use Zotero.HTTP.request for the upload
-            const uploadResponse = await Zotero.HTTP.request("POST", `${this.apiUrl}/marker`, {
-                headers: {
-                    "X-Api-Key": this.apiKey,
-                    "Content-Type": contentType,
-                },
-                body: body,
-                responseType: "json",
-            });
+                progressLine.changeLine({
+                    text: "Sending request to Local Marker...",
+                    progress: 30
+                });
 
-            const uploadResult = uploadResponse.response as unknown as DatalabResponse;
-            ztoolkit.log("DataLab: Upload response", JSON.stringify(uploadResult));
+                ztoolkit.log(`DataLab: Posting to ${localApiUrl}/marker with filepath: ${filePath}`);
 
-            if (!uploadResult.success || !uploadResult.request_check_url) {
-                throw new Error(uploadResult.error || "Upload failed");
+                // Simple JSON body matching the local marker API
+                const jsonBody = {
+                    filepath: filePath,
+                    force_ocr: localForceOcr,
+                    paginate_output: false,
+                    output_format: "markdown"
+                };
+
+                ztoolkit.log(`DataLab: Sending JSON body: ${JSON.stringify(jsonBody)}`);
+
+                const response = await Zotero.HTTP.request("POST", `${localApiUrl}/marker`, {
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(jsonBody),
+                    responseType: "json",
+                    timeout: 600000, // 10 minutes timeout for long OCR jobs
+                });
+
+                if (response.status !== 200 && response.status !== 201) {
+                    throw new Error(`Local server returned status ${response.status}`);
+                }
+
+                // @ts-ignore
+                const result = response.response;
+                ztoolkit.log(`DataLab: Local response keys: ${Object.keys(result).join(", ")}`);
+                ztoolkit.log("DataLab: Full Local response", JSON.stringify(result));
+
+                // Extract markdown from response - try common field names
+                const markdown = result.markdown || result.text || result.content || result.output || (typeof result === 'string' ? result : "");
+
+                if (!markdown) {
+                    throw new Error("Could not extract markdown from local server response. Check debug logs for response structure.");
+                }
+
+                progressLine.changeLine({
+                    text: "Saving extracted note...",
+                    progress: 90
+                });
+
+                await this.saveNote(item, markdown);
+
+                progressLine.changeLine({
+                    text: "Done!",
+                    progress: 100
+                });
+                setTimeout(() => progressWin.close(), 3000);
+
+            } else {
+                // --- Cloud DataLab API Mode ---
+                // Read cloud-specific settings
+                const cloudForceOcr = Zotero.Prefs.get(`${config.prefsPrefix}.cloudForceOcr`) as boolean ?? false;
+                const cloudUseLlm = Zotero.Prefs.get(`${config.prefsPrefix}.cloudUseLlm`) as boolean ?? false;
+
+                // Read the file using IOUtils
+                // @ts-ignore
+                const fileData: Uint8Array = await IOUtils.read(filePath);
+                ztoolkit.log(`DataLab: Read ${fileData.length} bytes from file`);
+
+                progressLine.changeLine({
+                    text: "Uploading PDF to DataLab Cloud...",
+                    progress: 30
+                });
+
+                // Build multipart body with cloud settings
+                const { body, contentType } = this.buildMultipartBody(fileData, "document.pdf", cloudForceOcr, cloudUseLlm);
+
+                // Use Zotero.HTTP.request for the upload
+                const uploadResponse = await Zotero.HTTP.request("POST", `${this.apiUrl}/marker`, {
+                    headers: {
+                        "X-Api-Key": this.apiKey,
+                        "Content-Type": contentType,
+                    },
+                    body: body,
+                    responseType: "json",
+                });
+
+                const uploadResult = uploadResponse.response as unknown as DatalabResponse;
+                ztoolkit.log("DataLab: Upload response", JSON.stringify(uploadResult));
+
+                if (!uploadResult.success || !uploadResult.request_check_url) {
+                    throw new Error(uploadResult.error || "Upload failed");
+                }
+
+                progressLine.changeLine({
+                    text: "Processing... (This may take a while)",
+                    progress: 50
+                });
+
+                const result = await this.pollForResults(uploadResult.request_check_url, progressLine);
+
+                if (!result.success || result.status !== "complete") {
+                    throw new Error(result.error || "Conversion failed");
+                }
+
+                progressLine.changeLine({
+                    text: "Saving extracted note...",
+                    progress: 90
+                });
+
+                await this.saveNote(item, result.markdown || "");
+
+                progressLine.changeLine({
+                    text: "Done!",
+                    progress: 100
+                });
+                setTimeout(() => progressWin.close(), 3000);
             }
-
-            progressLine.changeLine({
-                text: "Processing... (This may take a while)",
-                progress: 50
-            });
-
-            const result = await this.pollForResults(uploadResult.request_check_url, progressLine);
-
-            if (!result.success || result.status !== "complete") {
-                throw new Error(result.error || "Conversion failed");
-            }
-
-            progressLine.changeLine({
-                text: "Saving extracted note...",
-                progress: 90
-            });
-
-            await this.saveNote(item, result.markdown || "");
-
-            progressLine.changeLine({
-                text: "Done!",
-                progress: 100
-            });
-            setTimeout(() => progressWin.close(), 3000);
 
         } catch (e) {
             ztoolkit.log(e);

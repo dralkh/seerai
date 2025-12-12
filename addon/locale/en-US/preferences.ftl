@@ -1,7 +1,8 @@
 pref-title = Seer AI Settings
 pref-datalab-title = DataLab OCR
-pref-datalabApiKey = API Key
-pref-datalabMaxConcurrent = Max Concurrent
+pref-datalabModeLocal = Local Marker Server
+pref-datalabModeCloud = Cloud (DataLab.to)
+pref-datalabForceOcr = Force OCR (recommended for scanned PDFs)
 pref-help = { $name } Build { $version } { $time }
 pref-models-title = AI Model Configurations
 pref-models-add = Add Configuration

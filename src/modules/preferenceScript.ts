@@ -139,9 +139,63 @@ function bindPrefEvents() {
     });
   }
 
-  // Bind DataLab settings
+  // Helper to bind a checkbox element to a boolean preference
+  function bindCheckbox(checkboxId: string, prefKey: string) {
+    const checkbox = doc?.querySelector(`#${checkboxId}`) as HTMLInputElement | null;
+    if (!checkbox) return;
+
+    // Load current value from preferences
+    const currentValue = Zotero.Prefs.get(`${prefPrefix}.${prefKey}`) as boolean;
+    checkbox.checked = currentValue ?? false;
+
+    // Save value when changed
+    checkbox.addEventListener("command", () => {
+      Zotero.Prefs.set(`${prefPrefix}.${prefKey}`, checkbox.checked);
+      ztoolkit.log(`Saved ${prefKey}: ${checkbox.checked}`);
+    });
+  }
+
+  // Function to show/hide settings based on mode selection
+  function updateModeVisibility(isLocal: boolean) {
+    const localSettings = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-localSettings`) as HTMLElement;
+    const cloudSettings = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-cloudSettings`) as HTMLElement;
+
+    if (localSettings) {
+      localSettings.style.display = isLocal ? "" : "none";
+    }
+    if (cloudSettings) {
+      cloudSettings.style.display = isLocal ? "none" : "";
+    }
+  }
+
+  // Bind menulist for mode selection
+  const modeSelect = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-datalabMode`) as XUL.MenuList;
+  if (modeSelect) {
+    // Load current value from preference
+    const useLocal = Zotero.Prefs.get(`${prefPrefix}.datalabUseLocal`) as boolean ?? false;
+    modeSelect.value = useLocal ? "local" : "cloud";
+    updateModeVisibility(useLocal);
+
+    // Save on change
+    modeSelect.addEventListener("command", () => {
+      const isLocal = modeSelect.value === "local";
+      Zotero.Prefs.set(`${prefPrefix}.datalabUseLocal`, isLocal);
+      updateModeVisibility(isLocal);
+      ztoolkit.log(`Saved datalabUseLocal: ${isLocal}`);
+    });
+  }
+
+  // Bind other DataLab settings
+  bindInput(`zotero-prefpane-${config.addonRef}-datalabUrl`, "datalabUrl");
   bindInput(`zotero-prefpane-${config.addonRef}-datalabApiKey`, "datalabApiKey");
   bindInput(`zotero-prefpane-${config.addonRef}-datalabMaxConcurrent`, "datalabMaxConcurrent");
+
+  // Local-specific settings
+  bindCheckbox(`zotero-prefpane-${config.addonRef}-localForceOcr`, "localForceOcr");
+
+  // Cloud-specific settings
+  bindCheckbox(`zotero-prefpane-${config.addonRef}-cloudForceOcr`, "cloudForceOcr");
+  bindCheckbox(`zotero-prefpane-${config.addonRef}-cloudUseLlm`, "cloudUseLlm");
 }
 
 /**

@@ -12,8 +12,13 @@ declare namespace _ZoteroTypes {
       "apiURL": string;
       "apiKey": string;
       "model": string;
+      "datalabUseLocal": boolean;
+      "datalabUrl": string;
       "datalabApiKey": string;
       "datalabMaxConcurrent": number;
+      "localForceOcr": boolean;
+      "cloudForceOcr": boolean;
+      "cloudUseLlm": boolean;
       "modelConfigs": string;
       "activeModelId": string;
     };

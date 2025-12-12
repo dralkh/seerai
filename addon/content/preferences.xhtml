@@ -21,26 +21,71 @@
     <html:p id="__addonRef__-models-empty" data-l10n-id="pref-models-empty"></html:p>
   </html:div>
 
-  <html:hr />
+  <html:hr style="margin: 16px 0;" />
 
   <!-- DataLab OCR Configuration -->
   <label>
     <html:h3 data-l10n-id="pref-datalab-title">DataLab OCR</html:h3>
   </label>
-  <hbox align="center">
-    <html:label for="zotero-prefpane-__addonRef__-datalabApiKey" data-l10n-id="pref-datalabApiKey"
-      style="width: 120px;">DataLab API Key</html:label>
-    <html:input type="password" id="zotero-prefpane-__addonRef__-datalabApiKey" preference="datalabApiKey"
-      placeholder="Token from datalab.to" flex="1"></html:input>
+
+  <!-- Service Selection with Menulist Dropdown -->
+  <hbox align="center" style="margin-bottom: 12px;">
+    <label style="width: 120px; font-weight: bold;">OCR Service:</label>
+    <menulist id="zotero-prefpane-__addonRef__-datalabMode" style="min-width: 200px;">
+      <menupopup>
+        <menuitem value="local" label="Local Marker Server" />
+        <menuitem value="cloud" label="Cloud (DataLab.to)" />
+      </menupopup>
+    </menulist>
   </hbox>
-  <hbox align="center">
-    <html:label for="zotero-prefpane-__addonRef__-datalabMaxConcurrent" data-l10n-id="pref-datalabMaxConcurrent"
-      style="width: 120px;">Max Concurrent</html:label>
-    <html:input type="number" id="zotero-prefpane-__addonRef__-datalabMaxConcurrent" preference="datalabMaxConcurrent"
-      placeholder="5" min="1" max="10" style="width: 60px;"></html:input>
-  </hbox>
+
+  <!-- Local Server Settings -->
+  <vbox id="zotero-prefpane-__addonRef__-localSettings"
+    style="margin-left: 20px; margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.03); border-radius: 4px;">
+    <hbox align="center" style="margin-bottom: 8px;">
+      <label style="width: 100px;">Server URL:</label>
+      <html:input type="text" id="zotero-prefpane-__addonRef__-datalabUrl" placeholder="http://localhost:8001"
+        style="flex: 1; min-width: 200px;"></html:input>
+    </hbox>
+    <hbox align="center" style="margin-bottom: 8px;">
+      <checkbox id="zotero-prefpane-__addonRef__-localForceOcr" label="Force OCR" checked="true" />
+    </hbox>
+    <hbox align="center">
+      <html:a href="https://github.com/dralkh/seer-ai#option-b-local-marker-server"
+        style="color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 12px;"
+        onclick="Zotero.launchURL(this.href); return false;">
+        📖 Setup Tutorial
+      </html:a>
+    </hbox>
+  </vbox>
+
+  <!-- Cloud Settings -->
+  <vbox id="zotero-prefpane-__addonRef__-cloudSettings"
+    style="margin-left: 20px; margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.03); border-radius: 4px;">
+    <hbox align="center" style="margin-bottom: 8px;">
+      <label style="width: 100px;">API Key:</label>
+      <html:input type="password" id="zotero-prefpane-__addonRef__-datalabApiKey" placeholder="Token from datalab.to"
+        style="flex: 1; min-width: 200px;"></html:input>
+    </hbox>
+    <hbox align="center" style="margin-bottom: 6px;">
+      <checkbox id="zotero-prefpane-__addonRef__-cloudForceOcr" label="Force OCR" />
+    </hbox>
+    <hbox align="center">
+      <checkbox id="zotero-prefpane-__addonRef__-cloudUseLlm" label="Use LLM (AI-enhanced extraction)" />
+    </hbox>
+  </vbox>
+
+  <!-- Common Settings -->
+  <vbox style="margin-top: 8px;">
+    <hbox align="center">
+      <label style="width: 120px;">Max Concurrent:</label>
+      <html:input type="number" id="zotero-prefpane-__addonRef__-datalabMaxConcurrent" placeholder="5" min="1" max="10"
+        style="width: 60px;"></html:input>
+    </hbox>
+  </vbox>
+
 </groupbox>
-<vbox>
-  <html:label data-l10n-id="pref-help"
+<vbox style="margin-top: 16px;">
+  <html:label data-l10n-id="pref-help" style="font-size: 11px; color: #666;"
     data-l10n-args='{"time": "__buildTime__","name": "__addonName__","version":"__buildVersion__"}'></html:label>
 </vbox>
