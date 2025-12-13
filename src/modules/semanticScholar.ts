@@ -126,7 +126,8 @@ class SemanticScholarService {
 
     // Rate limiting: queue requests to stay under 1 req/sec
     private lastRequestTime = 0;
-    private readonly minRequestInterval = 1100; // 1.1 seconds to be safe
+    private readonly minRequestInterval = 1100; // 1.1 seconds with API key
+    private readonly unauthenticatedInterval = 3000; // 3 seconds without API key
 
     // Separate rate limiting for autocomplete (lighter, more responsive)
     private lastAutocompleteTime = 0;
@@ -147,14 +148,16 @@ class SemanticScholarService {
         const now = Date.now();
         const timeSinceLastRequest = now - this.lastRequestTime;
 
-        if (timeSinceLastRequest < this.minRequestInterval) {
-            const waitTime = this.minRequestInterval - timeSinceLastRequest;
+        const apiKey = this.getApiKey();
+        const interval = apiKey ? this.minRequestInterval : this.unauthenticatedInterval;
+
+        if (timeSinceLastRequest < interval) {
+            const waitTime = interval - timeSinceLastRequest;
             await new Promise(resolve => setTimeout(resolve, waitTime));
         }
 
         this.lastRequestTime = Date.now();
 
-        const apiKey = this.getApiKey();
         const headers: Record<string, string> = {
             "Content-Type": "application/json",
             ...(options.headers as Record<string, string> || {}),

@@ -1635,9 +1635,8 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
         try {
             // Check for API key
-            if (!semanticScholarService.hasApiKey()) {
-                throw new Error("Please configure your Semantic Scholar API key in Settings.");
-            }
+            // API Key is optional now, but checked for rate limiting internally
+
 
             // Build year filter
             let yearParam: string | undefined;
