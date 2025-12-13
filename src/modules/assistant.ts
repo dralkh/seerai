@@ -21,6 +21,7 @@ import {
 import { OcrService } from "./ocr";
 import {
     semanticScholarService,
+    unpaywallService,
     SemanticScholarPaper,
     SemanticScholarAuthorDetails,
     SearchResult,
@@ -53,6 +54,9 @@ let currentSearchResults: SemanticScholarPaper[] = [];
 let currentSearchToken: string | null = null;  // For pagination
 let totalSearchResults: number = 0;  // Total count from API
 let isSearching = false;
+
+// Cache for Unpaywall PDF URLs (paperId -> pdfUrl)
+const unpaywallPdfCache = new Map<string, string>();
 
 // Filter presets
 interface FilterPreset {
@@ -1874,6 +1878,9 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
             container.appendChild(card);
         });
 
+        // Trigger batch Unpaywall check for papers without PDFs
+        this.batchCheckUnpaywall(doc, currentSearchResults);
+
         // "Show More" button
         const showMoreBtn = ztoolkit.UI.createElement(doc, "button", {
             properties: { innerText: "📥 Show More", id: "show-more-btn" },
@@ -1913,6 +1920,65 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     }
 
     /**
+     * Batch check Unpaywall for papers without PDFs
+     * Updates badges in the DOM as results come in
+     */
+    private static async batchCheckUnpaywall(doc: Document, papers: SemanticScholarPaper[]): Promise<void> {
+        // Filter papers that need checking (no openAccessPdf but have DOI)
+        const papersToCheck = papers.filter(p =>
+            !p.openAccessPdf &&
+            p.externalIds?.DOI &&
+            !unpaywallPdfCache.has(p.paperId)
+        );
+
+        if (papersToCheck.length === 0) return;
+
+        Zotero.debug(`[Seer AI] Batch checking Unpaywall for ${papersToCheck.length} papers`);
+
+        // Check in parallel (UnpaywallService handles batching internally)
+        const dois = papersToCheck.map(p => p.externalIds!.DOI!);
+        const results = await unpaywallService.checkMultipleDois(dois);
+
+        // Update cache and UI for each result
+        papersToCheck.forEach(paper => {
+            const doi = paper.externalIds!.DOI!;
+            const pdfUrl = results.get(doi.toLowerCase().trim());
+
+            if (pdfUrl) {
+                unpaywallPdfCache.set(paper.paperId, pdfUrl);
+            }
+
+            // Find and update the badge in the DOM
+            // Cards are identified by paper title text content
+            const cards = doc.querySelectorAll('.search-result-card');
+            for (const card of cards) {
+                const titleEl = card.querySelector('div[style*="font-weight: 600"]');
+                if (titleEl && titleEl.textContent === paper.title) {
+                    const badge = card.querySelector('span[style*="Checking"]');
+                    if (badge && badge instanceof HTMLElement) {
+                        if (pdfUrl) {
+                            badge.innerText = "🔗 PDF (Unpaywall)";
+                            badge.style.backgroundColor = "#e3f2fd";
+                            badge.style.color = "#1976d2";
+                            badge.style.cursor = "pointer";
+                            badge.title = pdfUrl;
+                            badge.onclick = (e: Event) => {
+                                e.stopPropagation();
+                                Zotero.launchURL(pdfUrl);
+                            };
+                        } else {
+                            badge.innerText = "📭 No PDF";
+                            badge.style.backgroundColor = "#fafafa";
+                            badge.style.color = "#9e9e9e";
+                        }
+                    }
+                    break;
+                }
+            }
+        });
+    }
+
+    /**
      * Append new search result cards without clearing existing content
      */
     private static appendSearchCards(doc: Document, container: HTMLElement, newPapers: SemanticScholarPaper[], item: Zotero.Item): void {
@@ -1939,6 +2005,9 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
             const card = this.createSearchResultCard(doc, paper, item);
             container.appendChild(card);
         });
+
+        // Batch check Unpaywall for papers without PDFs
+        this.batchCheckUnpaywall(doc, newPapers);
 
         // Add Show More button at the end
         const showMoreBtn = ztoolkit.UI.createElement(doc, "button", {
@@ -1998,6 +2067,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
         header.appendChild(title);
 
         if (paper.openAccessPdf) {
+            // Paper has open access PDF from Semantic Scholar
             const pdfBadge = ztoolkit.UI.createElement(doc, "span", {
                 properties: { innerText: "📄 PDF" },
                 styles: {
@@ -2011,6 +2081,60 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
                 }
             });
             header.appendChild(pdfBadge);
+        } else if (paper.externalIds?.DOI) {
+            // No Semantic Scholar PDF, but has DOI - check Unpaywall async
+            const pdfBadge = ztoolkit.UI.createElement(doc, "span", {
+                properties: { innerText: "🔍 Checking..." },
+                styles: {
+                    fontSize: "10px",
+                    padding: "2px 6px",
+                    backgroundColor: "#fff3e0",
+                    color: "#e65100",
+                    borderRadius: "4px",
+                    marginLeft: "8px",
+                    whiteSpace: "nowrap"
+                }
+            });
+            header.appendChild(pdfBadge);
+
+            // Check cache first
+            if (unpaywallPdfCache.has(paper.paperId)) {
+                const cachedUrl = unpaywallPdfCache.get(paper.paperId)!;
+                pdfBadge.innerText = "🔗 PDF (Unpaywall)";
+                pdfBadge.style.backgroundColor = "#e3f2fd";
+                pdfBadge.style.color = "#1976d2";
+                pdfBadge.style.cursor = "pointer";
+                pdfBadge.title = cachedUrl;
+                pdfBadge.addEventListener("click", (e: Event) => {
+                    e.stopPropagation();
+                    Zotero.launchURL(cachedUrl);
+                });
+            } else {
+                // Async check Unpaywall
+                unpaywallService.getPdfUrl(paper.externalIds.DOI).then(pdfUrl => {
+                    if (pdfUrl) {
+                        unpaywallPdfCache.set(paper.paperId, pdfUrl);
+                        pdfBadge.innerText = "🔗 PDF (Unpaywall)";
+                        pdfBadge.style.backgroundColor = "#e3f2fd";
+                        pdfBadge.style.color = "#1976d2";
+                        pdfBadge.style.cursor = "pointer";
+                        pdfBadge.title = pdfUrl;
+                        pdfBadge.addEventListener("click", (e: Event) => {
+                            e.stopPropagation();
+                            Zotero.launchURL(pdfUrl);
+                        });
+                    } else {
+                        // No PDF found
+                        pdfBadge.innerText = "📭 No PDF";
+                        pdfBadge.style.backgroundColor = "#fafafa";
+                        pdfBadge.style.color = "#9e9e9e";
+                    }
+                }).catch(() => {
+                    pdfBadge.innerText = "📭 No PDF";
+                    pdfBadge.style.backgroundColor = "#fafafa";
+                    pdfBadge.style.color = "#9e9e9e";
+                });
+            }
         }
 
         card.appendChild(header);
@@ -2509,14 +2633,38 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
                     }
                 }
             } else {
-                // No open access PDF - trigger Zotero's "Find Full Text"
-                try {
-                    Zotero.debug(`[Seer AI] No open access PDF, initiating Find Full Text...`);
-                    await (Zotero.Attachments as any).addAvailablePDF(newItem);
-                    Zotero.debug(`[Seer AI] Find Full Text initiated`);
-                } catch (findError) {
-                    // Find Full Text failure is non-fatal
-                    Zotero.debug(`[Seer AI] Find Full Text failed (non-fatal): ${findError}`);
+                // No Semantic Scholar PDF - check Unpaywall cache first
+                const cachedUnpaywallUrl = unpaywallPdfCache.get(paper.paperId);
+                if (cachedUnpaywallUrl) {
+                    try {
+                        Zotero.debug(`[Seer AI] Using Unpaywall PDF: ${cachedUnpaywallUrl}`);
+                        await Zotero.Attachments.importFromURL({
+                            url: cachedUnpaywallUrl,
+                            parentItemID: newItem.id,
+                            title: `${paper.title}.pdf`,
+                            contentType: 'application/pdf'
+                        });
+                        Zotero.debug(`[Seer AI] Unpaywall PDF attached successfully`);
+                    } catch (pdfError) {
+                        // Unpaywall download failed - try Find Full Text
+                        Zotero.debug(`[Seer AI] Unpaywall PDF download failed, trying Find Full Text: ${pdfError}`);
+                        try {
+                            await (Zotero.Attachments as any).addAvailablePDF(newItem);
+                            Zotero.debug(`[Seer AI] Find Full Text initiated`);
+                        } catch (findError) {
+                            Zotero.debug(`[Seer AI] Find Full Text failed (non-fatal): ${findError}`);
+                        }
+                    }
+                } else {
+                    // No cached Unpaywall PDF - trigger Zotero's "Find Full Text"
+                    try {
+                        Zotero.debug(`[Seer AI] No PDF available, initiating Find Full Text...`);
+                        await (Zotero.Attachments as any).addAvailablePDF(newItem);
+                        Zotero.debug(`[Seer AI] Find Full Text initiated`);
+                    } catch (findError) {
+                        // Find Full Text failure is non-fatal
+                        Zotero.debug(`[Seer AI] Find Full Text failed (non-fatal): ${findError}`);
+                    }
                 }
             }
 

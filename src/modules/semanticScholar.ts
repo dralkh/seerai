@@ -494,5 +494,147 @@ export interface SemanticScholarAuthorDetails {
     papers?: { paperId: string; title: string; year?: number }[];
 }
 
-// Export singleton instance
+// ==================== Unpaywall Service ====================
+
+/**
+ * Unpaywall API response interface
+ */
+export interface UnpaywallResponse {
+    doi: string;
+    is_oa: boolean;
+    best_oa_location?: {
+        url?: string;
+        url_for_pdf?: string;
+        license?: string;
+        host_type?: string;
+    };
+    oa_locations?: Array<{
+        url?: string;
+        url_for_pdf?: string;
+        host_type?: string;
+    }>;
+}
+
+/**
+ * Unpaywall service for finding open access PDFs
+ * API: https://unpaywall.org/products/api
+ * Free, requires email for identification
+ */
+class UnpaywallService {
+    private readonly baseUrl = "https://api.unpaywall.org/v2";
+    private readonly email = "seerai-plugin@seerai.space"; // Identification for Unpaywall
+
+    // Cache to avoid repeated lookups
+    private cache = new Map<string, string | null>();
+    private pendingRequests = new Map<string, Promise<string | null>>();
+
+    /**
+     * Get PDF URL from Unpaywall using DOI
+     * Returns cached result if available
+     */
+    async getPdfUrl(doi: string): Promise<string | null> {
+        if (!doi) return null;
+
+        // Normalize DOI
+        const normalizedDoi = doi.toLowerCase().trim();
+
+        // Check cache
+        if (this.cache.has(normalizedDoi)) {
+            return this.cache.get(normalizedDoi) ?? null;
+        }
+
+        // Check if request is already pending (avoid duplicate requests)
+        if (this.pendingRequests.has(normalizedDoi)) {
+            return this.pendingRequests.get(normalizedDoi)!;
+        }
+
+        // Create the request promise
+        const requestPromise = this.fetchPdfUrl(normalizedDoi);
+        this.pendingRequests.set(normalizedDoi, requestPromise);
+
+        try {
+            const result = await requestPromise;
+            this.cache.set(normalizedDoi, result);
+            return result;
+        } finally {
+            this.pendingRequests.delete(normalizedDoi);
+        }
+    }
+
+    /**
+     * Actual fetch from Unpaywall API
+     */
+    private async fetchPdfUrl(doi: string): Promise<string | null> {
+        try {
+            const url = `${this.baseUrl}/${encodeURIComponent(doi)}?email=${this.email}`;
+            Zotero.debug(`[Seer AI] Checking Unpaywall for DOI: ${doi}`);
+
+            const response = await fetch(url);
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    // DOI not found - this is normal, cache as null
+                    return null;
+                }
+                Zotero.debug(`[Seer AI] Unpaywall error: ${response.status}`);
+                return null;
+            }
+
+            const data = await response.json() as unknown as UnpaywallResponse;
+
+            // Try to get the best PDF URL
+            const pdfUrl = data.best_oa_location?.url_for_pdf
+                || data.best_oa_location?.url
+                || data.oa_locations?.find(loc => loc.url_for_pdf)?.url_for_pdf
+                || data.oa_locations?.find(loc => loc.url)?.url;
+
+            if (pdfUrl) {
+                Zotero.debug(`[Seer AI] Unpaywall found PDF for ${doi}: ${pdfUrl}`);
+                return pdfUrl;
+            }
+
+            return null;
+        } catch (error) {
+            Zotero.debug(`[Seer AI] Unpaywall fetch error: ${error}`);
+            return null;
+        }
+    }
+
+    /**
+     * Batch check PDFs for multiple DOIs (parallel with rate consideration)
+     */
+    async checkMultipleDois(dois: string[]): Promise<Map<string, string | null>> {
+        const results = new Map<string, string | null>();
+
+        // Process in small batches to avoid overwhelming the API
+        const batchSize = 5;
+        for (let i = 0; i < dois.length; i += batchSize) {
+            const batch = dois.slice(i, i + batchSize);
+            const promises = batch.map(async (doi) => {
+                const pdfUrl = await this.getPdfUrl(doi);
+                results.set(doi, pdfUrl);
+            });
+            await Promise.all(promises);
+
+            // Small delay between batches
+            if (i + batchSize < dois.length) {
+                await new Promise(r => setTimeout(r, 100));
+            }
+        }
+
+        return results;
+    }
+
+    /**
+     * Clear the cache
+     */
+    clearCache(): void {
+        this.cache.clear();
+    }
+}
+
+// Export Unpaywall singleton
+export const unpaywallService = new UnpaywallService();
+
+// Export Semantic Scholar singleton instance
 export const semanticScholarService = new SemanticScholarService();
