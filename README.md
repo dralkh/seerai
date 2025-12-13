@@ -295,7 +295,6 @@ Moving beyond keyword matching to understanding the meaning of your queries.
 
 ### 6. Semantic Scholar Enhancements (WIP)
 - **Saved Search History** — Saved search history shown in drop down of Past searches button - when clicking one of the list it would return user to previous search operation with all data saved and persisted - with button clear saved search history.
-- **Direct Import** — One-click import of discovered papers directly into your Zotero library (Action button, compatible with zotero framework importing all variables of results. this action button would depend on default selection of collection/folder dropdown from search result to be saved there).
 
 
 
