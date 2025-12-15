@@ -235,20 +235,44 @@ function selectCurrentItem(onInsert?: (value: string, type: PlaceholderType, ite
     const valueToInsert = String(selectedResult.title);
     const itemId = selectedResult.id;
 
-    // Insert the value with bracket notation and itemId
-    input.value = insertPlaceholderValue(input.value, state.trigger, valueToInsert, itemId);
+    // Special handling for prompts: replace trigger with template text
+    if (selectedResult.type === 'prompt' && selectedResult.data?.template) {
+        const template = selectedResult.data.template as string;
 
-    // Calculate cursor position based on what was actually inserted
-    // Format: [trigger + displayValue::id] 
-    const maxDisplayLength = 30;
-    const displayLength = Math.min(valueToInsert.length, maxDisplayLength - 3) + (valueToInsert.length > maxDisplayLength ? 3 : 0);
-    const idLength = itemId ? String(itemId).length + 2 : 0; // +2 for ::
-    const newCursorPos = state.trigger.startPos + 1 + 1 + displayLength + idLength + 1 + 1; // [ + trigger + display + ::id + ] + space
-    input.setSelectionRange(newCursorPos, newCursorPos);
+        // Calculate where to insert
+        const before = input.value.substring(0, state.trigger.startPos);
+        const after = input.value.substring(state.trigger.endPos);
 
-    // Save topic if it's a topic type
-    if (selectedResult.type === 'topic') {
-        saveRecentTopic(valueToInsert);
+        input.value = before + template + after;
+
+        // Set cursor to end of inserted template
+        const newRunningPos = state.trigger.startPos + template.length;
+        input.setSelectionRange(newRunningPos, newRunningPos);
+
+        // Trigger input event to re-scan for placeholders within the template
+        const doc = input.ownerDocument;
+        if (doc) {
+            const inputEvent = doc.createEvent('Event');
+            inputEvent.initEvent('input', true, true);
+            input.dispatchEvent(inputEvent);
+        }
+    } else {
+        // Normal placeholder insertion
+        // Insert the value with bracket notation and itemId
+        input.value = insertPlaceholderValue(input.value, state.trigger, valueToInsert, itemId);
+
+        // Calculate cursor position based on what was actually inserted
+        // Format: [trigger + displayValue::id] 
+        const maxDisplayLength = 30;
+        const displayLength = Math.min(valueToInsert.length, maxDisplayLength - 3) + (valueToInsert.length > maxDisplayLength ? 3 : 0);
+        const idLength = itemId ? String(itemId).length + 2 : 0; // +2 for ::
+        const newCursorPos = state.trigger.startPos + 1 + 1 + displayLength + idLength + 1 + 1; // [ + trigger + display + ::id + ] + space
+        input.setSelectionRange(newCursorPos, newCursorPos);
+
+        // Save topic if it's a topic type
+        if (selectedResult.type === 'topic') {
+            saveRecentTopic(valueToInsert);
+        }
     }
 
     // Callback with full context info
@@ -534,6 +558,7 @@ export function createPlaceholderMenuButton(
         `;
 
         const placeholderTypes: [string, PlaceholderType][] = [
+            ['!', 'prompt'],
             ['#', 'topic'],
             ['/', 'paper'],
             ['@', 'author'],

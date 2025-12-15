@@ -5,7 +5,7 @@
 
 // ==================== Types ====================
 
-export type PlaceholderType = 'topic' | 'paper' | 'author' | 'collection' | 'tag' | 'year' | 'table';
+export type PlaceholderType = 'topic' | 'paper' | 'author' | 'collection' | 'tag' | 'year' | 'table' | 'prompt';
 export type PromptCategory = 'analysis' | 'comparative' | 'writing' | 'summary' | 'custom';
 
 export interface PlaceholderInfo {
@@ -36,6 +36,7 @@ export const PLACEHOLDER_TRIGGERS: Record<string, PlaceholderType> = {
     '^': 'collection',
     '~': 'tag',
     '$': 'table',
+    '!': 'prompt',
 };
 
 // Placeholder patterns for parsing

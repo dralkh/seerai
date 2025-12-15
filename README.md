@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/70e618aa-5c92-45fc-bec0-bf253de09ad4" 
-       alt="My diagram"
+       alt="seerai logo"
        width="300"
        height="300">
 </p>
@@ -14,62 +14,61 @@ https://github.com/user-attachments/assets/b0847022-d1ab-4e98-8e3a-607d1073db8f
 
 <img width="1949" height="1514" alt="image" src="https://github.com/user-attachments/assets/b384fd8a-9e11-4c56-979a-533ca99900c0" />
 
-
 [![Zotero 7 Compatible](https://img.shields.io/badge/Zotero-7.x-brightgreen)](https://www.zotero.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/badge/Version-3.0.0-blue)](https://github.com/dralkh/seerai/releases)
 
-**seerai** is an intelligent research assistant plugin for Zotero 7 that integrates AI-powered chat capabilities directly into your research workflow. Chat with your papers, get insights, and accelerate your review process.
+**seerai** is an intelligent research assistant plugin for Zotero 7 that integrates AI-powered chat, advanced search, and data extraction capabilities directly into your research workflow. Chat with your papers, extract structured data, and accelerate your literature review with a local-first, privacy-focused design.
 
 ---
+
 
 ## Features
 
 ### AI-Powered Chat Interface
-- **Contextual conversations** — Chat with AI about your selected papers with full context awareness (Currently only with notes)
-- **Multi-paper support** — Add multiple papers notes to a single conversation for comparative analysis
-- **Streaming responses** — Real-time, token-by-token response rendering
-- **Markdown support** — Responses are beautifully formatted with syntax highlighting for code blocks
-- **Vision support** — Paste images directly into chat for multimodal AI analysis
+- **Contextual Conversations**: Chat with AI about your selected papers with full context awareness.
+- **Smart Context Priority**: Automatically prioritizes content sources:
+  1. **Zotero Notes** (OCR note, and other notes for highest priority)
+  2. **Indexed PDF Text** (Fast, efficient, howver consumes alot of tokens, and would cause limit issues)
+  3. **OCR** (Fallback for scanned documents with no indexed text)
+- **Multi-paper Support**: Add multiple papers to a single conversation for comparative analysis.
+- **Streaming Responses**: Real-time, token-by-token response rendering.
+- **Markdown & Math**: Responses are formatted with syntax highlighting and LaTeX math support.
+- **Vision Support**: Paste images directly into chat for multimodal analysis.
+- **Enhanced Keybindings**: 
+  - `Enter`: Insert new line
+  - `Shift+Enter`: Send message
 
-### Smart Paper Selection
-- **Add by Tags** — Quickly add papers by selecting tags with collection filtering
-- **Add from Library** — Browse and select papers from any library or collection
-- **Add from Selection** — Add currently selected papers from Zotero's main view
-- **Include Notes** — Optionally include paper notes in the conversation context
-- **Include Abstracts** — Automatically include paper abstracts for richer context
-
-### Flexible AI Configuration
-- **Multiple AI Models** — Configure and switch between different AI providers (OpenAI, Anthropic, local models, etc.)
-- **Custom API Endpoints** — Use any OpenAI-compatible API endpoint
-- **Per-conversation model selection** — Choose the best model for each task
-
-### DataLab OCR Integration
-- **PDF Text Extraction** — Convert PDFs to searchable markdown notes using DataLab's OCR API
-- **Batch Processing** — Process multiple PDFs concurrently
-- **Automatic Note Creation** — Extracted text is saved as Zotero notes linked to your papers
+### Semantic Search & Discovery
+- **Deep Web Search**: Integrated Firecrawl support for finding full-text content.
+- **Semantic Scholar Agent**: Advanced paper search with filtering (Year, Venue, Citation Count).
+- **Smart Import**:
+  - **PDF Discovery**: Automatically finds and attaches PDFs during import.
+  - **Source Link**: Fallback to source links if PDFs are unavailable.
+  - **Status Indicators**: Clear feedback on import status (⬇️ Importing, ✅ Imported, ⚠️ Failed).
 
 ### Papers Tables
-- **Structured Extraction** — Extract specific data points from multiple papers into a comparative table
-- **AI-Powered Columns** — Define custom columns with AI prompts to extract exactly what you need (e.g., "Methodology", "Sample Size")
-- **One-Click Generation** — Generate data for individual cells or entire columns with a single click
-- **Column Presets** — Save and load your favorite column configurations for different research projects
-- **Auto-Processing** — Automatically processes PDFs with OCR if notes are missing
+- **Structured Extraction**: Extract specific data points from multiple papers into a comparative table.
+- **AI-Powered Columns**: Define custom columns with AI prompts (e.g., "Methodology", "Sample Size").
+- **Inline Editing**: innovative inline editor for column titles and prompts.
+- **One-Click Generation**: Generate data for individual cells or entire columns instantly.
+- **Side Strip Actions**: Unified controls for adding columns, generating triggers, and settings.
 
+### OCR & Text Extraction
+- **Flexible OCR Options**:
+  - **Mistral OCR**: High-quality cloud OCR (Recommended).
+  - **DataLab.to**: Reliable cloud-based extraction.
+  - **Local Marker**: Run your own local OCR server for free, private processing.
+- **Auto-Processing**: Automatically processes unindexed PDFs when needed.
 
-### Semantic Scholar Integration
-- **Advanced Search Agent** — Search for papers using keyword queries with advanced filtering (Year, Open Access, Venue, Citation Count).
-- **Smart suggestions** — Intelligent suggestions 
-- **Ai Search optimization** — Get AI-powered paper search optimization based on your current search parameters.
-
-
-
-
-### Conversation Management
-- **Persistent History** — Conversations are preserved across sessions
-- **Edit Messages** — Modify previous messages and regenerate responses
-- **Retry Responses** — Regenerate AI responses with a single click
-- **Copy to Clipboard** — Easily copy AI responses for use elsewhere
-- **Save as Note** — Export conversations as Zotero notes
+### Customizable AI
+- **Model Presets**: Pre-configured settings for popular providers:
+  - OpenAI (GPT-4o, o1)
+  - Anthropic (Claude Sonnet 3.5)
+  - Google (Gemini Pro)
+  - DeepSeek, Mistral, Groq, OpenRouter
+  - Local Models (Openai compatible endpoint, [Ollama](https://ollama.com), LM Studio)
+- **Per-Conversation Models**: Switch models dynamically based on the task complexity.
 
 ---
 
@@ -77,11 +76,11 @@ https://github.com/user-attachments/assets/b0847022-d1ab-4e98-8e3a-607d1073db8f
 
 ### From GitHub (Recommended)
 
-1. Download the latest release from [Releases](https://github.com/dralkh/seerai/releases)
-2. In Zotero, go to **Tools → Add-ons**
-3. Click the gear icon and select **Install Add-on From File...**
-4. Select the downloaded `.xpi` file
-5. Restart Zotero
+1. Download the latest release (`.xpi` file) from [Releases](https://github.com/dralkh/seerai/releases).
+2. In Zotero, go to **Tools → Add-ons**.
+3. Click the gear icon ⚙️ and select **Install Add-on From File...**.
+4. Select the downloaded `.xpi` file.
+5. Restart Zotero.
 
 ### From Source
 
@@ -96,200 +95,150 @@ npm install
 # Build the plugin
 npm run build
 
-# The .xpi file will be in the project root
+# The .xpi file will be generated in the root directory
 ```
 
 ---
 
 ## Configuration
 
-### Setting Up AI Models
+Go to **Zotero → Settings → seerai** to configure your AI providers and services.
 
-1. Go to **Zotero → Settings → seerai**
-2. Click **Add Configuration** to add your first AI model
-3. Enter:
-   - **Name**: A friendly name for this configuration
-   - **API URL**: The endpoint URL (e.g., `https://api.openai.com/v1/`)
-   - **API Key**: Your API key
-   - **Model**: The model identifier (e.g., `gpt-5`, `claude-4-sonnet`)
-4. Click **Set as Default** to make it your primary model
+### 1. AI Models
+Use the **Add Configuration** button to set up your AI models.
+- **Presets**: Select from built-in presets (OpenAI, Anthropic, Ollama, etc.) for quick setup.
+- **Custom**: Manually configure API URL, Key, and Model ID for any OpenAI-compatible provider.
+- **Default**: Set a preferred model as your default for new conversations.
 
-#### Supported Providers
+### 2. OCR Services
+Choose your preferred text extraction engine:
+- **Mistral OCR**: Requires [Mistral API Key](https://console.mistral.ai/). Best for accuracy.
+- **Cloud (DataLab.to)**: Requires DataLab API Key.
+- **Local Marker Server**: Requires running a local Python server.
+  - URL: `http://localhost:8001` (Default)
+  - See [Marker Project](https://github.com/VikParuchuri/marker) for setup.
 
-| Provider | API URL | Example Models |
-|----------|---------|----------------|
-| OpenAI | `https://api.openai.com/v1/` | `gpt-5`, `gpt-5-mini`, `o1` |
-| Anthropic (via proxy) | `https://api.anthropic.com/v1/` | `claude-4-sonnet`, `claude-4-opus` |
-| OpenRouter | `https://openrouter.ai/api/v1/` | Various models |
-| Local (Ollama) | `http://localhost:11434/v1/` | `qwen3`, `mistral`, etc. |
-
-### DataLab OCR Setup
-
-seerai supports three modes for PDF-to-markdown conversion:
-
-#### Option A: DataLab.to
-
-1. Get an API key from [datalab.to](https://datalab.to)
-2. Go to **Zotero → Settings → seerai**
-3. Select **Cloud (DataLab.to)** from the OCR Service dropdown
-4. Enter your DataLab API Key
-5. Optional settings:
-   - **Force OCR**: Enable for scanned PDFs
-   - **Use LLM**: Enable AI-enhanced extraction (uses more credits)
-
-#### Option B: Local Marker Server
-
-Run your own local OCR server for unlimited processing without API costs.
-
-**Prerequisites:**
-- Python installed
-- `uv` installed (fast Python package installer)
-
-**Installation & Running:**
-
-```bash
-# Create a virtual environment
-uv venv
-
-# Install Marker with full dependencies
-uv pip install marker-pdf[full]
-
-# Install API server dependencies
-uv pip install -U uvicorn fastapi python-multipart
-
-# Run the Marker API Server
-uv run marker_server --port 8001
-```
-
-The server will start at `http://localhost:8001`.
-
-**Configuring seerai for Local Marker:**
-
-1. Go to **Zotero → Settings → seerai**
-2. Select **Local Marker Server** from the OCR Service dropdown
-3. Set Server URL to `http://localhost:8001`
-4. Optional: Enable **Force OCR** for scanned PDFs
-
-#### Option C: Mistral OCR
-
-Use Mistral's AI-powered OCR for high-quality document extraction.
-
-1. Get an API key from [Mistral AI](https://console.mistral.ai/)
-2. Go to **Zotero → Settings → seerai**
-3. Select **Mistral OCR** from the OCR Service dropdown
-4. Enter your Mistral API Key
-
-Mistral OCR uses the `mistral-ocr-latest` model and automatically handles file upload/cleanup.
-
-### Semantic Scholar Setup
-
-1. Go to **Zotero → Settings → seerai**
-2. Enter your **Semantic Scholar API Key** (optional, but recommended for higher rate limits).
-   - Without an API key: Limited request rate.
-   - With an API key: Higher limits (up to 1 request/sec).
-3. Request a free API key from [Semantic Scholar](https://www.semanticscholar.org/product/api).
+### 3. Search Integrations
+- **Semantic Scholar**: Add your [API Key](https://www.semanticscholar.org/product/api) for higher rate limits and faster searches.
+- **Firecrawl**: Add [API Key](https://firecrawl.dev) to enable deep web search capabilities - local instance with ([GitHub](https://github.com/firecrawl/firecrawl)).
 
 ---
 
-## Usage
+## Usage Guide
 
-### Opening the Assistant
+### Chatting with Papers
+1. Select a paper (or multiple) in your library.
+2. Open the **SeerAI** sidebar tab.
+3. (Optional) Customize context inclusions via the settings icon (Abstracts, Notes).
+4. Type your question or use templates from the **Prompt Library** (Book icon).
 
-1. Select a paper in your Zotero library
-2. The **Smart Assistant** panel will appear in the item details sidebar
-3. Start chatting!
+### Creating Data Tables
+1. Open the **Tables** tab in the main view.
+2. Click `+` on the side strip to add a new column.
+3. Define the column header and AI prompt (e.g., "What is the sample size?").
+4. Drag and drop papers into the table.
+5. Click **Generate** on cells to extract data.
 
-### Adding Papers to Context
-
-- **Add by Tag**: Click the tag button to filter and select papers by tags
-- **Add Papers**: Browse and search your entire library
-- **Add from Selection**: Add whatever is currently selected in Zotero
-
-### Chat Settings
-
-Click the settings icon in the chat controls to access:
-- **Include Notes**: Add paper notes to AI context
-- **Include Abstracts**: Add paper abstracts to AI context
-
-### Using DataLab OCR
-
-1. Right-click on a PDF attachment in Zotero
-2. Select **Extract Text with DataLab OCR**
-3. The extracted text will be saved as a note and used by the AI chat
+### Prompt Library
+- Access via the **Book Icon** 📖 in chat.
+- Use built-in templates (Summarize, Critique, Compare).
+- Create custom templates with placeholders:
+  - `!`: Saved Prompts
+  - `/`: Papers 
+  - `^`: Folders
+  - `~`: Tags 
+  - `@`: Authors
+  - `#`: Topics
 
 ---
+
+
+## Future Implementations Ideas
+
+Propose several advanced features to enhance seerai's capabilities. These are currently in the just idea board.
+
+### 1. Advanced Search Capabilities
+Enhanced search functionality to help users find relevant literature more effectively.
+- **Autocomplete**: Intelligent suggestions for tags, creators, and collections as you type.
+- **Complex Queries**: Support for boolean logic (AND/OR) and nested search conditions (e.g., "Title contains X AND Year > 2020").
+- **Field-Specific Search**: Dedicated filters for titles, authors, years, and tags.
+
+### 2. Semantic Vector Search
+- **Voice, Transcription, Embedding Integration**: Support for OpenAI-compatible embedding, voice, transcription models (e.g., `text-embedding-3-small`, local Ollama embeddings).
+- **Contextual Retrieval**: Find papers based on conceptual similarity rather than just exact text matches.
+- **In-Memory Vector Store** — Fast, local indexing of session-relevant papers for semantic analysis.
+- **RAG** - used when 80% limit reached to context size
+
+### 3. Data Verification & Quality Control
+- **Verifier Button** — One-click verification to check all extracted data against source text.
+- **Confidence Scores** — AI-generated confidence ratings for each extracted data point.
+- **Source Highlighting** — Click a cell to see the exact passage in the paper where the data came from.
+
+### 4. Firecrawl API Integration
+- **URL Discovery** — Usage Firecrawl API for pdf discovery
+
+### Others
+Citations referencing within tables and chat on generation -
+MCP
+Connectors
+UI revamp
+
+---
+
 
 ## Development
 
 ### Prerequisites
-
 - Node.js 18+
-- npm 9+
 - Zotero 7
 
-### Development Workflow
-
-```bash
-# Start development server with hot reload
-npm start
-
-# Build for production
-npm run build
-
-# Run linting
-npm run lint:check
-
-# Fix linting issues
-npm run lint:fix
-```
-
 ### Project Structure
+The codebase follows a modular architecture:
 
 ```
 seerai/
-├── addon/                 # Zotero addon files
-│   ├── content/          # XUL/XHTML files
-│   ├── locale/           # Localization files
-│   └── manifest.json     # Addon manifest
+├── addon/                 # Zotero integration files (XUL/XHTML)
 ├── src/
-│   ├── modules/
-│   │   ├── assistant.ts  # Main chat interface
-│   │   ├── openai.ts     # OpenAI API service
-│   │   ├── datalab.ts    # DataLab OCR service
-│   │   └── chat/         # Chat state management
-│   └── hooks.ts          # Zotero event hooks
+│   ├── modules/           # Core feature modules
+│   │   ├── chat/          # Chat engine & state
+│   │   ├── assistant.ts   # Main assistant logic
+│   │   ├── firecrawl.ts   # Firecrawl integration
+│   │   ├── ocr.ts         # OCR implementation
+│   │   ├── openai.ts      # LLM client implementation
+│   │   ├── semanticScholar.ts # Semantic Scholar integration
+│   │   └── preferenceScript.ts # Preferences logic
+│   ├── utils/             # Utility functions
+│   └── hooks.ts           # Zotero event listeners
 └── package.json
 ```
 
+### Commands
+```bash
+npm start       # Start dev server with hot reload
+npm run build   # Build for production
+npm run lint:fix # Fix code style issues
+```
+
+---
+
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+Contributions are welcome!
+1. Fork the repo.
+2. Create a feature branch (`git checkout -b feature/MyFeature`).
+3. Commit changes (`git commit -m 'Add MyFeature'`).
+4. Push to branch (`git push origin feature/MyFeature`).
+5. Open a Pull Request.
 
 ---
 
 ## License
 
-This project is licensed under the MIT License - [LICENSE](LICENSE).
-
----
+MIT License - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
-
-- [Zotero](https://www.zotero.org) for the amazing reference manager
-- [Zotero Plugin Template](https://github.com/windingwind/zotero-plugin-template) for the plugin scaffolding
-- [DataLab](https://datalab.to) for OCR services
-- [Mistral](https://mistral.ai) for OCR services
-- [Semantic Scholar](https://www.semanticscholar.org/product/api) for Semantic Scholar API
-- [Firecrawl](https://firecrawl.io) for URL discovery
-
----
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/dralkh/seerai/issues)
+- [Zotero](https://www.zotero.org)
+- [Mistral AI](https://mistral.ai)
+- [Semantic Scholar](https://www.semanticscholar.org)
+- [Firecrawl](https://firecrawl.io)
+- [Marker](https://github.com/VikParuchuri/marker)

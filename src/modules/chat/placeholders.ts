@@ -3,7 +3,7 @@
  * Handles placeholder detection, autocomplete queries, and resolution
  */
 
-import { PLACEHOLDER_TRIGGERS, PlaceholderType, extractPlaceholders } from './promptLibrary';
+import { PLACEHOLDER_TRIGGERS, PlaceholderType, extractPlaceholders, searchPrompts } from './promptLibrary';
 
 // Re-export PlaceholderType for convenience
 export { PlaceholderType } from './promptLibrary';
@@ -51,6 +51,7 @@ export const PLACEHOLDER_INFO: Record<PlaceholderType, { icon: string; label: st
     tag: { icon: '🏷️', label: 'Tag', color: '#e91e63' },
     year: { icon: '📅', label: 'Year', color: '#607d8b' },
     table: { icon: '📊', label: 'Table', color: '#009688' },
+    prompt: { icon: '⚡', label: 'Prompt', color: '#ffc107' },
 };
 
 // ==================== Trigger Detection ====================
@@ -602,9 +603,43 @@ export async function getAutocompleteResults(
             return queryYears(query, limit);
         case 'table':
             return queryTables(query, limit);
+        case 'prompt':
+            return queryPrompts(query, limit);
         default:
             return [];
     }
+}
+
+/**
+ * Query prompts from prompt library
+ */
+export async function queryPrompts(query: string, limit: number = 20): Promise<AutocompleteResult[]> {
+    const results: AutocompleteResult[] = [];
+
+    try {
+        const prompts = await searchPrompts(query);
+
+        for (const prompt of prompts) {
+            results.push({
+                id: prompt.id,
+                title: prompt.name,
+                subtitle: prompt.description || 'Prompt Template',
+                icon: '⚡',
+                type: 'prompt',
+                data: {
+                    template: prompt.template,
+                    category: prompt.category,
+                    tags: prompt.tags
+                }
+            });
+
+            if (results.length >= limit) break;
+        }
+    } catch (error) {
+        console.error('Error querying prompts:', error);
+    }
+
+    return results;
 }
 
 /**
