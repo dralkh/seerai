@@ -33,6 +33,14 @@ import {
 } from "./semanticScholar";
 import { firecrawlService, PdfDiscoveryResult } from "./firecrawl";
 import { getTheme } from "../utils/theme";
+// Prompt Library & Placeholder System imports
+import { PromptTemplate, loadPrompts } from "./chat/promptLibrary";
+import { showPromptPicker } from "./chat/ui/promptPicker";
+import { initPlaceholderAutocomplete, createPlaceholderMenuButton, hideDropdown } from "./chat/ui/placeholderDropdown";
+import { ChatContextManager } from "./chat/context/contextManager";
+import { createContextChipsArea } from "./chat/context/contextUI";
+import { ContextItem, ContextItemType } from "./chat/context/contextTypes";
+
 
 // Debounce timer for autocomplete
 let autocompleteTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -680,16 +688,11 @@ export class Assistant {
     /**
      * Re-render just the selection area (for efficient updates)
      */
+    /**
+     * Re-render just the selection area (Legacy - No-op)
+     */
     private static reRenderSelectionArea() {
-        if (!currentContainer || !currentItem) return;
-
-        const selectionArea = currentContainer.querySelector('#selection-area');
-        if (selectionArea) {
-            const doc = currentContainer.ownerDocument!;
-            const stateManager = getChatStateManager();
-            const newSelectionArea = this.createSelectionArea(doc, stateManager);
-            selectionArea.replaceWith(newSelectionArea);
-        }
+        // No-op: UI is handled by ChatContextManager
     }
 
     /**
@@ -802,22 +805,45 @@ export class Assistant {
     /**
      * Add an item and its notes to the selection
      */
+    /**
+     * Add an item to the unified context manager
+     */
     private static async addItemWithNotes(item: Zotero.Item) {
+        const contextManager = ChatContextManager.getInstance();
         const stateManager = getChatStateManager();
 
-        // Add the item itself
-        const selection = this.itemToSelection(item);
-        stateManager.addSelection('items', selection);
+        // Map Zotero Item to ContextItem
+        const contextItem: ContextItem = {
+            id: item.id,
+            type: 'paper',
+            displayName: item.getField('title'),
+            fullName: item.getField('title'),
+            trigger: '/',
+            source: 'selection',
+            metadata: {
+                itemKey: item.key,
+                libraryID: item.libraryID
+            }
+        };
 
-        // Auto-fetch and add all notes from this item
-        const notes = await this.getItemNotesAsSelections(item);
-        for (const note of notes) {
-            stateManager.addSelection('notes', note);
+        const mode = stateManager.getOptions().selectionMode;
+
+        if (mode === 'explore') {
+            // Additive - Treat as command so it persists
+            contextManager.addItem(
+                contextItem.id,
+                contextItem.type,
+                contextItem.displayName,
+                'command',
+                contextItem.metadata
+            );
+        } else {
+            // Default/Focus: Replace
+            contextManager.syncFromSelection([item]);
         }
-
-        // Re-render selection area
-        this.reRenderSelectionArea();
     }
+
+
 
     /**
      * Remove an item and its associated notes
@@ -10973,168 +10999,13 @@ ${tableRows}  </tbody>
      * Create the selection chips area
      */
     private static createSelectionArea(doc: Document, stateManager: ReturnType<typeof getChatStateManager>): HTMLElement {
-        const selectionArea = ztoolkit.UI.createElement(doc, "div", {
-            properties: { id: "selection-area" },
-            styles: {
-                display: "flex",
-                flexWrap: "wrap",
-                gap: "6px",
-                padding: "8px",
-                backgroundColor: "var(--background-secondary)",
-                borderRadius: "6px",
-                minHeight: "40px",
-                alignItems: "center"
-            }
+        // Return hidden element to maintain layout compatibility if needed, but empty
+        return ztoolkit.UI.createElement(doc, "div", {
+            styles: { display: "none" },
+            properties: { id: "selection-area" }
         });
-
-        const states = stateManager.getStates();
-
-        // Label
-        if (states.items.length > 0 || states.notes.length > 0) {
-            const label = ztoolkit.UI.createElement(doc, "span", {
-                properties: { innerText: "Context:" },
-                styles: { fontSize: "11px", color: "var(--text-secondary)", marginRight: "4px", fontWeight: "600" }
-            });
-            selectionArea.appendChild(label);
-        }
-
-        // Render item chips
-        states.items.forEach(item => {
-            const chip = this.createChip(doc, item.title, selectionConfigs.items, () => {
-                this.removeItemWithNotes(item.id);
-            });
-            selectionArea.appendChild(chip);
-        });
-
-        // Render note chips (show count instead of individual notes if many)
-        if (states.notes.length > 3) {
-            const notesSummary = ztoolkit.UI.createElement(doc, "div", {
-                properties: {
-                    innerText: `📝 ${states.notes.length} notes included`,
-                    className: "chip chip-notes-summary"
-                },
-                styles: {
-                    display: "inline-flex",
-                    alignItems: "center",
-                    padding: "3px 8px",
-                    borderRadius: "12px",
-                    fontSize: "11px"
-                }
-            });
-            selectionArea.appendChild(notesSummary);
-        } else {
-            states.notes.forEach(note => {
-                const chip = this.createChip(doc, note.title, selectionConfigs.notes, () => {
-                    stateManager.removeSelection('notes', note.id);
-                    this.reRenderSelectionArea();
-                });
-                selectionArea.appendChild(chip);
-            });
-        }
-
-        // Add Papers button - opens searchable paper picker
-        const addBtn = ztoolkit.UI.createElement(doc, "button", {
-            properties: { innerText: "📄 Add Papers", className: "context-action-btn" },
-            styles: {
-                border: "1px solid var(--button-dashed-border-blue)",
-                backgroundColor: "transparent",
-                color: "var(--button-dashed-text-blue)"
-            },
-            listeners: [{
-                type: "click",
-                listener: () => {
-                    Zotero.debug("[seerai] Add Papers button clicked");
-                    this.showPaperPicker(doc, stateManager);
-                }
-            }]
-        });
-        selectionArea.appendChild(addBtn);
-
-        // Add by Tag button
-        const addByTagBtn = ztoolkit.UI.createElement(doc, "button", {
-            properties: { innerText: "🏷️ Add by Tag", className: "context-action-btn" },
-            styles: {
-                border: "1px solid var(--button-dashed-border-orange)",
-                backgroundColor: "transparent",
-                color: "var(--button-dashed-text-orange)"
-            },
-            listeners: [{
-                type: "click",
-                listener: () => {
-                    Zotero.debug("[seerai] Add by Tag button clicked");
-                    this.showTagPicker(doc, stateManager);
-                }
-            }]
-        });
-        selectionArea.appendChild(addByTagBtn);
-
-        // Add Table button
-        const addTableBtn = ztoolkit.UI.createElement(doc, "button", {
-            properties: { innerText: "📊 Add Table", className: "context-action-btn" },
-            styles: {
-                border: "1px solid var(--highlight-primary)",
-                backgroundColor: "transparent",
-                color: "var(--highlight-primary)"
-            },
-            listeners: [{
-                type: "click",
-                listener: () => {
-                    Zotero.debug("[seerai] Add Table button clicked");
-                    this.showChatTablePicker(doc, stateManager);
-                }
-            }]
-        });
-        selectionArea.appendChild(addTableBtn);
-
-        // Render tag chips (if any selected)
-        if (states.tags.length > 0) {
-            states.tags.forEach(tag => {
-                const chip = this.createChip(doc, tag.title, selectionConfigs.tags, () => {
-                    stateManager.removeSelection('tags', tag.id);
-                    this.reRenderSelectionArea();
-                });
-                selectionArea.appendChild(chip);
-            });
-        }
-
-        // Render table chips (if any selected)
-        if (states.tables.length > 0) {
-            states.tables.forEach(table => {
-                const chipLabel = `${table.title} (${table.rowCount} rows)`;
-                const chip = this.createChip(doc, chipLabel, selectionConfigs.tables, () => {
-                    stateManager.removeSelection('tables', table.id);
-                    this.reRenderSelectionArea();
-                });
-                selectionArea.appendChild(chip);
-            });
-        }
-
-        // Clear all button (allow clearing even single items)
-        if (stateManager.hasSelections()) {
-            const clearAllBtn = ztoolkit.UI.createElement(doc, "button", {
-                properties: { innerText: "✕ Clear All", className: "context-action-btn" },
-                styles: {
-                    border: "none",
-                    backgroundColor: "var(--button-clear-background)",
-                    color: "var(--button-clear-text)"
-                },
-                listeners: [{
-                    type: "click",
-                    listener: async () => {
-                        stateManager.clearAll();
-                        // Re-add current item based on selection mode (not in lock mode)
-                        const mode = stateManager.getOptions().selectionMode;
-                        if (mode !== 'lock' && currentItem) {
-                            await this.addItemWithNotes(currentItem);
-                        }
-                    }
-                }]
-            });
-            selectionArea.appendChild(clearAllBtn);
-        }
-
-        return selectionArea;
     }
+
 
     /**
      * Show tag picker as a beautiful inline dropdown panel for Chat
@@ -12577,6 +12448,10 @@ ${tableRows}  </tbody>
             }
         });
 
+        // Unified Context Chips Area
+        const contextChipsArea = createContextChipsArea(doc);
+        const contextManager = ChatContextManager.getInstance();
+
         // Image preview area (hidden by default)
         const imagePreviewArea = ztoolkit.UI.createElement(doc, "div", {
             properties: { id: "image-preview-area" },
@@ -12746,9 +12621,86 @@ ${tableRows}  </tbody>
             }]
         });
 
+        // Prompt Library button
+        const promptsBtn = ztoolkit.UI.createElement(doc, "button", {
+            properties: { innerText: "📚", title: "Prompt Library" },
+            styles: {
+                width: "32px",
+                height: "32px",
+                border: "1px solid var(--border-primary)",
+                borderRadius: "6px",
+                backgroundColor: "var(--background-primary)",
+                color: "var(--text-secondary)",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "14px",
+                transition: "all 0.15s ease"
+            },
+            listeners: [{
+                type: "click",
+                listener: () => {
+                    showPromptPicker(doc, promptsBtn as HTMLElement, {
+                        onSelect: (template) => {
+                            // Insert template text into input
+                            const currentVal = input.value;
+                            if (currentVal) {
+                                input.value = currentVal + ' ' + template.template;
+                            } else {
+                                input.value = template.template;
+                            }
+                            input.focus();
+                            // Trigger input event for autocomplete (Zotero-compatible)
+                            const inputEvent = doc.createEvent('Event');
+                            inputEvent.initEvent('input', true, true);
+                            input.dispatchEvent(inputEvent);
+                        }
+                    });
+                }
+            }, {
+                type: "mouseenter",
+                listener: () => {
+                    (promptsBtn as HTMLElement).style.backgroundColor = "var(--background-secondary)";
+                    (promptsBtn as HTMLElement).style.borderColor = "var(--border-secondary)";
+                }
+            }, {
+                type: "mouseleave",
+                listener: () => {
+                    (promptsBtn as HTMLElement).style.backgroundColor = "var(--background-primary)";
+                    (promptsBtn as HTMLElement).style.borderColor = "var(--border-primary)";
+                }
+            }]
+        });
+
+        // Placeholder menu button (for manually inserting placeholders)
+        const placeholderBtn = createPlaceholderMenuButton(doc, input);
+
+        // Initialize placeholder autocomplete on input with chip insertion
+        initPlaceholderAutocomplete(doc, input, (value, itemType, itemId, trigger) => {
+            // Add to centralized context manager
+            const type = itemType as ContextItemType;
+            contextManager.addItem(
+                itemId || value,
+                type,
+                value,
+                'command',
+                { itemKey: String(itemId) } // Store metadata if available
+            );
+
+            // Clear the trigger text from input
+            const currentValue = input.value;
+            // Find and remove the trigger pattern from input
+            const cleanedValue = currentValue.replace(/\[[^\]]+\]\s*$/, '').trim();
+            input.value = cleanedValue;
+        });
+
+        inputArea.appendChild(promptsBtn);
+        inputArea.appendChild(placeholderBtn);
         inputArea.appendChild(input);
         inputArea.appendChild(sendBtn);
 
+        inputContainer.appendChild(contextChipsArea);
         inputContainer.appendChild(imagePreviewArea);
         inputContainer.appendChild(inputArea);
         return inputContainer;
@@ -13053,56 +13005,82 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
         const contentDiv = streamingDiv.querySelector('[data-content]') as HTMLElement;
 
         try {
-            // Build context from selected items, notes, and tables
-            const states = stateManager.getStates();
-            let context = "=== Selected Papers ===\n";
+            // Build context from ChatContextManager
+            const contextManager = ChatContextManager.getInstance();
+            const options = stateManager.getOptions();
 
-            for (const item of states.items) {
-                context += `\n--- ${item.title} ---`;
-                if (item.year) context += ` (${item.year})`;
-                if (item.creators && item.creators.length > 0) {
-                    context += `\nAuthors: ${item.creators.join(', ')}`;
-                }
-                if (item.abstract) {
-                    context += `\nAbstract: ${item.abstract}`;
-                }
+            // Fetch Table Configs if needed (for table items)
+            const contextItems = contextManager.getItems();
 
-                // Fetch PDF/note content for this item
+            // Check for tables
+            let storedTables: any[] = [];
+            const hasTable = contextItems.some(i => i.type === 'table');
+            if (hasTable) {
                 try {
-                    const zoteroItem = Zotero.Items.get(item.id);
-                    if (zoteroItem && zoteroItem.isRegularItem()) {
-                        const itemContent = await getPdfTextForItem(zoteroItem, 0, true, true);
-                        if (itemContent) {
-                            context += `\n\nContent:\n${itemContent}`;
+                    storedTables = await getTableStore().getAllTables();
+                } catch (e) { Zotero.debug(`[seerai] Error fetching tables for context: ${e}`); }
+            }
+
+            let context = "=== Context ===\n";
+            if (contextItems.length === 0) {
+                context += "(No specific context provided. Answer based on general knowledge and web search if enabled.)";
+            }
+
+            for (const item of contextItems) {
+                if (item.type === 'paper') {
+                    const zoteroItem = Zotero.Items.get(item.id as number);
+                    if (!zoteroItem) continue;
+
+                    context += `\n\n--- Paper: ${item.displayName} ---`;
+
+                    const year = zoteroItem.getField('date');
+                    if (year) context += ` (${year})`;
+
+                    const creators = zoteroItem.getCreators().map((c: any) => `${c.firstName} ${c.lastName}`);
+                    if (creators.length > 0) context += `\nAuthors: ${creators.join(', ')}`;
+
+                    const abstract = zoteroItem.getField('abstractNote');
+                    if (abstract) context += `\nAbstract: ${abstract}`;
+
+                    // Fetch PDF/note content for this item
+                    try {
+                        if (zoteroItem.isRegularItem()) {
+                            // Fetch text (priority logic inside getPdfTextForItem: Notes -> Indexed PDF -> Metadata)
+                            // We pass includeNotes=true, includeMetadata=true.
+                            const itemContent = await getPdfTextForItem(zoteroItem, 0, true, true);
+                            if (itemContent) {
+                                context += `\n\nContent:\n${itemContent}`;
+                            }
+                        }
+                    } catch (e) {
+                        Zotero.debug(`[seerai] Error fetching content for item ${item.id}: ${e}`);
+                    }
+                }
+                else if (item.type === 'table') {
+                    const tableConfig = storedTables.find(t => t.id === item.id);
+                    if (tableConfig) {
+                        context += `\n\n--- Table Context: ${tableConfig.name} ---`;
+                        context += `\nColumns: ${tableConfig.columns.map((c: any) => c.title).join(', ')}`;
+                        context += `\nContains ${tableConfig.addedPaperIds.length} papers.`;
+                        // List some papers to give context
+                        const previewLimit = 20;
+                        const previewIds = tableConfig.addedPaperIds.slice(0, previewLimit);
+                        const titles = previewIds.map((id: number) => Zotero.Items.get(id)?.getField('title')).filter(Boolean);
+                        if (titles.length > 0) {
+                            context += `\nPapers:\n- ${titles.join('\n- ')}`;
+                        }
+                        if (tableConfig.addedPaperIds.length > previewLimit) {
+                            context += `\n...and ${tableConfig.addedPaperIds.length - previewLimit} more.`;
                         }
                     }
-                } catch (e) {
-                    Zotero.debug(`[seerai] Error fetching content for item ${item.id}: ${e}`);
+                }
+                else if (item.type === 'tag') {
+                    context += `\n\nContext Instruction: Focus on papers tagged with "${item.displayName}".`;
                 }
             }
 
-
-            if (states.notes.length > 0) {
-                context += "\n\n=== Notes ===";
-                for (const note of states.notes) {
-                    context += `\n\n--- ${note.title} ---\n${note.content}`;
-                }
-            }
-
-            // Include table context
-            if (states.tables.length > 0) {
-                context += "\n\n=== Table Data ===";
-                for (const table of states.tables) {
-                    context += `\n\n--- Table: ${table.title} (${table.rowCount} rows) ---`;
-                    context += `\nColumns: ${table.columnNames.join(', ')}`;
-                    context += `\n${table.content}`;
-                }
-            }
-
-            // Check if we should include web search context
-            const options = stateManager.getOptions();
+            // Web Search Context
             let webContext = "";
-
             if (options.webSearchEnabled && firecrawlService.isConfigured()) {
                 try {
                     Zotero.debug(`[seerai] Fetching web search context for: ${text}`);
@@ -13138,32 +13116,62 @@ ${context}${webContext}
 
 Be concise, accurate, and helpful. When referencing papers, cite them by title or author. When referencing table data, cite the table name and relevant columns.${webContext ? ' When using web search results, cite the source URL.' : ''}`;
 
-            // Build vision-compatible messages with pasted images
-            const userMessageContent: VisionMessageContentPart[] = [
-                { type: "text", text: text || "Please analyze these images." }
-            ];
+            // Check if we should include images (vision mode)
+            let messages: (OpenAIMessage | VisionMessage)[];
 
-            // Add pasted images
-            for (const img of pastedImages) {
-                userMessageContent.push({
-                    type: "image_url",
-                    image_url: {
-                        url: img.image,  // Already a data URL
-                        detail: "auto"
+            if (options.includeImages) {
+                // Get Zotero items for image extraction (Only from selected PAPER items)
+                const zoteroItems: Zotero.Item[] = [];
+                for (const item of contextItems) {
+                    if (item.type === 'paper') {
+                        const zItem = Zotero.Items.get(item.id as number);
+                        if (zItem) zoteroItems.push(zItem);
                     }
-                });
+                }
+
+                // Get image content parts
+                const imageParts = await createImageContentParts(zoteroItems, 5);
+
+                if (imageParts.length > 0) {
+                    Zotero.debug(`[seerai] Including ${imageParts.length} images in request`);
+
+                    // Build user message with images
+                    const userMessageContent: VisionMessageContentPart[] = [
+                        { type: "text", text: text },
+                        ...imageParts
+                    ];
+
+                    messages = [
+                        { role: "system", content: systemPrompt },
+                        ...conversationMessages.filter(m => m.role !== 'system' && m.role !== 'error').map(m => ({
+                            role: m.role as "user" | "assistant",
+                            content: m.content
+                        })),
+                        { role: "user", content: userMessageContent }
+                    ];
+
+                    // Remove the last user message we added (text only) since we're replacing it with vision content
+                    messages = messages.slice(0, -2).concat(messages.slice(-1));
+                } else {
+                    // No images found, use standard messages
+                    messages = [
+                        { role: "system", content: systemPrompt },
+                        ...conversationMessages.filter(m => m.role !== 'system' && m.role !== 'error').map(m => ({
+                            role: m.role as "user" | "assistant",
+                            content: m.content
+                        }))
+                    ];
+                }
+            } else {
+                // Standard text-only messages
+                messages = [
+                    { role: "system", content: systemPrompt },
+                    ...conversationMessages.filter(m => m.role !== 'system' && m.role !== 'error').map(m => ({
+                        role: m.role as "user" | "assistant",
+                        content: m.content
+                    }))
+                ];
             }
-
-            Zotero.debug(`[seerai] Sending message with ${pastedImages.length} pasted images`);
-
-            const messages: (OpenAIMessage | VisionMessage)[] = [
-                { role: "system", content: systemPrompt },
-                ...conversationMessages.slice(0, -1).filter(m => m.role !== 'system' && m.role !== 'error').map(m => ({
-                    role: m.role as "user" | "assistant",
-                    content: m.content
-                })),
-                { role: "user", content: userMessageContent }
-            ];
 
             let fullResponse = "";
 
@@ -13193,10 +13201,17 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
                     };
                     conversationMessages.push(assistantMsg);
 
+                    // Persist assistant message
                     try {
                         await getMessageStore().appendMessage(assistantMsg);
                     } catch (e) {
                         Zotero.debug(`[seerai] Error saving assistant message: ${e}`);
+                    }
+
+                    // Final render with markdown
+                    if (contentDiv) {
+                        contentDiv.setAttribute("data-raw", content);
+                        contentDiv.innerHTML = parseMarkdown(content);
                     }
 
                     // Clear pasted images after successful send

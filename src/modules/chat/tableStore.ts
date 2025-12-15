@@ -130,6 +130,14 @@ export class TableStore {
     }
 
     /**
+     * Get all tables from history
+     */
+    async getAllTables(): Promise<TableConfig[]> {
+        const history = await this.loadHistory();
+        return history.entries.map(e => e.config);
+    }
+
+    /**
      * Save table configuration history (for delete operations)
      */
     async saveHistory(history: TableHistory): Promise<void> {

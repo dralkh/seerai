@@ -733,3 +733,98 @@ html.dark .chip-tables {
   transition: background-color 0.2s ease;
   gap: 4px;
 }
+
+/* ==================== Prompt Library Styles ==================== */
+
+.prompt-picker-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 10000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 100px;
+}
+
+.prompt-picker-container {
+  background: var(--background-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  max-width: 400px;
+  max-height: 500px;
+  overflow: hidden;
+}
+
+.prompt-card {
+  padding: 10px 12px;
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: var(--background-primary);
+}
+
+.prompt-card:hover {
+  border-color: var(--border-secondary);
+  background: var(--background-secondary);
+}
+
+.prompt-card.selected {
+  border-color: var(--highlight-primary);
+  background: var(--paper-checked-background);
+}
+
+/* ==================== Placeholder Dropdown Styles ==================== */
+
+#placeholder-dropdown {
+  background: var(--background-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.placeholder-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.placeholder-item:hover {
+  background: var(--paper-checked-background);
+}
+
+.placeholder-item.selected {
+  background: var(--paper-checked-background);
+}
+
+/* Dark mode overrides for prompt library */
+@media (prefers-color-scheme: dark) {
+  .prompt-picker-overlay {
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  .prompt-card:hover {
+    background: var(--background-tertiary);
+  }
+}
+
+body.dark .prompt-picker-overlay,
+:root[data-theme='dark'] .prompt-picker-overlay,
+html.dark .prompt-picker-overlay {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+body.dark .prompt-card:hover,
+:root[data-theme='dark'] .prompt-card:hover,
+html.dark .prompt-card:hover {
+  background: var(--background-tertiary);
+}

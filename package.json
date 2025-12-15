@@ -1,7 +1,7 @@
 {
   "name": "seerai",
   "type": "module",
-  "version": "1.1.2",
+  "version": "1.2.5",
   "description": "seerai - Intelligent Research Assistant for Zotero",
   "config": {
     "addonName": "seerai",
