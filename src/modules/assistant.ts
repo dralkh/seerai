@@ -1063,7 +1063,9 @@ export class Assistant {
                 display: "flex",
                 flexDirection: "column",
                 gap: "10px",
-                minHeight: "150px"
+                minHeight: "450px",
+                maxHeight: "600px",
+                overflow: "auto"
             },
             properties: { id: "assistant-messages-area" }
         }) as HTMLElement;
@@ -12260,23 +12262,32 @@ ${tableRows}  </tbody>
             }
         });
 
-        const input = ztoolkit.UI.createElement(doc, "input", {
+        const input = ztoolkit.UI.createElement(doc, "textarea", {
             attributes: {
-                type: "text",
-                placeholder: "Ask about selected items... (paste images with Cmd+V)"
+                placeholder: "Ask about selected items... (paste images with Cmd+V)",
+                rows: "1"
             },
             styles: {
                 flex: "1",
-                padding: "8px 12px",
+                padding: "6px 10px",
                 border: "1px solid var(--border-primary)",
                 borderRadius: "6px",
-                fontSize: "13px"
+                fontSize: "13px",
+                resize: "vertical",
+                height: "32px",
+                minHeight: "32px",
+                maxHeight: "150px", // Reduced max height to prevent it from taking too much space
+                fontFamily: "inherit",
+                lineHeight: "1.4",
+                boxSizing: "border-box",
+                overflow: "auto" // Changed from hidden to auto to allow scrolling immediately if needed
             },
             listeners: [
                 {
                     type: "keypress",
                     listener: (e: KeyboardEvent) => {
-                        if (e.key === "Enter" && !this.isStreaming) {
+                        if (e.key === "Enter" && !e.shiftKey && !this.isStreaming) {
+                            e.preventDefault(); // Prevent newline
                             this.handleSendWithStreamingAndImages(
                                 input as unknown as HTMLInputElement,
                                 messagesArea,
@@ -12285,6 +12296,18 @@ ${tableRows}  </tbody>
                                 () => { pastedImages.length = 0; updateImagePreview(); }
                             );
                         }
+                    }
+                },
+                {
+                    type: "input",
+                    listener: () => {
+                        // Auto-expand
+                        const el = input as unknown as HTMLTextAreaElement;
+                        el.style.height = 'auto';
+                        const newHeight = Math.max(32, el.scrollHeight);
+                        el.style.height = newHeight + 'px';
+                        // Show scrollbar if content exceeds single line
+                        el.style.overflow = newHeight > 32 ? 'auto' : 'hidden';
                     }
                 },
                 {
@@ -12321,14 +12344,18 @@ ${tableRows}  </tbody>
         const sendBtn = ztoolkit.UI.createElement(doc, "button", {
             properties: { innerText: "➤ Send" },
             styles: {
-                padding: "8px 16px",
+                padding: "0 16px",
+                height: "32px",
                 backgroundColor: "var(--accent-color, #007AFF)",
                 color: "#fff",
                 border: "none",
                 borderRadius: "6px",
                 cursor: "pointer",
                 fontWeight: "600",
-                fontSize: "13px"
+                fontSize: "13px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center"
             },
             listeners: [{
                 type: "click",
@@ -12350,14 +12377,17 @@ ${tableRows}  </tbody>
         const stopBtn = ztoolkit.UI.createElement(doc, "button", {
             properties: { innerText: "⏹", id: "stop-btn", title: "Stop Generation" },
             styles: {
-                padding: "8px 12px",
+                padding: "0 12px",
+                height: "32px",
                 fontSize: "13px",
                 border: "1px solid var(--button-stop-border, #d32f2f)",
                 borderRadius: "6px",
                 backgroundColor: "var(--button-stop-background, #ffebee)",
                 color: "var(--button-stop-text, #c62828)",
                 cursor: "pointer",
-                display: "none"
+                display: "none",
+                alignItems: "center",
+                justifyContent: "center"
             },
             listeners: [{
                 type: "click",
@@ -12373,13 +12403,17 @@ ${tableRows}  </tbody>
         const clearBtn = ztoolkit.UI.createElement(doc, "button", {
             properties: { innerText: "🗑", title: "Clear Chat" },
             styles: {
-                padding: "8px 12px",
+                padding: "0 12px",
+                height: "32px",
                 fontSize: "13px",
                 border: "1px solid var(--border-primary)",
                 borderRadius: "6px",
                 backgroundColor: "var(--background-secondary)",
                 color: "var(--text-secondary)",
-                cursor: "pointer"
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center"
             },
             listeners: [{
                 type: "click",
@@ -12398,13 +12432,17 @@ ${tableRows}  </tbody>
         const saveBtn = ztoolkit.UI.createElement(doc, "button", {
             properties: { innerText: "💾", title: "Save Chat" },
             styles: {
-                padding: "8px 12px",
+                padding: "0 12px",
+                height: "32px",
                 fontSize: "13px",
                 border: "1px solid var(--border-primary)",
                 borderRadius: "6px",
                 backgroundColor: "var(--background-secondary)",
                 color: "var(--text-secondary)",
-                cursor: "pointer"
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center"
             },
             listeners: [{
                 type: "click",
@@ -12854,9 +12892,23 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
         const stopBtn = messagesArea.ownerDocument?.getElementById("stop-btn") as HTMLElement;
         if (stopBtn) stopBtn.style.display = "inline-block";
 
-        // Create streaming message placeholder
+        // Create streaming message placeholder with loading indicator
+        const loadingHtml = `
+            <div class="typing-indicator" style="display: flex; align-items: center; gap: 4px; color: var(--text-secondary); font-style: italic;">
+                <span>Thinking</span>
+                <span class="dot" style="animation: blink 1.4s infinite .2s;">.</span>
+                <span class="dot" style="animation: blink 1.4s infinite .4s;">.</span>
+                <span class="dot" style="animation: blink 1.4s infinite .6s;">.</span>
+            </div>
+            <style>
+                @keyframes blink { 0% { opacity: .2; } 20% { opacity: 1; } 100% { opacity: .2; } }
+            </style>
+        `;
         const streamingDiv = this.appendMessage(messagesArea, "Assistant", "");
         const contentDiv = streamingDiv.querySelector('[data-content]') as HTMLElement;
+        contentDiv.innerHTML = loadingHtml;
+
+        let isFirstToken = true;
 
         try {
             // Build context from ChatContextManager
@@ -13041,6 +13093,10 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
                 onToken: (token) => {
                     fullResponse += token;
                     if (contentDiv) {
+                        if (isFirstToken) {
+                            contentDiv.innerHTML = ""; // Clear loading indicator
+                            isFirstToken = false;
+                        }
                         contentDiv.setAttribute("data-raw", fullResponse);
                         contentDiv.innerHTML = parseMarkdown(fullResponse);
                         messagesArea.scrollTop = messagesArea.scrollHeight;
@@ -13118,14 +13174,16 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
             },
             attributes: { "data-msg-id": msgId || "" },
             styles: {
-                padding: "10px 14px",
+                padding: "12px 16px",
                 borderRadius: isUser ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
                 fontSize: "13px",
                 maxWidth: "90%",
+                minHeight: "auto",
                 alignSelf: isUser ? "flex-end" : "flex-start",
+                flexShrink: "0", // Prevent bubble from shrinking in flex container
                 boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
                 position: "relative",
-                backgroundColor: isUser ? "#1976d2" : "#f5f5f5",
+                backgroundColor: isUser ? "#1976d2" : "#f5f5f5", // Light gray background for assistant bubble
                 color: isUser ? "#ffffff" : "#212121",
                 border: isUser ? "none" : "1px solid #e0e0e0"
             }
@@ -13182,7 +13240,7 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
 
         const contentDiv = ztoolkit.UI.createElement(doc, "div", {
             attributes: { "data-content": "true", "data-raw": text },
-            styles: { lineHeight: "1.5" }
+            styles: { lineHeight: "1.6" } // Increased line height
         });
         // Parse markdown to HTML for rendering
         contentDiv.innerHTML = parseMarkdown(text);

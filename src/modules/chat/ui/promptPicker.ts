@@ -26,6 +26,9 @@ interface PromptPickerOptions {
 
 // ==================== Main Picker ====================
 
+// Track active anchor for toggle logic
+let activePickerAnchor: HTMLElement | null = null;
+
 /**
  * Show the prompt picker popover
  */
@@ -37,21 +40,25 @@ export async function showPromptPicker(
     const parentContainer = anchorEl.parentElement;
     if (!parentContainer) return;
 
-    // Remove any existing picker
-    const existing = parentContainer.querySelector('.prompt-picker-container');
+    // Check if we are toggling the same button
+    const existing = doc.querySelector('.prompt-picker-container');
     if (existing) {
         existing.remove();
-        return;
+        const wasActive = activePickerAnchor === anchorEl;
+        activePickerAnchor = null;
+
+        if (wasActive) {
+            return;
+        }
     }
+
+    activePickerAnchor = anchorEl;
 
     // Create container
     const container = doc.createElement('div');
     container.className = 'prompt-picker-container';
     container.style.cssText = `
-        position: absolute;
-        bottom: 100%;
-        left: 0;
-        margin-bottom: 6px;
+        position: fixed;
         width: 380px;
         max-height: 480px;
         background: var(--background-primary);
@@ -63,6 +70,33 @@ export async function showPromptPicker(
         overflow: hidden;
         z-index: 10003;
     `;
+
+    // Calculate position
+    const rect = anchorEl.getBoundingClientRect();
+    const view = doc.defaultView || { innerHeight: 800, innerWidth: 1200 };
+
+    // Default: Above the button, left-aligned if possible
+    let bottom = view.innerHeight - rect.top + 6; // 6px gap
+    let left = rect.left;
+
+    // Check width overflow
+    if (left + 380 > view.innerWidth) {
+        // Align right edge with button right edge if it overflows
+        left = rect.right - 380;
+    }
+    // Check left overflow
+    if (left < 10) left = 10;
+
+    // Check height overflow (if top of popup would be offscreen)
+    // 480px max height
+    if (rect.top - 480 < 0) {
+        // Not enough space above? Try below.
+        // But "drop up" is requested. We'll clamp max-height instead if needed logic is added.
+        // For now, let's just clamp the top position.
+    }
+
+    container.style.bottom = `${bottom}px`;
+    container.style.left = `${left}px`;
 
     // State
     let currentCategory: PromptCategory | null = options.initialCategory || null;
@@ -271,11 +305,18 @@ export async function showPromptPicker(
     container.appendChild(footer);
 
     // === Assemble and show ===
-    parentContainer.appendChild(container);
+    // === Assemble and show ===
+    // Append to body (or documentElement) for fixed positioning
+    if (doc.body) {
+        doc.body.appendChild(container);
+    } else {
+        (doc.documentElement as HTMLElement).appendChild(container);
+    }
 
     // === Close handling ===
     function close() {
         container.remove();
+        activePickerAnchor = null;
         options.onClose?.();
         doc.removeEventListener('click', closeHandler);
         doc.removeEventListener('keydown', escHandler);
