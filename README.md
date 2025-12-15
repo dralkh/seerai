@@ -7,16 +7,31 @@
        height="300">
 </p>
 
-https://github.com/user-attachments/assets/b0847022-d1ab-4e98-8e3a-607d1073db8f
+<p align="center">
+  <a href="https://www.zotero.org">
+    <img src="https://img.shields.io/badge/Zotero-7.x-brightgreen" />
+  </a>
+  <a href="https://opensource.org/licenses/MIT">
+    <img src="https://img.shields.io/badge/License-MIT-blue.svg" />
+  </a>
+  <a href="https://github.com/dralkh/seerai/releases">
+    <img src="https://img.shields.io/badge/Version-3.0.0-blue" />
+  </a>
+</p>
 
-<img width="2787" height="1564" alt="image" src="https://github.com/user-attachments/assets/8d99a2a2-a5f0-43d4-9f20-2b7ab49548f7" />
 
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/90f68a0d-fec0-41e7-a988-f557c18bd150" width="600" />
+</p>
 
-<img width="1949" height="1514" alt="image" src="https://github.com/user-attachments/assets/b384fd8a-9e11-4c56-979a-533ca99900c0" />
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/b9e71c6b-d903-4a69-8461-c7314e52dcf5" width="600" />
+</p>
 
-[![Zotero 7 Compatible](https://img.shields.io/badge/Zotero-7.x-brightgreen)](https://www.zotero.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/Version-3.0.0-blue)](https://github.com/dralkh/seerai/releases)
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/fe543d48-eb68-47e4-b5f6-1d954e1597a2" width="600" />
+</p>
+
 
 **seerai** is an intelligent research assistant plugin for Zotero 7 that integrates AI-powered chat, advanced search, and data extraction capabilities directly into your research workflow. Chat with your papers, extract structured data, and accelerate your literature review with a local-first, privacy-focused design.
 
