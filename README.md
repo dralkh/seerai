@@ -50,13 +50,17 @@
 - **Streaming Responses**: Real-time, token-by-token response rendering.
 - **Markdown & Math**: Responses are formatted with syntax highlighting and LaTeX math support.
 - **Vision Support**: Paste images directly into chat for multimodal analysis.
+- **Interactive Follow-ups**: Deepen the conversation with streaming follow-up questions.
+- **Configurable Citations**: Choose your preferred citation style for AI insights and chat.
 - **Enhanced Keybindings**: 
   - `Enter`: Insert new line
   - `Shift+Enter`: Send message
 
 ### Semantic Search & Discovery
 - **Web Search**: Integrated Firecrawl support for finding full-text content.
-- **Semantic Scholar Agent**: Advanced paper search with filtering (Year, Venue, Citation Count).
+- **Semantic Scholar Agent**: Advanced paper search with:
+  - **Advanced Filters**: Fine-tune results by Year, Venue, and Citation Count.
+  - **AI Insights Config**: Configure insight generation directly from the search panel.
 - **Smart Import**:
   - **PDF Discovery**: Automatically finds and attaches PDFs during import.
   - **Source Link**: Fallback to source links if PDFs are unavailable.
