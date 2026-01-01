@@ -39,6 +39,7 @@ declare namespace _ZoteroTypes {
       "searchAutoAiInsights": boolean;
       "searchAiInsightsPrompt": string;
       "searchAiInsightsResponseLength": number;
+      "searchAiInsightsCitationStyle": string;
     };
   }
 }

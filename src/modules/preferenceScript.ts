@@ -203,6 +203,20 @@ function bindPrefEvents() {
   bindInput(`zotero-prefpane-${config.addonRef}-datalabMaxConcurrent`, "datalabMaxConcurrent");
   bindInput(`zotero-prefpane-${config.addonRef}-aiMaxConcurrent`, "aiMaxConcurrent");
 
+  // AI Insights settings
+  bindCheckbox(`zotero-prefpane-${config.addonRef}-searchAutoAiInsights`, "searchAutoAiInsights");
+  bindInput(`zotero-prefpane-${config.addonRef}-searchAiInsightsPrompt`, "searchAiInsightsPrompt");
+  bindInput(`zotero-prefpane-${config.addonRef}-searchAiInsightsResponseLength`, "searchAiInsightsResponseLength");
+
+  // Bind menulist for citation style
+  const styleSelect = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-searchAiInsightsCitationStyle`) as XUL.MenuList;
+  if (styleSelect) {
+    styleSelect.value = Zotero.Prefs.get(`${prefPrefix}.searchAiInsightsCitationStyle`) as string || "numbered";
+    styleSelect.addEventListener("command", () => {
+      Zotero.Prefs.set(`${prefPrefix}.searchAiInsightsCitationStyle`, styleSelect.value);
+    });
+  }
+
   // Local-specific settings
   bindCheckbox(`zotero-prefpane-${config.addonRef}-localForceOcr`, "localForceOcr");
 

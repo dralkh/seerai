@@ -3731,6 +3731,53 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     lengthGroup.appendChild(lengthValue);
     insightsSection.appendChild(lengthGroup);
 
+    // Citation Style configuration
+    const styleGroup = ztoolkit.UI.createElement(doc, "div", {
+      styles: { display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" },
+    });
+    const styleLabel = ztoolkit.UI.createElement(doc, "label", {
+      properties: { innerText: "Citation Style:" },
+      styles: { ...labelStyle, marginBottom: "0" },
+    });
+    const styleSelect = ztoolkit.UI.createElement(doc, "select", {
+      styles: {
+        ...inputStyle,
+        width: "auto",
+        minWidth: "150px",
+        height: "24px",
+        fontSize: "11px",
+        padding: "0 4px",
+      },
+    }) as HTMLSelectElement;
+
+    const citationStyles = [
+      { value: "numbered", label: "Numbered ([1])" },
+      { value: "apa", label: "APA (Author, Year)" },
+      { value: "mla", label: "MLA (Author Page)" },
+      { value: "chicago", label: "Chicago (Author Year)" },
+      { value: "harvard", label: "Harvard (Author Year)" },
+      { value: "ieee", label: "IEEE ([1])" },
+    ];
+
+    const currentStyle = Zotero.Prefs.get("extensions.seerai.searchAiInsightsCitationStyle") as string || "numbered";
+
+    citationStyles.forEach((s) => {
+      const opt = doc.createElement("option");
+      opt.value = s.value;
+      opt.innerText = s.label;
+      if (s.value === currentStyle) opt.selected = true;
+      styleSelect.appendChild(opt);
+    });
+
+    styleSelect.addEventListener("change", () => {
+      Zotero.Prefs.set("extensions.seerai.searchAiInsightsCitationStyle", styleSelect.value);
+      Assistant.refreshAllCitations(doc);
+    });
+
+    styleGroup.appendChild(styleLabel);
+    styleGroup.appendChild(styleSelect);
+    insightsSection.appendChild(styleGroup);
+
     advancedFiltersContainer.appendChild(insightsSection);
 
     filtersBody.appendChild(advancedFiltersContainer);
@@ -4247,6 +4294,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                         </div>
                         <div class="markdown-content" style="font-size: 13px; line-height: 1.6; color: var(--text-primary);">${parseMarkdown(fullSummary)}</div>
                     `;
+            // Apply citation style live during streaming if indices are already parsed
+            this.applyCitationStyle(summaryContainer);
           },
           onComplete: (content) => {
             fullSummary = content;
@@ -4264,6 +4313,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                                 <span>AI Insights Summary</span>
                             </div>
                             <div style="display: flex; gap: 6px;">
+                                <button id="settings-summary-btn" style="padding: 4px 8px; font-size: 14px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;" title="AI Settings">⚙️</button>
                                 <button id="copy-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;">📋 Copy</button>
                                 <button id="close-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;">✕ Close</button>
                             </div>
@@ -4307,6 +4357,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                 summaryContainer.style.display = "none";
               });
 
+            doc
+              .getElementById("settings-summary-btn")
+              ?.addEventListener("click", (e: Event) => {
+                const btn = e.target as HTMLElement;
+                this.showAiInsightSettingsPopover(doc, btn, summaryContainer);
+              });
+
             // Attach click handlers to citation links for navigation
             this.attachCitationClickHandlers(doc, summaryContainer);
 
@@ -4316,13 +4373,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           onError: (error) => {
             Zotero.debug(`[seerai] Search insights error: ${error}`);
             summaryContainer.innerHTML = `<div style="color: var(--error-color, #d32f2f); padding: 10px;">⚠️ AI Error: ${error.message}</div>`;
-          },
+          }
         },
         {
           apiURL: activeModel.apiURL,
           apiKey: activeModel.apiKey,
-          model: activeModel.model,
-        },
+          model: activeModel.model
+        }
       );
     } catch (e) {
       Zotero.debug(`[seerai] Failed to generate insights: ${e}`);
@@ -4347,6 +4404,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           <span>AI Insights Summary</span>
         </div>
         <div style="display: flex; gap: 6px;">
+          <button id="settings-summary-btn" style="padding: 4px 8px; font-size: 14px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;" title="AI Settings">⚙️</button>
           <button id="copy-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;">📋 Copy</button>
           <button id="close-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;">✕ Close</button>
         </div>
@@ -4388,6 +4446,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       .getElementById("close-summary-btn")
       ?.addEventListener("click", () => {
         summaryContainer.style.display = "none";
+      });
+
+    doc
+      .getElementById("settings-summary-btn")
+      ?.addEventListener("click", (e: Event) => {
+        const btn = e.target as HTMLElement;
+        this.showAiInsightSettingsPopover(doc, btn, summaryContainer);
       });
 
     // Attach click handlers to citation links for navigation
@@ -4537,6 +4602,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           onToken: (token) => {
             fullAnswer += token;
             answerDiv.innerHTML = parseMarkdown(fullAnswer);
+            // Apply citation style live during streaming
+            Assistant.applyCitationStyle(answerDiv);
           },
           onComplete: (content) => {
             fullAnswer = content;
@@ -4589,9 +4656,157 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   }
 
   /**
+   * Get formatted citation string based on style
+   */
+  private static getFormattedCitation(paper: SemanticScholarPaper, index: number, style: string): string {
+    if (!paper) return `[${index}]`;
+    const authors = paper.authors || [];
+    const firstAuthor = authors[0]?.name || "Unknown";
+    const year = paper.year || "n.d.";
+    const title = paper.title || "Untitled";
+
+    switch (style) {
+      case "apa":
+        // (Author, Year) or (Author et al., Year)
+        if (authors.length > 2) return `(${firstAuthor} et al., ${year})`;
+        if (authors.length === 2) return `(${firstAuthor} & ${authors[1].name}, ${year})`;
+        return `(${firstAuthor}, ${year})`;
+      case "mla":
+        // (Author Page) - Page is usually unknown here, so just Author
+        // Use (Author) or (Author et al.)
+        if (authors.length > 2) return `(${firstAuthor} et al.)`;
+        return `(${firstAuthor})`;
+      case "chicago":
+      case "harvard":
+        // (Author Year)
+        if (authors.length > 2) return `(${firstAuthor} et al. ${year})`;
+        return `(${firstAuthor} ${year})`;
+      case "ieee":
+      case "numbered":
+      default:
+        return `[${index}]`;
+    }
+  }
+
+  /**
+   * Apply the user's selected citation style to the insight container
+   */
+  private static applyCitationStyle(container: HTMLElement): void {
+    const style = Zotero.Prefs.get("extensions.seerai.searchAiInsightsCitationStyle") as string || "numbered";
+
+    const links = container.querySelectorAll(".citation-link");
+    links.forEach((link: Element) => {
+      const htmlLink = link as HTMLElement;
+      const indicesStr = htmlLink.dataset.citationIndices;
+      if (!indicesStr) return;
+
+      const indices = indicesStr.split(',').map(s => parseInt(s.trim(), 10));
+      if (indices.length === 0) return;
+
+      // For multiple citations, strictly speaking styles differ:
+      // APA: (Author, Year; Author2, Year2)
+      // IEEE: [1], [2] or [1, 2]
+
+      // Simplified approach: Map each index to its formatted string and join
+      // If style is numbered/ieee, we want to keep [1, 2] look if possible, or [1][2]
+      if (style === "numbered" || style === "ieee") {
+        // The markdown parser already produced [1,2] or [1]. 
+        // We can trust the innerText OR rebuild it to be safe.
+        // Let's rebuild to be consistent with index logic
+        htmlLink.innerText = `[${indices.join(", ")}]`;
+      } else {
+        // Text based citation
+        const citationTexts = indices.map(idx => {
+          const paper = currentSearchResults[idx - 1];
+          return this.getFormattedCitation(paper, idx, style);
+        });
+        // Join with semicolon for text styles
+        htmlLink.innerText = citationTexts.join(", ");
+      }
+    });
+  }
+
+  /**
+   * Find all AI insight containers and refresh their citation styles
+   */
+  public static refreshAllCitations(doc: Document): void {
+    // Search tab summary
+    const summaryContainer = doc.getElementById("search-ai-summary-container");
+    if (summaryContainer) this.applyCitationStyle(summaryContainer as HTMLElement);
+
+    // Follow-up answer areas
+    const followUpAnswers = doc.querySelectorAll(".ai-answer");
+    followUpAnswers.forEach((ans: Element) => this.applyCitationStyle(ans as HTMLElement));
+  }
+
+  /**
+   * Handle smart copy - append references if citations are copied
+   */
+  private static handleSmartCopy(e: ClipboardEvent, container: HTMLElement): void {
+    const doc = container.ownerDocument;
+    if (!doc) return;
+    const selection = doc.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+
+    const selectedText = selection.toString();
+    if (!selectedText.trim()) return;
+
+    // Find all citations within the selection
+    // This is tricky because selection might be partial text.
+    // We can look for data-citation-indices in the selected NODES.
+
+    const range = selection.getRangeAt(0);
+    const clone = range.cloneContents();
+    const div = doc.createElement("div");
+    div.appendChild(clone);
+
+    const links = div.querySelectorAll(".citation-link");
+    const indicesSet = new Set<number>();
+
+    links.forEach((link: Element) => {
+      const idxStr = (link as HTMLElement).dataset.citationIndices;
+      if (idxStr) {
+        idxStr.split(',').forEach(s => indicesSet.add(parseInt(s.trim(), 10)));
+      }
+    });
+
+    if (indicesSet.size === 0) return;
+
+    // Format references
+    const indices = Array.from(indicesSet).sort((a, b) => a - b);
+    const references = indices.map(idx => {
+      const paper = currentSearchResults[idx - 1];
+      if (!paper) return null;
+      // Simple reference format: [N] Title. Author. Year.
+      const authors = paper.authors?.map(a => a.name).join(", ") || "Unknown Author";
+      return `[${idx}] ${paper.title}. ${authors}. ${paper.year || ""}.`;
+    }).filter(Boolean);
+
+    if (references.length > 0) {
+      e.preventDefault();
+      const refText = `\n\nReferences:\n${references.join("\n")}`;
+      const finalPayload = selectedText + refText;
+      if (e.clipboardData) {
+        e.clipboardData.setData("text/plain", finalPayload);
+        // Also try to set generic HTML if we want to preserve rich text? 
+        // For now text/plain is safer for reference appending.
+      }
+    }
+  }
+
+  /**
    * Attach click and hover handlers to citation links in AI insights container
    */
   private static attachCitationClickHandlers(doc: Document, container: HTMLElement): void {
+    // Apply styling first
+    this.applyCitationStyle(container);
+
+    // Smart copy listener (only attach once)
+    if (!container.dataset.hasCopyListener) {
+      container.addEventListener("copy", (e) => this.handleSmartCopy(e as ClipboardEvent, container));
+      container.dataset.hasCopyListener = "true";
+    }
+
     const citationLinks = container.querySelectorAll(".citation-link");
     citationLinks.forEach((link: Element) => {
       const htmlLink = link as HTMLElement;
@@ -4756,6 +4971,211 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     menu.style.top = `${top}px`;
     menu.style.left = `${left}px`;
+  }
+
+  /**
+   * Show settings popover for Search AI Insights
+   */
+  private static showAiInsightSettingsPopover(
+    doc: Document,
+    anchor: HTMLElement,
+    container: HTMLElement
+  ): void {
+    Zotero.debug("[seerai] showAiInsightSettingsPopover called");
+    const existing = doc.getElementById("search-settings-popover");
+    if (existing) existing.remove();
+    const existingBackdrop = doc.getElementById("search-settings-backdrop");
+    if (existingBackdrop) existingBackdrop.remove();
+
+    // Backdrop
+    const backdrop = ztoolkit.UI.createElement(doc, "div", {
+      properties: { id: "search-settings-backdrop" },
+      styles: {
+        position: "fixed",
+        top: "0",
+        left: "0",
+        right: "0",
+        bottom: "0",
+        zIndex: "9998",
+        backgroundColor: "transparent",
+      },
+      listeners: [
+        {
+          type: "click",
+          listener: (e: Event) => {
+            e.stopPropagation();
+            backdrop.remove();
+            const p = doc.getElementById("search-settings-popover");
+            if (p) p.remove();
+          },
+        },
+      ],
+    });
+
+    // Popover
+    const popover = ztoolkit.UI.createElement(doc, "div", {
+      properties: { id: "search-settings-popover" },
+      styles: {
+        position: "fixed",
+        backgroundColor: "var(--background-primary, #fff)",
+        width: "280px",
+        borderRadius: "8px",
+        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
+        border: "1px solid var(--border-primary, #ccc)",
+        padding: "16px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "12px",
+        zIndex: "9999",
+      },
+      listeners: [
+        { type: "click", listener: (e: Event) => e.stopPropagation() },
+      ],
+    });
+
+    // Header
+    const header = ztoolkit.UI.createElement(doc, "div", {
+      properties: { innerText: "AI Insight Configuration" },
+      styles: {
+        fontSize: "14px",
+        fontWeight: "600",
+        borderBottom: "1px solid var(--border-primary)",
+        paddingBottom: "8px",
+        color: "var(--text-primary)",
+      },
+    });
+    popover.appendChild(header);
+
+    // 1. Response Length
+    const lengthSection = ztoolkit.UI.createElement(doc, "div", {
+      styles: { display: "flex", flexDirection: "column", gap: "8px" },
+    });
+
+    // Get current value
+    const currentLen = Zotero.Prefs.get("extensions.seerai.searchAiInsightsResponseLength") as number || 500;
+    const lenText = currentLen >= 2000 ? "Limitless" : `${currentLen} words`;
+
+    const lenLabel = ztoolkit.UI.createElement(doc, "div", {
+      properties: { innerText: `Max Response Length: ${lenText}` },
+      styles: { fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" },
+    });
+    lengthSection.appendChild(lenLabel);
+
+    const sliderContainer = ztoolkit.UI.createElement(doc, "div", {
+      styles: { display: "flex", alignItems: "center", gap: "10px" },
+    });
+    const slider = ztoolkit.UI.createElement(doc, "input", {
+      attributes: {
+        type: "range",
+        min: "100",
+        max: "2000",
+        step: "100",
+        value: String(currentLen),
+      },
+      styles: { flex: "1" },
+    }) as HTMLInputElement;
+
+    sliderContainer.appendChild(slider);
+    lengthSection.appendChild(sliderContainer);
+
+    slider.addEventListener("input", () => {
+      const val = parseInt(slider.value);
+      if (val >= 2000) {
+        lenLabel.innerText = `Max Response Length: Limitless`;
+      } else {
+        lenLabel.innerText = `Max Response Length: ${val} words`;
+      }
+    });
+    slider.addEventListener("change", () => {
+      const val = parseInt(slider.value);
+      Zotero.Prefs.set("extensions.seerai.searchAiInsightsResponseLength", val);
+      currentSearchState.searchAiInsightsResponseLength = val; // Update runtime state
+    });
+
+    popover.appendChild(lengthSection);
+
+    // 2. Citation Style (Advanced Configuration)
+    const advancedSection = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+        marginTop: "8px",
+        paddingTop: "8px",
+        borderTop: "1px solid var(--border-primary)"
+      },
+    });
+
+    const styleLabel = ztoolkit.UI.createElement(doc, "div", {
+      properties: { innerText: "Citation Style" },
+      styles: { fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" },
+    });
+    advancedSection.appendChild(styleLabel);
+
+    const styleSelect = ztoolkit.UI.createElement(doc, "select", {
+      styles: {
+        width: "100%",
+        padding: "6px",
+        borderRadius: "4px",
+        border: "1px solid var(--border-primary)",
+        backgroundColor: "var(--background-secondary)",
+        fontSize: "12px",
+        color: "var(--text-primary)"
+      }
+    }) as HTMLSelectElement;
+
+    // Options
+    const styles = [
+      { value: "numbered", label: "Numbered ([1])" },
+      { value: "apa", label: "APA (Author, Year)" },
+      { value: "mla", label: "MLA (Author Page)" },
+      { value: "chicago", label: "Chicago (Author Year)" },
+      { value: "harvard", label: "Harvard (Author Year)" },
+      { value: "ieee", label: "IEEE ([1])" }
+    ];
+
+    const currentStyle = Zotero.Prefs.get("extensions.seerai.searchAiInsightsCitationStyle") as string || "numbered";
+
+    styles.forEach(s => {
+      const opt = doc.createElement("option");
+      opt.value = s.value;
+      opt.innerText = s.label;
+      if (s.value === currentStyle) opt.selected = true;
+      styleSelect.appendChild(opt);
+    });
+
+    styleSelect.addEventListener("change", () => {
+      Zotero.Prefs.set("extensions.seerai.searchAiInsightsCitationStyle", styleSelect.value);
+      Assistant.refreshAllCitations(doc);
+    });
+
+    advancedSection.appendChild(styleSelect);
+    Zotero.debug("[seerai] Appending advanced/citation section");
+    popover.appendChild(advancedSection);
+
+    // Append to DOM
+    if (doc.body) {
+      doc.body.appendChild(backdrop);
+      doc.body.appendChild(popover);
+    } else {
+      doc.documentElement?.appendChild(backdrop);
+      doc.documentElement?.appendChild(popover);
+    }
+
+    // Position
+    const rect = anchor.getBoundingClientRect();
+    const view = doc.defaultView;
+    if (!view) return;
+
+    let top = rect.bottom + 8;
+    let left = rect.right - 280; // Align right edge
+
+    // Prevent off-screen
+    if (left < 10) left = 10;
+    if (top + 400 > view.innerHeight) top = rect.top - 400; // Flip up if needed
+
+    popover.style.top = `${top}px`;
+    popover.style.left = `${left}px`;
   }
 
   /**
@@ -17259,19 +17679,10 @@ ${tableRows}  </tbody>
     }
 
     // Agent Iteration Limit & Auto-OCR moved to Chat Settings (gear icon)
-
-    // Position dropdown
-    anchorEl.parentElement?.appendChild(dropdown);
-
-    // Close on click outside
-    const closeHandler = (e: Event) => {
-      if (!dropdown.contains(e.target as Node) && e.target !== anchorEl) {
-        dropdown.remove();
-        doc.removeEventListener("click", closeHandler);
-      }
-    };
-    setTimeout(() => doc.addEventListener("click", closeHandler), 10);
   }
+
+  // Position dropdown
+
 
   /**
    * Create the input area with send button and image paste support
