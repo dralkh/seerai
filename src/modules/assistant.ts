@@ -4143,6 +4143,8 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
         maxHeight: "350px",
         overflowY: "auto",
         position: "relative",
+        userSelect: "text", // Make text selectable
+        cursor: "text",
       },
     });
     container.appendChild(summaryContainer);
@@ -4307,6 +4309,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
             // Attach click handlers to citation links for navigation
             this.attachCitationClickHandlers(doc, summaryContainer);
+
+            // Append Follow-up Question UI
+            this.createFollowUpUI(doc, summaryContainer);
           },
           onError: (error) => {
             Zotero.debug(`[seerai] Search insights error: ${error}`);
@@ -4387,6 +4392,173 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Attach click handlers to citation links for navigation
     this.attachCitationClickHandlers(doc, summaryContainer);
+
+    // Append Follow-up Question UI
+    this.createFollowUpUI(doc, summaryContainer);
+  }
+
+  /**
+   * Create and append the Follow-up Question UI
+   */
+  private static createFollowUpUI(doc: Document, container: HTMLElement): void {
+    const wrapper = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        marginTop: "12px",
+        paddingTop: "12px",
+        borderTop: "1px solid var(--border-primary)",
+      },
+    });
+
+    const inputContainer = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        display: "flex",
+        gap: "8px",
+        marginTop: "8px",
+      },
+    });
+
+    const input = ztoolkit.UI.createElement(doc, "input", {
+      attributes: {
+        type: "text",
+        placeholder: "Ask a follow-up about these papers...",
+      },
+      styles: {
+        flex: "1",
+        padding: "8px 10px",
+        borderRadius: "4px",
+        border: "1px solid var(--border-primary)",
+        fontSize: "12px",
+        backgroundColor: "var(--background-secondary)",
+        color: "var(--text-primary)",
+      },
+    }) as HTMLInputElement;
+
+    const sendBtn = ztoolkit.UI.createElement(doc, "button", {
+      properties: { innerText: "➤" },
+      styles: {
+        padding: "8px 12px",
+        borderRadius: "4px",
+        border: "none",
+        backgroundColor: "var(--highlight-primary)",
+        color: "var(--highlight-text)",
+        cursor: "pointer",
+        fontWeight: "bold",
+      },
+    });
+
+    // Helper to submit
+    const submit = async () => {
+      const question = input.value.trim();
+      if (!question) return;
+      input.value = "";
+      input.disabled = true;
+      sendBtn.disabled = true;
+
+      await this.handleFollowUpQuestion(doc, wrapper, question);
+
+      input.disabled = false;
+      sendBtn.disabled = false;
+      input.focus();
+    };
+
+    sendBtn.addEventListener("click", submit);
+    input.addEventListener("keypress", (e: Event) => {
+      const ke = e as KeyboardEvent;
+      if (ke.key === "Enter") submit();
+    });
+
+    inputContainer.appendChild(input);
+    inputContainer.appendChild(sendBtn);
+    wrapper.appendChild(inputContainer);
+    container.appendChild(wrapper);
+  }
+
+  /**
+   * Handle follow-up question submission
+   */
+  private static async handleFollowUpQuestion(
+    doc: Document,
+    container: HTMLElement,
+    question: string
+  ): Promise<void> {
+    // create response area
+    const responseArea = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        marginTop: "12px",
+        backgroundColor: "var(--background-secondary)",
+        borderRadius: "6px",
+        padding: "10px",
+        fontSize: "13px",
+        lineHeight: "1.5",
+        color: "var(--text-primary)",
+      },
+    });
+
+    // Insert before the input container (last child)
+    container.insertBefore(responseArea, container.lastChild);
+
+    responseArea.innerHTML = `
+      <div style="font-weight: 600; margin-bottom: 4px; font-size: 11px; color: var(--text-secondary);">You asked: "${question}"</div>
+      <div class="ai-answer">Thinking...</div>
+    `;
+
+    try {
+      const activeModel = getActiveModelConfig();
+      if (!activeModel) {
+        responseArea.innerHTML += `<div style="color: var(--error-color);">⚠️ No AI model configured.</div>`;
+        return;
+      }
+
+      // Gather context from ALL current results (including Show More loaded ones)
+      // Limit to first 30 to prevent context overflow, or maybe token count
+      // For now, take up to 25 papers
+      const contextPapers = currentSearchResults.slice(0, 25);
+      const context = contextPapers
+        .map((p, i) => `[${i + 1}] Title: ${p.title}\nAbstract: ${p.abstract || "N/A"}`)
+        .join("\n\n");
+
+      const systemPrompt = `You are a helpful research assistant. Answer the user's question based ONLY on the provided research papers.
+      Use [N] format to cite specific papers. Be concise and direct.`;
+
+      const messages = [
+        { role: "system" as const, content: systemPrompt },
+        {
+          role: "user" as const,
+          content: `Context of ${contextPapers.length} papers:\n${context}\n\nQuestion: ${question}`,
+        },
+      ];
+
+      let fullAnswer = "";
+      const answerDiv = responseArea.querySelector(".ai-answer") as HTMLElement;
+
+      await openAIService.chatCompletionStream(
+        messages,
+        {
+          onToken: (token) => {
+            fullAnswer += token;
+            answerDiv.innerHTML = parseMarkdown(fullAnswer);
+          },
+          onComplete: (content) => {
+            fullAnswer = content;
+            answerDiv.innerHTML = parseMarkdown(fullAnswer);
+            // Re-attach citation handlers for the new content
+            this.attachCitationClickHandlers(doc, answerDiv);
+          },
+          onError: (error) => {
+            answerDiv.innerHTML += `<div style="color: var(--error-color);">Error: ${error.message}</div>`;
+          }
+        },
+        {
+          apiURL: activeModel.apiURL,
+          apiKey: activeModel.apiKey,
+          model: activeModel.model,
+        }
+      );
+
+    } catch (e) {
+      Zotero.debug(`[seerai] Follow-up error: ${e}`);
+      responseArea.innerHTML += `<div style="color: var(--error-color);">Failed to generate answer.</div>`;
+    }
   }
 
   /**
@@ -4417,20 +4589,173 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   }
 
   /**
-   * Attach click handlers to citation links in AI insights container
+   * Attach click and hover handlers to citation links in AI insights container
    */
   private static attachCitationClickHandlers(doc: Document, container: HTMLElement): void {
     const citationLinks = container.querySelectorAll(".citation-link");
     citationLinks.forEach((link: Element) => {
+      const htmlLink = link as HTMLElement;
+      const indicesStr = htmlLink.dataset.citationIndices;
+      if (!indicesStr) return;
+
+      const indices = indicesStr.split(',').map(s => parseInt(s.trim(), 10));
+
+      // 1. Hover effect: Show titles
+      const titles = indices.map(idx => {
+        const paper = currentSearchResults[idx - 1];
+        return paper ? `[${idx}] ${paper.title}` : `[${idx}] Paper not found`;
+      }).join('\n');
+      htmlLink.title = titles;
+
+      // 2. Click handler
       link.addEventListener("click", (e: Event) => {
         e.stopPropagation();
-        const indexStr = (link as HTMLElement).dataset.citationIndex;
-        if (indexStr) {
-          const index = parseInt(indexStr, 10) - 1; // Convert from 1-indexed to 0-indexed
-          this.scrollToSearchResult(doc, index);
+        Zotero.debug(`[seerai] Citation clicked: ${indicesStr} (found ${indices.length} indices)`);
+        if (indices.length === 1) {
+          Assistant.scrollToSearchResult(doc, indices[0] - 1);
+        } else {
+          Assistant.showCitationMenu(doc, htmlLink, indices);
         }
       });
     });
+  }
+
+  /**
+   * Show a "drop up" menu for multi-citations
+   * Uses a backdrop pattern for better compatibility with Zotero/XUL
+   */
+  private static showCitationMenu(doc: Document, anchor: HTMLElement, indices: number[]): void {
+    // Remove any existing menus
+    const existingMenu = doc.getElementById("citation-menu-popover");
+    if (existingMenu) existingMenu.remove();
+    const existingBackdrop = doc.getElementById("citation-menu-backdrop");
+    if (existingBackdrop) existingBackdrop.remove();
+
+    // 1. Create Backdrop (for click-outside behavior)
+    const backdrop = ztoolkit.UI.createElement(doc, "div", {
+      properties: { id: "citation-menu-backdrop" },
+      styles: {
+        position: "fixed",
+        top: "0",
+        left: "0",
+        right: "0",
+        bottom: "0",
+        zIndex: "9998", // Below menu
+        backgroundColor: "transparent",
+      },
+      listeners: [
+        {
+          type: "click",
+          listener: (e: Event) => {
+            e.stopPropagation();
+            backdrop.remove();
+            const m = doc.getElementById("citation-menu-popover");
+            if (m) m.remove();
+          },
+        },
+      ],
+    });
+
+    // 2. Create Menu
+    const menu = ztoolkit.UI.createElement(doc, "div", {
+      properties: { id: "citation-menu-popover" },
+      styles: {
+        position: "fixed",
+        backgroundColor: "var(--background-primary, #fff)",
+        border: "1px solid var(--border-primary, #ccc)",
+        borderRadius: "6px",
+        boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+        padding: "4px",
+        zIndex: "10000",
+        minWidth: "150px",
+        maxWidth: "300px",
+      },
+      listeners: [
+        { type: "click", listener: (e: Event) => e.stopPropagation() },
+      ],
+    });
+
+    const header = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        fontSize: "10px",
+        fontWeight: "600",
+        color: "var(--text-secondary, #666)",
+        padding: "4px 8px",
+        borderBottom: "1px solid var(--border-primary, #ccc)",
+        marginBottom: "4px",
+      },
+    });
+    header.innerText = "Select paper to view:";
+    menu.appendChild(header);
+
+    indices.forEach(idx => {
+      const paper = currentSearchResults[idx - 1];
+      if (!paper) return;
+
+      const item = ztoolkit.UI.createElement(doc, "div", {
+        styles: {
+          padding: "6px 8px",
+          fontSize: "12px",
+          cursor: "pointer",
+          borderRadius: "4px",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          color: "var(--text-primary, #000)",
+        },
+      });
+      item.innerText = `[${idx}] ${paper.title}`;
+      item.title = paper.title;
+
+      item.addEventListener("mouseenter", () => {
+        item.style.backgroundColor = "var(--background-secondary, #f5f5f5)";
+      });
+      item.addEventListener("mouseleave", () => {
+        item.style.backgroundColor = "transparent";
+      });
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        Assistant.scrollToSearchResult(doc, idx - 1);
+        menu.remove();
+        backdrop.remove();
+      });
+
+      menu.appendChild(item);
+    });
+
+    // 3. Append to DOM (Fallback to documentElement for XUL)
+    if (doc.body) {
+      doc.body.appendChild(backdrop);
+      doc.body.appendChild(menu);
+    } else {
+      doc.documentElement?.appendChild(backdrop);
+      doc.documentElement?.appendChild(menu);
+    }
+
+    // 4. Position Logic
+    const rect = anchor.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const view = doc.defaultView;
+    if (!view) return;
+
+    // Default: Position above
+    let top = rect.top - menuRect.height - 8;
+
+    // If not enough space above, flip to below
+    if (top < 0) {
+      top = rect.bottom + 8;
+    }
+
+    let left = rect.left;
+    // Prevent going off-screen right
+    if (left + menuRect.width > view.innerWidth) {
+      left = view.innerWidth - menuRect.width - 8;
+    }
+    // Prevent going off-screen left
+    if (left < 0) left = 8;
+
+    menu.style.top = `${top}px`;
+    menu.style.left = `${left}px`;
   }
 
   /**

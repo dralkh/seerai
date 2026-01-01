@@ -43,8 +43,8 @@ function parseInline(text: string): string {
     // Style quoted paper titles (but not as links since Zotero blocks custom URIs)
     result = result.replace(/&quot;([^&]+)&quot;/g, '<em style="color: #2e7d32;">"$1"</em>');
 
-    // Citation references: [1], [2], etc. - make clickable for navigation
-    result = result.replace(/\[(\d+)\]/g, '<span class="citation-link" data-citation-index="$1" style="color: #1976d2; cursor: pointer; text-decoration: underline; font-weight: 500;" title="Click to scroll to paper">[$1]</span>');
+    // Citation references: [1], [1,2], [1, 2], etc. - make clickable for navigation
+    result = result.replace(/\[(\d+(?:\s*,\s*\d+)*)\]/g, '<span class="citation-link" data-citation-indices="$1" style="color: #1976d2; cursor: pointer; text-decoration: underline; font-weight: 500;" title="Click to scroll to paper">[$1]</span>');
 
     return result;
 }
