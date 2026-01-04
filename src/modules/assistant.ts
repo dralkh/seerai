@@ -25,7 +25,7 @@ import {
   setActiveModelId,
   hasModelConfigs,
 } from "./chat/modelConfig";
-import { parseMarkdown } from "./chat/markdown";
+import { parseMarkdown, processStreamingContent, stripThinkTags } from "./chat/markdown";
 import { getMessageStore } from "./chat/messageStore";
 import {
   createImageContentParts,
@@ -18872,6 +18872,15 @@ ${tableRows}  </tbody>
       onToken: (token: string, fullResponse: string) => {
         session.fullResponse = fullResponse;
         if (session.contentDiv) {
+          // Process streaming content to handle think tags
+          const { displayContent, isThinking: stillThinking } = processStreamingContent(fullResponse);
+
+          // If we're still in a think block with no visible content, keep the thinking indicator
+          if (stillThinking && session.isThinking) {
+            // Keep showing "Thinking..." indicator
+            return;
+          }
+
           // Ensure markdown container exists
           let mdContainer = session.contentDiv.querySelector(".markdown-content");
           if (!mdContainer) {
@@ -18888,13 +18897,17 @@ ${tableRows}  </tbody>
             }
           }
 
-          if (session.isThinking) {
+          if (session.isThinking && displayContent) {
             mdContainer.innerHTML = "";
             session.isThinking = false;
           }
-          // Update only the markdown container
-          mdContainer.setAttribute("data-raw", fullResponse);
-          mdContainer.innerHTML = parseMarkdown(fullResponse);
+
+          // Only update if we have content to display
+          if (displayContent) {
+            // Update only the markdown container
+            mdContainer.setAttribute("data-raw", displayContent);
+            mdContainer.innerHTML = parseMarkdown(displayContent);
+          }
         }
         if (session.messagesArea) {
           smartScrollToBottom();
@@ -18948,7 +18961,9 @@ ${tableRows}  </tbody>
         }
       },
       onMessageUpdate: (content: string) => {
-        session.fullResponse = content;
+        // Strip think tags from the content
+        const cleanedContent = stripThinkTags(content);
+        session.fullResponse = cleanedContent;
         if (session.contentDiv) {
           let mdContainer = session.contentDiv.querySelector(".markdown-content");
           if (!mdContainer) {
@@ -18960,11 +18975,13 @@ ${tableRows}  </tbody>
               session.contentDiv.appendChild(mdContainer);
             }
           }
-          mdContainer.innerHTML = parseMarkdown(content);
+          mdContainer.innerHTML = parseMarkdown(cleanedContent);
         }
       },
       onComplete: async (content: string) => {
-        session.fullResponse = content;
+        // Strip think tags from the final content
+        const cleanedContent = stripThinkTags(content);
+        session.fullResponse = cleanedContent;
         session.isThinking = false;
 
         // Remove the thinking indicator if it still exists
@@ -18984,7 +19001,7 @@ ${tableRows}  </tbody>
         const assistantMsg: ChatMessage = {
           id: Date.now().toString(),
           role: "assistant",
-          content: content,
+          content: cleanedContent,
           timestamp: new Date(),
           toolResults: session.toolResults.length > 0 ? session.toolResults : undefined,
         };
@@ -19538,20 +19555,33 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
             onToken: (token) => {
               fullResponse += token;
               if (contentDiv) {
-                if (isFirstToken) {
+                // Process streaming content to handle think tags
+                const { displayContent, isThinking: stillThinking } = processStreamingContent(fullResponse);
+
+                // If still in think block with no content, keep loading indicator
+                if (stillThinking && !displayContent) {
+                  return;
+                }
+
+                if (isFirstToken && displayContent) {
                   contentDiv.innerHTML = ""; // Clear loading indicator
                   isFirstToken = false;
                 }
-                contentDiv.setAttribute("data-raw", fullResponse);
-                contentDiv.innerHTML = parseMarkdown(fullResponse);
-                messagesArea.scrollTop = messagesArea.scrollHeight;
+
+                if (displayContent) {
+                  contentDiv.setAttribute("data-raw", displayContent);
+                  contentDiv.innerHTML = parseMarkdown(displayContent);
+                  messagesArea.scrollTop = messagesArea.scrollHeight;
+                }
               }
             },
             onComplete: async (content) => {
+              // Strip think tags from the final content
+              const cleanedContent = stripThinkTags(content);
               const assistantMsg: ChatMessage = {
                 id: Date.now().toString(),
                 role: "assistant",
-                content: content,
+                content: cleanedContent,
                 timestamp: new Date(),
               };
               conversationMessages.push(assistantMsg);
@@ -19565,8 +19595,8 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
 
               // Final render with markdown
               if (contentDiv) {
-                contentDiv.setAttribute("data-raw", content);
-                contentDiv.innerHTML = parseMarkdown(content);
+                contentDiv.setAttribute("data-raw", cleanedContent);
+                contentDiv.innerHTML = parseMarkdown(cleanedContent);
               }
 
               // Clear pasted images after successful send
@@ -20109,23 +20139,30 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
           onToken: (token) => {
             fullResponse += token;
             if (contentDiv) {
-              contentDiv.setAttribute("data-raw", fullResponse);
-              contentDiv.innerHTML = parseMarkdown(fullResponse);
-              messagesArea.scrollTop = messagesArea.scrollHeight;
+              // Process streaming content to handle think tags
+              const { displayContent } = processStreamingContent(fullResponse);
+
+              if (displayContent) {
+                contentDiv.setAttribute("data-raw", displayContent);
+                contentDiv.innerHTML = parseMarkdown(displayContent);
+                messagesArea.scrollTop = messagesArea.scrollHeight;
+              }
             }
           },
           onComplete: (content) => {
+            // Strip think tags from the final content
+            const cleanedContent = stripThinkTags(content);
             const assistantMsg: ChatMessage = {
               id: Date.now().toString(),
               role: "assistant",
-              content: content,
+              content: cleanedContent,
               timestamp: new Date(),
             };
             conversationMessages.push(assistantMsg);
             // Final render with markdown
             if (contentDiv) {
-              contentDiv.setAttribute("data-raw", content);
-              contentDiv.innerHTML = parseMarkdown(content);
+              contentDiv.setAttribute("data-raw", cleanedContent);
+              contentDiv.innerHTML = parseMarkdown(cleanedContent);
             }
           },
           onError: (error) => {

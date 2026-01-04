@@ -6,6 +6,65 @@
 import { highlightCode } from "./syntaxHighlight";
 
 /**
+ * Strip <think> tags and their content from text.
+ * Handles both complete <think>...</think> blocks and incomplete ones during streaming.
+ * 
+ * @param text - The input text that may contain think tags
+ * @returns The text with think tags removed
+ */
+export function stripThinkTags(text: string): string {
+    if (!text) return '';
+
+    // Remove complete <think>...</think> blocks (including multiline content)
+    let result = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+
+    // Remove incomplete opening <think> tag with any content after it (for streaming)
+    // This handles the case where we're mid-stream inside a think block
+    result = result.replace(/<think>[\s\S]*$/gi, '');
+
+    return result.trim();
+}
+
+/**
+ * Check if content is currently inside an incomplete think block (streaming).
+ * Used to determine if we should show "Thinking..." indicator.
+ * 
+ * @param text - The streaming text content
+ * @returns true if currently inside an incomplete think block
+ */
+export function isInsideThinkBlock(text: string): boolean {
+    if (!text) return false;
+
+    // Count opening and closing think tags
+    const openTags = (text.match(/<think>/gi) || []).length;
+    const closeTags = (text.match(/<\/think>/gi) || []).length;
+
+    // If we have more opening than closing, we're inside a think block
+    return openTags > closeTags;
+}
+
+/**
+ * Process streaming content, handling think tags appropriately.
+ * Returns the content to display, or empty string if should show "Thinking...".
+ * 
+ * @param text - The full streaming response so far
+ * @returns Object with displayContent and isThinking flag
+ */
+export function processStreamingContent(text: string): { displayContent: string; isThinking: boolean } {
+    if (!text) return { displayContent: '', isThinking: false };
+
+    const strippedContent = stripThinkTags(text);
+    const inThinkBlock = isInsideThinkBlock(text);
+
+    // If we're inside a think block and have no visible content yet, show thinking indicator
+    if (inThinkBlock && strippedContent.length === 0) {
+        return { displayContent: '', isThinking: true };
+    }
+
+    return { displayContent: strippedContent, isThinking: false };
+}
+
+/**
  * Escape HTML entities to prevent XSS
  */
 function escapeHtml(text: string): string {
@@ -55,7 +114,11 @@ function parseInline(text: string): string {
 export function parseMarkdown(markdown: string): string {
     if (!markdown) return '';
 
-    const lines = markdown.split('\n');
+    // Strip think tags before processing markdown
+    const cleanedMarkdown = stripThinkTags(markdown);
+    if (!cleanedMarkdown) return '';
+
+    const lines = cleanedMarkdown.split('\n');
     const htmlParts: string[] = [];
     let inCodeBlock = false;
     let codeBlockContent: string[] = [];
