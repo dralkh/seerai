@@ -45,6 +45,7 @@ import {
   SearchAnalysisColumn,
   SearchColumnConfig,
   defaultSearchColumnConfig,
+  PersistedPdfDiscovery,
 } from "./chat/tableTypes";
 import { OcrService } from "./ocr";
 import {
@@ -12039,7 +12040,21 @@ Task: ${columnPrompt}`;
             const hasTitle = !!itemForIndicator?.getField("title");
 
             if (hasDoi || hasArxiv || hasPmid || hasTitle) {
-              td.innerHTML = `<span class="search-pdf-btn" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔍 Search PDF</span>`;
+              // Check for persisted PDF discovery result first
+              const persistedDiscovery = currentTableConfig?.pdfDiscoveryData?.[row.paperId];
+              if (persistedDiscovery) {
+                if (persistedDiscovery.status === 'found') {
+                  td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">📄 Process PDF</span>`;
+                } else if (persistedDiscovery.status === 'source_link' && persistedDiscovery.sourceUrl) {
+                  td.innerHTML = `<span class="source-link-btn" data-url="${persistedDiscovery.sourceUrl}" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔗 Source-Link</span>`;
+                } else if (persistedDiscovery.status === 'not_found') {
+                  td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">❌ Not found</span>`;
+                } else {
+                  td.innerHTML = `<span class="search-pdf-btn" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔍 Search PDF</span>`;
+                }
+              } else {
+                td.innerHTML = `<span class="search-pdf-btn" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔍 Search PDF</span>`;
+              }
             } else {
               td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">No source</span>`;
             }
@@ -12224,6 +12239,16 @@ Task: ${columnPrompt}`;
                 if (success) {
                   td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">📄 Process PDF</span>`;
                   td.style.cursor = "pointer";
+                  // Persist the discovery result
+                  if (currentTableConfig) {
+                    if (!currentTableConfig.pdfDiscoveryData) currentTableConfig.pdfDiscoveryData = {};
+                    currentTableConfig.pdfDiscoveryData[row.paperId] = {
+                      status: 'found',
+                      discoveredAt: new Date().toISOString(),
+                    };
+                    const tableStore = getTableStore();
+                    await tableStore.saveConfig(currentTableConfig);
+                  }
                 } else {
                   // Step 7: Show Source-Link if identifiers available
                   const doi = (item.getField("DOI") as string) || undefined;
@@ -12241,14 +12266,45 @@ Task: ${columnPrompt}`;
                   if (sourceLink) {
                     td.innerHTML = `<span class="source-link-btn" data-url="${sourceLink}" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔗 Source-Link</span>`;
                     td.style.cursor = "pointer";
+                    // Persist the source link discovery result
+                    if (currentTableConfig) {
+                      if (!currentTableConfig.pdfDiscoveryData) currentTableConfig.pdfDiscoveryData = {};
+                      currentTableConfig.pdfDiscoveryData[row.paperId] = {
+                        status: 'source_link',
+                        sourceUrl: sourceLink,
+                        discoveredAt: new Date().toISOString(),
+                      };
+                      const tableStore = getTableStore();
+                      await tableStore.saveConfig(currentTableConfig);
+                    }
                   } else {
                     td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">❌ Not found</span>`;
                     td.style.cursor = "pointer";
+                    // Persist the not-found result
+                    if (currentTableConfig) {
+                      if (!currentTableConfig.pdfDiscoveryData) currentTableConfig.pdfDiscoveryData = {};
+                      currentTableConfig.pdfDiscoveryData[row.paperId] = {
+                        status: 'not_found',
+                        discoveredAt: new Date().toISOString(),
+                      };
+                      const tableStore = getTableStore();
+                      await tableStore.saveConfig(currentTableConfig);
+                    }
                   }
                 }
               } catch (err) {
                 td.innerHTML = `<span style="color: #c62828; font-size: 11px;">Error</span>`;
                 td.style.cursor = "pointer";
+                // Persist the error result
+                if (currentTableConfig) {
+                  if (!currentTableConfig.pdfDiscoveryData) currentTableConfig.pdfDiscoveryData = {};
+                  currentTableConfig.pdfDiscoveryData[row.paperId] = {
+                    status: 'error',
+                    discoveredAt: new Date().toISOString(),
+                  };
+                  const tableStore = getTableStore();
+                  await tableStore.saveConfig(currentTableConfig);
+                }
               }
               return;
             }

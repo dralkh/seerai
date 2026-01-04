@@ -72,6 +72,14 @@ export const defaultColumns: TableColumn[] = [
     },
 ];
 
+// Persisted PDF discovery result for table persistence (per paper)
+export interface PersistedPdfDiscovery {
+    status: 'not_run' | 'found' | 'source_link' | 'not_found' | 'error';
+    pdfUrl?: string;      // Direct PDF URL if found
+    sourceUrl?: string;   // Source link URL (arXiv, PMC, DOI resolver, etc.)
+    discoveredAt?: string; // ISO timestamp of discovery
+}
+
 // Table configuration that gets persisted
 export interface TableConfig {
     id: string;
@@ -91,6 +99,8 @@ export interface TableConfig {
     addedPaperIds: number[];
     // Persisted generated data: { paperId: { columnId: value } }
     generatedData?: { [paperId: number]: { [columnId: string]: string } };
+    // Persisted PDF discovery results: { paperId: PersistedPdfDiscovery }
+    pdfDiscoveryData?: { [paperId: number]: PersistedPdfDiscovery };
     createdAt: string;
     updatedAt: string;
 }
