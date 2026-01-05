@@ -53,6 +53,8 @@
 - **Enhanced Keybindings**: 
   - `Enter`: Insert new line
   - `Shift+Enter`: Send message
+  - `Ctrl+Shift+S`: Toggle/Focus detachable window
+- **Detachable Window**: Pop out the SeerAI interface into a standalone resizable floating window to maintain chat access while navigating your library.
 
 ### Semantic Search & Discovery
 - **Web Search**: Integrated Firecrawl & Tavily support for finding high-quality full-text content.
@@ -176,6 +178,11 @@ This mode requires highly sophistecated models with good tool function capabilit
 2. Open the **SeerAI** sidebar tab.
 3. (Optional) Customize context inclusions via the settings icon (Abstracts, Notes).
 4. Type your question or use templates from the **Prompt Library** (Book icon).
+### Detachable Window
+- **Pop-out**: Click the `⇱` button in the SeerAI tab bar to open a floating window.
+- **Hotkey**: Press `Ctrl+Shift+S` to instantly detach, toggle, or focus the window.
+- **Auto-Sync**: The detached window automatically updates its context when you select different items in Zotero.
+- **Attach**: Close the floating window or click the dock button (within the sidebar placeholder) to return to the sidebar.
 
 ### Creating Data Tables
 1. Open the **Tables** tab in the main view.

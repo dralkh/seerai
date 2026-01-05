@@ -9,6 +9,7 @@ import { registerApiEndpoints } from "./modules/api";
 import { executeGenerateItemTags } from "./modules/chat/tools/tagTool";
 import { defaultAgentConfig } from "./modules/chat/tools/toolTypes";
 import { getActiveModelConfig } from "./modules/chat/modelConfig";
+import { DetachedWindowManager } from "./modules/ui/windowManager";
 
 const ocrService = new OcrService();
 
@@ -27,9 +28,15 @@ async function onStartup() {
   // Register MCP API endpoints
   registerApiEndpoints();
 
+  // Register global keyboard shortcut for detached window (Ctrl+Shift+S)
+  DetachedWindowManager.registerShortcut();
+
   await Promise.all(
     Zotero.getMainWindows().map((win) => onMainWindowLoad(win)),
   );
+
+  // Initialize detached window manager (restore previous state if any)
+  DetachedWindowManager.initialize();
 
   // Mark initialized as true to confirm plugin loading status
   // outside of the plugin (e.g. scaffold testing process)

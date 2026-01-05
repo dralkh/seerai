@@ -12,6 +12,20 @@ if (!basicTool.getGlobal("Zotero")[config.addonInstance]) {
   });
   // @ts-expect-error - Plugin instance is not typed
   Zotero[config.addonInstance] = addon;
+
+  // Expose API for detached window (lazy loaded)
+  Object.defineProperty(addon.api, "Assistant", {
+    get() {
+      const { Assistant } = require("./modules/assistant");
+      return Assistant;
+    },
+  });
+  Object.defineProperty(addon.api, "DetachedWindowManager", {
+    get() {
+      const { DetachedWindowManager } = require("./modules/ui/windowManager");
+      return DetachedWindowManager;
+    },
+  });
 }
 
 function defineGlobal(name: Parameters<BasicTool["getGlobal"]>[0]): void;
@@ -23,3 +37,4 @@ function defineGlobal(name: string, getter?: () => any) {
     },
   });
 }
+

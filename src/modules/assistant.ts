@@ -77,6 +77,7 @@ import { createContextChipsArea } from "./chat/context/contextUI";
 import { ContextItem, ContextItemType } from "./chat/context/contextTypes";
 import { handleAgenticChat, isAgenticModeEnabled, AgentUIObserver, createToolExecutionUI, createToolProcessUI } from "./chat/agenticChat";
 import { ToolResult } from "./chat/tools/toolTypes";
+import { DetachedWindowManager } from "./ui/windowManager";
 
 
 // Debounce timer for autocomplete
@@ -1044,11 +1045,128 @@ export class Assistant {
         currentContainer = body;
         currentItem = item;
 
+        // If window is detached, show minimal "Open in Window" UI instead
+        if (DetachedWindowManager.isDetached()) {
+          this.renderDetachedPlaceholder(body);
+          setSectionSummary("Open in separate window");
+          return;
+        }
+
         this.renderInterface(body, item, true);
         const stateManager = getChatStateManager();
         setSectionSummary(stateManager.getSummary());
       },
     });
+  }
+
+  /**
+   * Render a placeholder UI when the main interface is in a detached window
+   */
+  private static renderDetachedPlaceholder(container: HTMLElement): void {
+    const doc = container.ownerDocument!;
+    container.innerHTML = "";
+
+    const placeholder = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "200px",
+        textAlign: "center",
+        padding: "20px",
+        gap: "16px",
+      },
+    });
+
+    const icon = ztoolkit.UI.createElement(doc, "div", {
+      properties: { innerText: "🪟" },
+      styles: {
+        fontSize: "48px",
+        marginBottom: "8px",
+      },
+    });
+
+    const text = ztoolkit.UI.createElement(doc, "div", {
+      properties: { innerText: "SeerAI is open in a separate window" },
+      styles: {
+        fontSize: "14px",
+        color: "var(--text-secondary)",
+        marginBottom: "12px",
+      },
+    });
+
+    const focusBtn = ztoolkit.UI.createElement(doc, "button", {
+      properties: { innerText: "Focus Window" },
+      styles: {
+        padding: "8px 16px",
+        borderRadius: "6px",
+        background: "var(--highlight-primary)",
+        color: "white",
+        border: "none",
+        cursor: "pointer",
+        fontWeight: "500",
+        fontSize: "13px",
+      },
+      listeners: [
+        {
+          type: "click",
+          listener: () => {
+            DetachedWindowManager.focusWindow();
+          },
+        },
+      ],
+    });
+
+    const attachBtn = ztoolkit.UI.createElement(doc, "button", {
+      properties: { innerText: "Bring Back to Sidebar" },
+      styles: {
+        padding: "8px 16px",
+        borderRadius: "6px",
+        background: "transparent",
+        color: "var(--text-secondary)",
+        border: "1px solid var(--border-primary)",
+        cursor: "pointer",
+        fontWeight: "500",
+        fontSize: "13px",
+        marginTop: "8px",
+      },
+      listeners: [
+        {
+          type: "click",
+          listener: () => {
+            DetachedWindowManager.attach();
+          },
+        },
+      ],
+    });
+
+    const shortcutHint = ztoolkit.UI.createElement(doc, "div", {
+      properties: { innerText: "Shortcut: Ctrl+Shift+S" },
+      styles: {
+        fontSize: "11px",
+        color: "var(--text-tertiary)",
+        marginTop: "12px",
+      },
+    });
+
+    placeholder.appendChild(icon);
+    placeholder.appendChild(text);
+    placeholder.appendChild(focusBtn);
+    placeholder.appendChild(attachBtn);
+    placeholder.appendChild(shortcutHint);
+    container.appendChild(placeholder);
+  }
+
+  /**
+   * Public method to render the UI to a given container
+   * Used by the detached window to render the full interface
+   */
+  public static async renderToContainer(container: HTMLElement, item: Zotero.Item): Promise<void> {
+    currentContainer = container;
+    currentItem = item;
+    currentItemId = item.id;
+    await this.renderInterface(container, item);
   }
 
   /**
@@ -1373,130 +1491,155 @@ export class Assistant {
     this.lastRenderedContainer = container;
 
     container.innerHTML = "";
-    const doc = container.ownerDocument!;
 
-    // Ensure stylesheet is loaded
-    const styleId = "seerai-stylesheet";
-    if (!doc.getElementById(styleId)) {
-      const link = ztoolkit.UI.createElement(doc, "link", {
-        properties: {
-          id: styleId,
-          type: "text/css",
-          rel: "stylesheet",
-          href: `chrome://${config.addonRef}/content/zoteroPane.css`,
-        },
-      });
-      doc.documentElement?.appendChild(link);
-    }
-
-    const stateManager = getChatStateManager();
-
-    // Load history and persisted messages if not already loaded
-    if (conversationHistory.length === 0) {
-      await this.loadHistory();
-    }
-
-    if (conversationMessages.length === 0) {
-      try {
-        const store = getMessageStore();
-        // If history exists, load the most recent one if no ID is set
-        if (conversationHistory.length > 0 && store.getConversationId() === "default") {
-          store.setConversationId(conversationHistory[0].id);
-        }
-        conversationMessages = await store.loadMessages();
-
-        // Also load state for this chat
-        const savedState = await store.getConversationState();
-        if (savedState) {
-          stateManager.fromJSON(savedState);
-        }
-
-        Zotero.debug(
-          `[seerai] Loaded ${conversationMessages.length} messages for session ${store.getConversationId()}`,
-        );
-      } catch (e) {
-        Zotero.debug(`[seerai] Error loading messages: ${e}`);
-      }
-    }
-
-    // Load table config - ALWAYS reload from disk when viewing table tab to get latest changes from tools
-    if (!currentTableConfig || activeTab === "table") {
-      try {
-        const tableStore = getTableStore();
-        currentTableConfig = await tableStore.loadConfig();
-        Zotero.debug(`[seerai] Loaded table config: ${currentTableConfig.id} (activeTab=${activeTab})`);
-      } catch (e) {
-        Zotero.debug(`[seerai] Error loading table config: ${e}`);
-      }
-    }
-
-    // Auto-add current item with its notes based on selection mode
-    const options = stateManager.getOptions();
-    const mode = options.selectionMode;
-
-    if (mode === "explore") {
-      // Explore mode: add items without clearing (multi-add)
-      if (!stateManager.isSelected("items", item.id)) {
-        this.addItemWithNotes(item);
-      }
-    } else if (mode === "default") {
-      // Default mode: switch to single item (clear others, focus on this one)
-      if (!stateManager.isSelected("items", item.id)) {
-        stateManager.clearAll();
-        this.addItemWithNotes(item);
-      }
-    }
-    // Lock mode: do nothing - don't add any items automatically
-    // Main Container with tabs
-    const mainContainer = ztoolkit.UI.createElement(doc, "div", {
-      styles: {
-        display: "flex",
-        flexDirection: "column",
-        height: "100%",
-        minHeight: "350px",
-        fontFamily: "system-ui, -apple-system, sans-serif",
-      },
-    });
+    // Debug visual
+    const debugLoading = container.ownerDocument!.createElement("div");
+    debugLoading.textContent = "SeerAI: Rendering interface...";
+    debugLoading.style.cssText = "padding: 20px; color: gray; text-align: center;";
+    debugLoading.id = "seerai-debug-loading";
+    container.appendChild(debugLoading);
 
     try {
-      // === TAB BAR ===
-      const tabBar = this.createTabBar(doc, container, item);
-      mainContainer.appendChild(tabBar);
+      const doc = container.ownerDocument!;
+      Zotero.debug("[seerai] renderInterface: Starting render for item " + item.id);
 
-      // === TAB CONTENT CONTAINER ===
-      const tabContent = ztoolkit.UI.createElement(doc, "div", {
-        properties: { id: "tab-content" },
+
+      // Ensure stylesheet is loaded
+      const styleId = "seerai-stylesheet";
+      if (!doc.getElementById(styleId)) {
+        const link = ztoolkit.UI.createElement(doc, "link", {
+          properties: {
+            id: styleId,
+            type: "text/css",
+            rel: "stylesheet",
+            href: `chrome://${config.addonRef}/content/zoteroPane.css`,
+          },
+        });
+        doc.documentElement?.appendChild(link);
+      }
+
+      const stateManager = getChatStateManager();
+
+      // Load history and persisted messages if not already loaded
+      if (conversationHistory.length === 0) {
+        await this.loadHistory();
+      }
+
+      if (conversationMessages.length === 0) {
+        try {
+          const store = getMessageStore();
+          // If history exists, load the most recent one if no ID is set
+          if (conversationHistory.length > 0 && store.getConversationId() === "default") {
+            store.setConversationId(conversationHistory[0].id);
+          }
+          conversationMessages = await store.loadMessages();
+
+          // Also load state for this chat
+          const savedState = await store.getConversationState();
+          if (savedState) {
+            stateManager.fromJSON(savedState);
+          }
+
+          Zotero.debug(
+            `[seerai] Loaded ${conversationMessages.length} messages for session ${store.getConversationId()}`,
+          );
+        } catch (e) {
+          Zotero.debug(`[seerai] Error loading messages: ${e}`);
+        }
+      }
+
+      // Load table config - ALWAYS reload from disk when viewing table tab to get latest changes from tools
+      if (!currentTableConfig || activeTab === "table") {
+        try {
+          const tableStore = getTableStore();
+          currentTableConfig = await tableStore.loadConfig();
+          Zotero.debug(`[seerai] Loaded table config: ${currentTableConfig.id} (activeTab=${activeTab})`);
+        } catch (e) {
+          Zotero.debug(`[seerai] Error loading table config: ${e}`);
+        }
+      }
+
+      // Auto-add current item with its notes based on selection mode
+      const options = stateManager.getOptions();
+      const mode = options.selectionMode;
+
+      if (mode === "explore") {
+        // Explore mode: add items without clearing (multi-add)
+        if (!stateManager.isSelected("items", item.id)) {
+          this.addItemWithNotes(item);
+        }
+      } else if (mode === "default") {
+        // Default mode: switch to single item (clear others, focus on this one)
+        if (!stateManager.isSelected("items", item.id)) {
+          stateManager.clearAll();
+          this.addItemWithNotes(item);
+        }
+      }
+      // Lock mode: do nothing - don't add any items automatically
+      // Main Container with tabs
+      const mainContainer = ztoolkit.UI.createElement(doc, "div", {
         styles: {
-          flex: "1",
           display: "flex",
           flexDirection: "column",
-          overflow: "hidden",
+          height: "100%",
+          minHeight: "350px",
+          fontFamily: "system-ui, -apple-system, sans-serif",
         },
       });
 
-      // Render active tab content
-      if (activeTab === "chat") {
-        const chatTabContent = await this.createChatTabContent(
-          doc,
-          item,
-          stateManager,
-        );
-        tabContent.appendChild(chatTabContent);
-      } else if (activeTab === "table") {
-        const tableTabContent = await this.createTableTabContent(doc, item);
-        tabContent.appendChild(tableTabContent);
-      } else if (activeTab === "search") {
-        const searchTabContent = await this.createSearchTabContent(doc, item);
-        tabContent.appendChild(searchTabContent);
-      }
+      try {
+        // === TAB BAR ===
+        const tabBar = this.createTabBar(doc, container, item);
+        mainContainer.appendChild(tabBar);
 
-      mainContainer.appendChild(tabContent);
-      container.appendChild(mainContainer);
+        // === TAB CONTENT CONTAINER ===
+        const tabContent = ztoolkit.UI.createElement(doc, "div", {
+          properties: { id: "tab-content" },
+          styles: {
+            flex: "1",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          },
+        });
+
+        // Render active tab content
+        if (activeTab === "chat") {
+          const chatTabContent = await this.createChatTabContent(
+            doc,
+            item,
+            stateManager,
+          );
+          tabContent.appendChild(chatTabContent);
+        } else if (activeTab === "table") {
+          const tableTabContent = await this.createTableTabContent(doc, item);
+          tabContent.appendChild(tableTabContent);
+        } else if (activeTab === "search") {
+          const searchTabContent = await this.createSearchTabContent(doc, item);
+          tabContent.appendChild(searchTabContent);
+        }
+
+        // Remove loading indicator
+        const loading = doc.getElementById("seerai-debug-loading");
+        if (loading) loading.remove();
+
+        mainContainer.appendChild(tabContent);
+        container.appendChild(mainContainer);
+        Zotero.debug("[seerai] renderInterface: Render complete");
+
+      } catch (error) {
+        Zotero.debug(`[seerai] Error building UI components: ${error}`);
+        throw error; // Re-throw to be caught by outer block
+      }
     } catch (error) {
-      Zotero.debug(`[seerai] Error rendering interface: ${error}`);
-      const errorDiv = doc.createElement("div");
-      errorDiv.style.cssText = "padding: 20px; color: red;";
-      errorDiv.textContent = `Error rendering interface: ${error}`;
+      Zotero.debug(`[seerai] Error rendering interface (outer): ${error}`);
+
+      // Ensure we have a clean container for the error
+      container.innerHTML = "";
+
+      const errorDiv = container.ownerDocument!.createElement("div");
+      errorDiv.style.cssText = "padding: 20px; color: red; overflow: auto; height: 100%;";
+      errorDiv.textContent = `Error rendering interface: ${error}\n\nStack: ${(error as Error).stack || 'N/A'}`;
       container.appendChild(errorDiv);
     }
   }
@@ -1567,6 +1710,51 @@ export class Assistant {
       });
       tabBar.appendChild(tabItem);
     });
+
+    // Add detach button at the end
+    const detachBtn = ztoolkit.UI.createElement(doc, "button", {
+      properties: {
+        className: "detach-btn",
+        title: "Pop out to window (Ctrl+Shift+S)",
+        innerText: "⇱",
+      },
+      styles: {
+        padding: "8px 12px",
+        cursor: "pointer",
+        fontSize: "14px",
+        fontWeight: "500",
+        color: "var(--text-secondary)",
+        backgroundColor: "transparent",
+        border: "none",
+        borderBottom: "2px solid transparent",
+        transition: "all 0.2s ease",
+      },
+      listeners: [
+        {
+          type: "click",
+          listener: () => {
+            DetachedWindowManager.detach();
+          },
+        },
+        {
+          type: "mouseenter",
+          listener: (e: Event) => {
+            const btn = e.target as HTMLElement;
+            btn.style.color = "var(--highlight-primary)";
+            btn.style.backgroundColor = "var(--background-primary)";
+          },
+        },
+        {
+          type: "mouseleave",
+          listener: (e: Event) => {
+            const btn = e.target as HTMLElement;
+            btn.style.color = "var(--text-secondary)";
+            btn.style.backgroundColor = "transparent";
+          },
+        },
+      ],
+    });
+    tabBar.appendChild(detachBtn);
 
     return tabBar;
   }
@@ -1715,7 +1903,7 @@ export class Assistant {
         height: "100%",
         flex: "1",
         gap: "8px",
-        padding: "8px",
+        padding: "8px 8px 20px 8px",
         minWidth: "0",
         position: "relative",
       },
@@ -1744,8 +1932,7 @@ export class Assistant {
         display: "flex",
         flexDirection: "column",
         gap: "10px",
-        minHeight: "450px",
-        maxHeight: "600px",
+        minHeight: "200px",
         overflow: "auto",
       },
       properties: { id: "assistant-messages-area" },

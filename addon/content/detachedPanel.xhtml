@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet href="chrome://zotero/skin/zotero.css" type="text/css"?>
+<?xml-stylesheet href="chrome://seerai/content/zoteroPane.css" type="text/css"?>
+<!DOCTYPE window>
+<window id="seerai-detached-window" title="SeerAI" xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+    xmlns:html="http://www.w3.org/1999/xhtml" width="420" height="700" persist="screenX screenY width height"
+    onload="SeeraiDetached.init();">
+
+    <script type="application/javascript"><![CDATA[
+    var SeeraiDetached = {
+            init: async function () {
+                var container = document.getElementById("seerai-container");
+
+                try {
+                    if (!container) return;
+
+                    this.showMessage(container, "Loading...", "Connecting to Zotero...");
+
+                    // Find Zotero instance
+                    var zoteroInstance = null;
+                    var mainWindow = null;
+
+                    // Try getting from opener
+                    if (window.opener && window.opener.Zotero) {
+                        zoteroInstance = window.opener.Zotero;
+                        mainWindow = window.opener;
+                    }
+                    // Try standard global if available (unlikely in detached)
+                    else if (typeof Zotero !== "undefined") {
+                        zoteroInstance = Zotero;
+                        mainWindow = Zotero.getMainWindow();
+                    }
+
+                    if (!zoteroInstance) {
+                        this.showMessage(container, "Connection Error", "Could not find Zotero instance. Please close and reopen this window.");
+                        return;
+                    }
+
+                    // Check if SeerAI is loaded
+                    if (!zoteroInstance.SeerAI) {
+                        this.showMessage(container, "Error", "SeerAI plugin is not fully loaded. Please restart Zotero.");
+                        return;
+                    }
+
+                    var addon = zoteroInstance.SeerAI;
+                    var api = addon.api;
+
+                    // Get current item
+                    var zp = zoteroInstance.getActiveZoteroPane();
+                    var items = zp ? zp.getSelectedItems() : [];
+                    var item = items.length > 0 ? items[0] : null;
+
+                    if (item) {
+                        if (api && api.Assistant && typeof api.Assistant.renderToContainer === "function") {
+                            // Render the actual interface!
+                            try {
+                                await api.Assistant.renderToContainer(container, item);
+                            } catch (ex) {
+                                this.showMessage(container, "Render Error", ex.toString() + "\n" + (ex.stack || ""));
+                            }
+                        } else {
+                            this.showMessage(container, "Loading...", "Initializing SeerAI components...");
+                            // Retry in a moment if components aren't loaded yet
+                            setTimeout(() => this.init(), 1000);
+                        }
+                    } else {
+                        this.showMessage(container, "No Item Selected", "Select an item in Zotero to begin chatting");
+                    }
+                } catch (e) {
+                    // Robust error logging
+                    var errorMsg = e.toString();
+                    if (typeof Zotero !== "undefined") Zotero.debug("[seerai] Detached window error: " + errorMsg);
+                    else if (window.console) window.console.error(e);
+
+                    try {
+                        if (container) this.showMessage(container, "Error", errorMsg);
+                    } catch (ex) { }
+                }
+            },
+            showMessage: function (container, title, message) {
+                // Clear everything
+                container.innerHTML = "";
+
+                var div = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                div.setAttribute("style", "padding: 40px; text-align: center; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;");
+
+                var icon = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                icon.setAttribute("style", "font-size: 48px; margin-bottom: 16px;");
+                icon.textContent = "\u{1F4DA}";
+
+                var titleEl = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                titleEl.setAttribute("style", "font-size: 18px; font-weight: 600; margin-bottom: 8px;");
+                titleEl.textContent = title;
+
+                var msgEl = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
+                msgEl.setAttribute("style", "font-size: 14px; color: gray; white-space: pre-wrap;");
+                msgEl.textContent = message;
+
+                div.appendChild(icon);
+                div.appendChild(titleEl);
+                div.appendChild(msgEl);
+                container.appendChild(div);
+            },
+            attach: function () {
+                try {
+                    var zotero = window.opener ? window.opener.Zotero : (typeof Zotero !== "undefined" ? Zotero : null);
+
+                    if (zotero && zotero.SeerAI) {
+                        var api = zotero.SeerAI.api;
+                        if (api && api.DetachedWindowManager) {
+                            api.DetachedWindowManager.attach();
+                            return;
+                        }
+                    }
+                } catch (e) { }
+                window.close();
+            }
+        };
+  ]]></script>
+
+    <vbox id="seerai-window-root" flex="1" style="overflow: hidden;">
+        <html:div id="seerai-container"
+            style="flex: 1; display: flex; flex-direction: column; overflow: hidden; height: 100%; width: 100%; background: var(--background-primary);">
+        </html:div>
+    </vbox>
+</window>
