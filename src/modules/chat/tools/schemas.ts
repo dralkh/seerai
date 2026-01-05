@@ -202,34 +202,221 @@ export const EditNoteParamsSchema = z.object({
         .describe("Convert markdown content to HTML (default: true)"),
 });
 
+// ==================== Web & Citation Schemas ====================
+
+export const SearchWebParamsSchema = z.object({
+    query: z.string().min(1).describe("Search query"),
+    limit: z.number().int().min(1).max(20).default(5).optional()
+        .describe("Maximum results (default: 5)"),
+});
+
+export const ReadWebPageParamsSchema = z.object({
+    url: z.string().url().describe("URL to read"),
+});
+
+export const GetCitationsParamsSchema = z.object({
+    paper_id: z.string().min(1).describe("Semantic Scholar paper ID"),
+    limit: z.number().int().min(1).max(50).default(10).optional()
+        .describe("Maximum results (default: 10)"),
+});
+
+export const GetReferencesParamsSchema = z.object({
+    paper_id: z.string().min(1).describe("Semantic Scholar paper ID"),
+    limit: z.number().int().min(1).max(50).default(10).optional()
+        .describe("Maximum results (default: 10)"),
+});
+
+// ==================== Unified Tool Schemas (Consolidated) ====================
+
+/**
+ * Unified context tool schema
+ * Consolidates: add_to_context, remove_from_context, list_context
+ */
+export const ContextParamsSchema = z.discriminatedUnion("action", [
+    z.object({
+        action: z.literal("list"),
+    }),
+    z.object({
+        action: z.literal("add"),
+        items: z.array(ContextItemSchema).min(1).describe("Items to add to context"),
+    }),
+    z.object({
+        action: z.literal("remove"),
+        items: z.array(ContextItemSchema).min(1).describe("Items to remove from context"),
+    }),
+]);
+
+/**
+ * Unified collection tool schema
+ * Consolidates: find_collection, create_collection, list_collection, move_item, remove_item_from_collection
+ */
+export const CollectionParamsSchema = z.discriminatedUnion("action", [
+    z.object({
+        action: z.literal("find"),
+        name: z.string().min(1).describe("Collection name to search for"),
+        library_id: z.number().int().optional(),
+        parent_id: z.number().int().positive().optional(),
+    }),
+    z.object({
+        action: z.literal("create"),
+        name: z.string().min(1).describe("Name for new collection"),
+        parent_id: z.number().int().positive().optional(),
+        library_id: z.number().int().optional(),
+    }),
+    z.object({
+        action: z.literal("list"),
+        collection_id: z.number().int().positive().describe("Collection ID to list"),
+    }),
+    z.object({
+        action: z.literal("add_item"),
+        collection_id: z.number().int().positive().describe("Target collection ID"),
+        item_ids: z.array(z.number().int().positive()).min(1).describe("Item IDs to add"),
+        remove_from_others: z.boolean().default(false).optional(),
+    }),
+    z.object({
+        action: z.literal("remove_item"),
+        collection_id: z.number().int().positive().describe("Collection ID"),
+        item_ids: z.array(z.number().int().positive()).min(1).describe("Item IDs to remove"),
+    }),
+]);
+
+/**
+ * Unified table tool schema
+ * Consolidates: list_tables, create_table, add_to_table, create_table_column, generate_table_data, read_table
+ */
+export const TableParamsSchema = z.discriminatedUnion("action", [
+    z.object({
+        action: z.literal("list"),
+    }),
+    z.object({
+        action: z.literal("create"),
+        name: z.string().min(1).describe("Table name"),
+        paper_ids: z.array(z.number().int().positive()).optional().describe("Initial papers"),
+    }),
+    z.object({
+        action: z.literal("add_papers"),
+        table_id: z.string().min(1).describe("Table ID"),
+        paper_ids: z.array(z.number().int().positive()).min(1).describe("Paper IDs to add"),
+    }),
+    z.object({
+        action: z.literal("add_column"),
+        table_id: z.string().min(1).describe("Table ID"),
+        column_name: z.string().min(1).describe("Column name"),
+        ai_prompt: z.string().min(1).describe("AI prompt for data generation"),
+    }),
+    z.object({
+        action: z.literal("generate"),
+        table_id: z.string().min(1).describe("Table ID"),
+        column_id: z.string().optional(),
+        item_ids: z.array(z.number().int().positive()).optional(),
+    }),
+    z.object({
+        action: z.literal("read"),
+        table_id: z.string().optional().describe("Table ID (most recent if omitted)"),
+        include_data: z.boolean().default(true).optional(),
+    }),
+]);
+
+/**
+ * Unified note tool schema
+ * Consolidates: create_note, edit_note
+ */
+export const NoteParamsSchema = z.discriminatedUnion("action", [
+    z.object({
+        action: z.literal("create"),
+        parent_item_id: z.number().int().positive().optional(),
+        collection_id: z.number().int().positive().optional(),
+        title: z.string().min(1).describe("Note title"),
+        content: z.string().min(1).describe("Note content (markdown)"),
+        tags: z.array(z.string()).optional(),
+    }).refine(
+        data => data.parent_item_id !== undefined || data.collection_id !== undefined,
+        { message: "Either parent_item_id or collection_id required" }
+    ),
+    z.object({
+        action: z.literal("edit"),
+        note_id: z.number().int().positive().describe("Note ID to edit"),
+        operations: z.array(EditNoteOperationSchema).min(1),
+        convert_markdown: z.boolean().default(true).optional(),
+    }),
+]);
+
+/**
+ * Unified related papers tool schema
+ * Consolidates: get_citations, get_references
+ */
+export const RelatedPapersParamsSchema = z.discriminatedUnion("action", [
+    z.object({
+        action: z.literal("citations"),
+        paper_id: z.string().min(1).describe("Semantic Scholar paper ID"),
+        limit: z.number().int().min(1).max(50).default(10).optional(),
+    }),
+    z.object({
+        action: z.literal("references"),
+        paper_id: z.string().min(1).describe("Semantic Scholar paper ID"),
+        limit: z.number().int().min(1).max(50).default(10).optional(),
+    }),
+]);
+
+/**
+ * Unified web tool schema
+ * Consolidates: search_web, read_webpage
+ */
+export const WebParamsSchema = z.discriminatedUnion("action", [
+    z.object({
+        action: z.literal("search"),
+        query: z.string().min(1).describe("Search query"),
+        limit: z.number().int().min(1).max(20).default(5).optional(),
+    }),
+    z.object({
+        action: z.literal("read"),
+        url: z.string().url().describe("URL to read"),
+    }),
+]);
+
 // ==================== Schema Registry ====================
 
 /**
  * Map of tool names to their Zod schemas
  */
 const schemaRegistry: Partial<Record<ToolName, z.ZodSchema>> = {
+    // Core tools
     [TOOL_NAMES.SEARCH_LIBRARY]: SearchLibraryParamsSchema,
+    [TOOL_NAMES.SEARCH_EXTERNAL]: SearchExternalParamsSchema,
     [TOOL_NAMES.GET_ITEM_METADATA]: GetItemMetadataParamsSchema,
     [TOOL_NAMES.READ_ITEM_CONTENT]: ReadItemContentParamsSchema,
+    [TOOL_NAMES.IMPORT_PAPER]: ImportPaperParamsSchema,
+    [TOOL_NAMES.GENERATE_ITEM_TAGS]: GenerateItemTagsParamsSchema,
+
+    // Consolidated tools
+    [TOOL_NAMES.CONTEXT]: ContextParamsSchema,
+    [TOOL_NAMES.COLLECTION]: CollectionParamsSchema,
+    [TOOL_NAMES.TABLE]: TableParamsSchema,
+    [TOOL_NAMES.NOTE]: NoteParamsSchema,
+    [TOOL_NAMES.RELATED_PAPERS]: RelatedPapersParamsSchema,
+    [TOOL_NAMES.WEB]: WebParamsSchema,
+
+    // Legacy aliases (still supported for backwards compatibility)
     [TOOL_NAMES.CREATE_NOTE]: CreateNoteParamsSchema,
+    [TOOL_NAMES.EDIT_NOTE]: EditNoteParamsSchema,
     [TOOL_NAMES.ADD_TO_CONTEXT]: AddToContextParamsSchema,
     [TOOL_NAMES.REMOVE_FROM_CONTEXT]: RemoveFromContextParamsSchema,
-    [TOOL_NAMES.LIST_CONTEXT]: z.object({}), // No params
+    [TOOL_NAMES.LIST_CONTEXT]: z.object({}),
     [TOOL_NAMES.LIST_TABLES]: ListTablesParamsSchema,
     [TOOL_NAMES.CREATE_TABLE]: CreateTableParamsSchema,
     [TOOL_NAMES.ADD_TO_TABLE]: AddToTableParamsSchema,
     [TOOL_NAMES.CREATE_TABLE_COLUMN]: CreateTableColumnParamsSchema,
     [TOOL_NAMES.GENERATE_TABLE_DATA]: GenerateTableDataParamsSchema,
     [TOOL_NAMES.READ_TABLE]: ReadTableParamsSchema,
-    [TOOL_NAMES.SEARCH_EXTERNAL]: SearchExternalParamsSchema,
-    [TOOL_NAMES.IMPORT_PAPER]: ImportPaperParamsSchema,
     [TOOL_NAMES.MOVE_ITEM]: MoveItemParamsSchema,
     [TOOL_NAMES.REMOVE_ITEM_FROM_COLLECTION]: RemoveItemFromCollectionParamsSchema,
     [TOOL_NAMES.FIND_COLLECTION]: FindCollectionParamsSchema,
     [TOOL_NAMES.CREATE_COLLECTION]: CreateCollectionParamsSchema,
     [TOOL_NAMES.LIST_COLLECTION]: ListCollectionParamsSchema,
-    [TOOL_NAMES.GENERATE_ITEM_TAGS]: GenerateItemTagsParamsSchema,
-    [TOOL_NAMES.EDIT_NOTE]: EditNoteParamsSchema,
+    [TOOL_NAMES.SEARCH_WEB]: SearchWebParamsSchema,
+    [TOOL_NAMES.READ_WEBPAGE]: ReadWebPageParamsSchema,
+    [TOOL_NAMES.GET_CITATIONS]: GetCitationsParamsSchema,
+    [TOOL_NAMES.GET_REFERENCES]: GetReferencesParamsSchema,
 };
 
 // ==================== Tool Sensitivity Registry ====================
@@ -244,37 +431,43 @@ type SensitivityLevel = "read" | "write" | "destructive";
  * Map of tool names to their sensitivity levels
  */
 const sensitivityRegistry: Record<ToolName, SensitivityLevel> = {
-    // Read-only operations - always safe
+    // Core tools
     [TOOL_NAMES.SEARCH_LIBRARY]: "read",
+    [TOOL_NAMES.SEARCH_EXTERNAL]: "read",
     [TOOL_NAMES.GET_ITEM_METADATA]: "read",
     [TOOL_NAMES.READ_ITEM_CONTENT]: "read",
+    [TOOL_NAMES.IMPORT_PAPER]: "write",
+    [TOOL_NAMES.GENERATE_ITEM_TAGS]: "write",
+
+    // Consolidated tools (use "write" as they can do both read and write)
+    [TOOL_NAMES.CONTEXT]: "write",
+    [TOOL_NAMES.COLLECTION]: "write",
+    [TOOL_NAMES.TABLE]: "write",
+    [TOOL_NAMES.NOTE]: "write",
+    [TOOL_NAMES.RELATED_PAPERS]: "read",
+    [TOOL_NAMES.WEB]: "read",
+
+    // Legacy aliases
+    [TOOL_NAMES.CREATE_NOTE]: "write",
+    [TOOL_NAMES.EDIT_NOTE]: "write",
+    [TOOL_NAMES.ADD_TO_CONTEXT]: "write",
+    [TOOL_NAMES.REMOVE_FROM_CONTEXT]: "destructive",
     [TOOL_NAMES.LIST_CONTEXT]: "read",
     [TOOL_NAMES.LIST_TABLES]: "read",
-    [TOOL_NAMES.READ_TABLE]: "read",
-    [TOOL_NAMES.SEARCH_EXTERNAL]: "read",
-    [TOOL_NAMES.FIND_COLLECTION]: "read",
-    [TOOL_NAMES.LIST_COLLECTION]: "read",
-
-    // Write operations - can be undone or are additive
-    [TOOL_NAMES.CREATE_NOTE]: "write",
-    [TOOL_NAMES.ADD_TO_CONTEXT]: "write",
     [TOOL_NAMES.CREATE_TABLE]: "write",
     [TOOL_NAMES.ADD_TO_TABLE]: "write",
     [TOOL_NAMES.CREATE_TABLE_COLUMN]: "write",
     [TOOL_NAMES.GENERATE_TABLE_DATA]: "write",
-    [TOOL_NAMES.IMPORT_PAPER]: "write",
-    [TOOL_NAMES.CREATE_COLLECTION]: "write",
+    [TOOL_NAMES.READ_TABLE]: "read",
     [TOOL_NAMES.MOVE_ITEM]: "write",
-
-    // Destructive operations - require extra caution
-    [TOOL_NAMES.REMOVE_FROM_CONTEXT]: "destructive",
     [TOOL_NAMES.REMOVE_ITEM_FROM_COLLECTION]: "destructive",
+    [TOOL_NAMES.FIND_COLLECTION]: "read",
+    [TOOL_NAMES.CREATE_COLLECTION]: "write",
+    [TOOL_NAMES.LIST_COLLECTION]: "read",
     [TOOL_NAMES.SEARCH_WEB]: "read",
     [TOOL_NAMES.READ_WEBPAGE]: "read",
     [TOOL_NAMES.GET_CITATIONS]: "read",
     [TOOL_NAMES.GET_REFERENCES]: "read",
-    [TOOL_NAMES.GENERATE_ITEM_TAGS]: "write",
-    [TOOL_NAMES.EDIT_NOTE]: "write",
 };
 
 /**

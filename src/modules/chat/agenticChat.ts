@@ -162,7 +162,10 @@ export function createToolProcessUI(doc: Document): {
         label.textContent = "Processing task...";
         icon.textContent = "⚡";
         icon.style.animation = "pulse 1.5s infinite";
-        details.open = false; // Initially hidden while thinking logic runs
+        // Only close if we haven't started any tools yet
+        if (!listContainer.firstChild) {
+            details.open = false;
+        }
     };
 
     const setExecutingTool = (toolName: string) => {
@@ -171,6 +174,7 @@ export function createToolProcessUI(doc: Document): {
         icon.textContent = "🔧";
         icon.style.filter = "none";
         icon.style.animation = "pulse 1s infinite";
+        details.open = true; // Auto-expand when a tool is being called for visibility
     };
 
     const setCompleted = (count: number) => {
@@ -358,6 +362,7 @@ export interface AgentUIObserver {
     onMessageUpdate: (content: string) => void;
     onComplete: (content: string) => void;
     onError: (error: Error) => void;
+    onIterationStarted?: (iteration: number) => void;
 }
 
 /**
@@ -439,6 +444,10 @@ export async function handleAgenticChat(
         iteration++;
         Zotero.debug(`[seerai] Agent iteration ${iteration}`);
         agentTracer.startIteration(sessionId, iteration);
+
+        // Notify observer that a new iteration (reasoning turn) has started
+        // This allows resetting the UI status from "Calling Tool" back to "Thinking"
+        observer.onIterationStarted?.(iteration);
 
         let toolCallsReceived: ToolCall[] = [];
         let iterationContent = "";

@@ -7,9 +7,30 @@ import {
     AgentConfig,
     GetCitationsParams,
     GetReferencesParams,
+    RelatedPapersParams,
     ToolResult
 } from "./toolTypes";
 import { semanticScholarService } from "../../semanticScholar";
+
+/**
+ * Unified related papers tool dispatcher
+ * Routes to citations or references actions
+ */
+export async function executeRelatedPapers(
+    params: RelatedPapersParams,
+    config: AgentConfig
+): Promise<ToolResult> {
+    Zotero.debug(`[seerai] Tool: related_papers action=${params.action}`);
+
+    switch (params.action) {
+        case "citations":
+            return executeGetCitations({ paper_id: params.paper_id, limit: params.limit }, config);
+        case "references":
+            return executeGetReferences({ paper_id: params.paper_id, limit: params.limit }, config);
+        default:
+            return { success: false, error: `Unknown related_papers action: ${(params as any).action}` };
+    }
+}
 
 /**
  * Execute get_citations tool (Forward Citations)

@@ -16,11 +16,40 @@ import {
     GenerateTableDataResult,
     ReadTableParams,
     ReadTableResult,
+    TableParams,
     ToolResult,
     AgentConfig,
 } from "./toolTypes";
 import { getTableStore } from "../tableStore";
 import { TableConfig } from "../tableTypes";
+
+/**
+ * Unified table tool dispatcher
+ * Routes to list, create, add_papers, add_column, generate, or read actions
+ */
+export async function executeTable(
+    params: TableParams,
+    config: AgentConfig
+): Promise<ToolResult> {
+    Zotero.debug(`[seerai] Tool: table action=${params.action}`);
+
+    switch (params.action) {
+        case "list":
+            return executeListTables({}, config);
+        case "create":
+            return executeCreateTable({ name: params.name!, item_ids: params.paper_ids }, config);
+        case "add_papers":
+            return executeAddToTable({ table_id: params.table_id!, item_ids: params.paper_ids! }, config);
+        case "add_column":
+            return executeCreateTableColumn({ table_id: params.table_id!, column_name: params.column_name!, ai_prompt: params.ai_prompt! }, config);
+        case "generate":
+            return executeGenerateTableData({ table_id: params.table_id!, column_id: params.column_id, item_ids: params.item_ids }, config);
+        case "read":
+            return executeReadTable({ table_id: params.table_id, include_data: params.include_data }, config);
+        default:
+            return { success: false, error: `Unknown table action: ${(params as any).action}` };
+    }
+}
 
 // Track the most recently created table ID to handle "active" table lookups correctly
 // This solves race conditions when create_table_column is called immediately after create_table

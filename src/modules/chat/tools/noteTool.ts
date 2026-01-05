@@ -9,9 +9,40 @@ import {
     EditNoteParams,
     EditNoteResult,
     EditNoteOperation,
+    NoteParams,
     ToolResult,
     AgentConfig,
 } from "./toolTypes";
+
+/**
+ * Unified note tool dispatcher
+ * Routes to create or edit actions
+ */
+export async function executeNote(
+    params: NoteParams,
+    config: AgentConfig
+): Promise<ToolResult> {
+    Zotero.debug(`[seerai] Tool: note action=${params.action}`);
+
+    switch (params.action) {
+        case "create":
+            return executeCreateNote({
+                parent_item_id: params.parent_item_id,
+                collection_id: params.collection_id,
+                title: params.title!,
+                content: params.content!,
+                tags: params.tags,
+            }, config);
+        case "edit":
+            return executeEditNote({
+                note_id: params.note_id!,
+                operations: params.operations!,
+                convert_markdown: params.convert_markdown,
+            }, config);
+        default:
+            return { success: false, error: `Unknown note action: ${(params as any).action}` };
+    }
+}
 
 /**
  * Convert markdown to HTML for Zotero notes

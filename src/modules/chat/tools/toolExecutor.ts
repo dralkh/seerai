@@ -38,14 +38,21 @@ import {
     GetCitationsParams,
     GetReferencesParams,
     GenerateItemTagsParams,
+    // Unified types
+    ContextParams,
+    CollectionParams,
+    TableParams,
+    NoteParams,
+    RelatedPapersParams,
+    WebParams,
 } from "./toolTypes";
 
 import { safeValidateToolArgs, formatZodError } from "./schemas";
 
 import { executeSearchLibrary, executeSearchExternal, executeImportPaper } from "./searchTool";
 import { executeGetItemMetadata, executeReadItemContent } from "./readTool";
-import { executeCreateNote, executeEditNote } from "./noteTool";
-import { executeAddToContext, executeRemoveFromContext, executeListContext } from "./contextTool";
+import { executeCreateNote, executeEditNote, executeNote } from "./noteTool";
+import { executeAddToContext, executeRemoveFromContext, executeListContext, executeContext } from "./contextTool";
 import {
     executeListTables,
     executeCreateTable,
@@ -53,6 +60,7 @@ import {
     executeCreateTableColumn,
     executeGenerateTableData,
     executeReadTable,
+    executeTable,
 } from "./tableTool";
 import {
     executeFindCollection,
@@ -60,10 +68,12 @@ import {
     executeRemoveItemFromCollection,
     executeCreateCollection,
     executeListCollection,
+    executeCollection,
 } from "./collectionTool";
-import { executeSearchWeb, executeReadWebPage } from "./webTool";
-import { executeGetCitations, executeGetReferences } from "./citationTool";
+import { executeSearchWeb, executeReadWebPage, executeWeb } from "./webTool";
+import { executeGetCitations, executeGetReferences, executeRelatedPapers } from "./citationTool";
 import { executeGenerateItemTags } from "./tagTool";
+
 
 /**
  * Parse a tool call from API format to typed format
@@ -281,6 +291,26 @@ export async function executeToolCall(
                     validatedArgs as EditNoteParams,
                     config
                 );
+
+            // ==================== Consolidated Tools ====================
+
+            case TOOL_NAMES.CONTEXT:
+                return await executeContext(validatedArgs as ContextParams, config);
+
+            case TOOL_NAMES.COLLECTION:
+                return await executeCollection(validatedArgs as CollectionParams, config);
+
+            case TOOL_NAMES.TABLE:
+                return await executeTable(validatedArgs as TableParams, config);
+
+            case TOOL_NAMES.NOTE:
+                return await executeNote(validatedArgs as NoteParams, config);
+
+            case TOOL_NAMES.RELATED_PAPERS:
+                return await executeRelatedPapers(validatedArgs as RelatedPapersParams, config);
+
+            case TOOL_NAMES.WEB:
+                return await executeWeb(validatedArgs as WebParams, config);
 
             default:
                 return {

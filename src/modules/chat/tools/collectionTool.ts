@@ -12,9 +12,53 @@ import {
     ListCollectionResult,
     MoveItemParams,
     RemoveItemFromCollectionParams,
+    CollectionParams,
     ToolResult,
     AgentConfig,
 } from "./toolTypes";
+
+/**
+ * Unified collection tool dispatcher
+ * Routes to find, create, list, add_item, or remove_item actions
+ */
+export async function executeCollection(
+    params: CollectionParams,
+    config: AgentConfig
+): Promise<ToolResult> {
+    Zotero.debug(`[seerai] Tool: collection action=${params.action}`);
+
+    switch (params.action) {
+        case "find":
+            return executeFindCollection({ name: params.name!, library_id: params.library_id, parent_collection_id: params.parent_id }, config);
+        case "create":
+            return executeCreateCollection({ name: params.name!, parent_collection_id: params.parent_id, library_id: params.library_id }, config);
+        case "list":
+            return executeListCollection({ collection_id: params.collection_id! }, config);
+        case "add_item":
+            // For each item, call executeMoveItem
+            if (!params.item_ids || params.item_ids.length === 0) {
+                return { success: false, error: "item_ids required for add_item action" };
+            }
+            let added = 0;
+            for (const item_id of params.item_ids) {
+                const result = await executeMoveItem({ item_id, target_collection_id: params.collection_id!, remove_from_others: params.remove_from_others }, config);
+                if (result.success) added++;
+            }
+            return { success: true, summary: `Added ${added} item(s) to collection`, data: { added_count: added } };
+        case "remove_item":
+            if (!params.item_ids || params.item_ids.length === 0) {
+                return { success: false, error: "item_ids required for remove_item action" };
+            }
+            let removed = 0;
+            for (const item_id of params.item_ids) {
+                const result = await executeRemoveItemFromCollection({ item_id, collection_id: params.collection_id! }, config);
+                if (result.success) removed++;
+            }
+            return { success: true, summary: `Removed ${removed} item(s) from collection`, data: { removed_count: removed } };
+        default:
+            return { success: false, error: `Unknown collection action: ${(params as any).action}` };
+    }
+}
 
 /**
  * Helper to get a full path for a collection

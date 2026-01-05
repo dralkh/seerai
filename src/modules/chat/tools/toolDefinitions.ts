@@ -696,6 +696,176 @@ export const agentTools: ToolDefinition[] = [
                 required: ["item_id"]
             }
         }
+    },
+
+    // ==================== Consolidated Tools ====================
+
+    {
+        type: "function",
+        function: {
+            name: TOOL_NAMES.CONTEXT,
+            description: "Manage conversation context. Add items (papers, tags, collections) to focus the conversation, remove them, or list current context.",
+            parameters: {
+                type: "object",
+                properties: {
+                    action: {
+                        type: "string",
+                        enum: ["add", "remove", "list"],
+                        description: "Action to perform: 'add' items to context, 'remove' items, or 'list' current context"
+                    },
+                    items: {
+                        type: "array",
+                        description: "Items to add/remove (required for add/remove actions)",
+                        items: {
+                            type: "object",
+                            properties: {
+                                type: { type: "string", enum: ["paper", "tag", "author", "collection", "topic", "table"] },
+                                id: { type: "string", description: "Item ID (string or number)" },
+                                name: { type: "string" }
+                            },
+                            required: ["type"]
+                        }
+                    }
+                },
+                required: ["action"]
+            }
+        }
+    },
+
+    {
+        type: "function",
+        function: {
+            name: TOOL_NAMES.COLLECTION,
+            description: "Manage Zotero collections. Find, create, list contents, or add/remove items from collections.",
+            parameters: {
+                type: "object",
+                properties: {
+                    action: {
+                        type: "string",
+                        enum: ["find", "create", "list", "add_item", "remove_item"],
+                        description: "Action to perform on collections"
+                    },
+                    name: { type: "string", description: "Collection name (for find/create)" },
+                    collection_id: { type: "integer", description: "Collection ID (for list/add_item/remove_item)" },
+                    parent_id: { type: "integer", description: "Parent collection ID (for create/find)" },
+                    library_id: { type: "integer", description: "Library ID" },
+                    item_ids: { type: "array", items: { type: "integer" }, description: "Item IDs (for add_item/remove_item)" },
+                    remove_from_others: { type: "boolean", description: "Remove from other collections when adding" }
+                },
+                required: ["action"]
+            }
+        }
+    },
+
+    {
+        type: "function",
+        function: {
+            name: TOOL_NAMES.TABLE,
+            description: "Manage research analysis tables. List tables, create new tables, add papers, add columns, generate AI data, or read table contents.",
+            parameters: {
+                type: "object",
+                properties: {
+                    action: {
+                        type: "string",
+                        enum: ["list", "create", "add_papers", "add_column", "generate", "read"],
+                        description: "Action to perform on tables"
+                    },
+                    table_id: { type: "string", description: "Table ID (optional for list/read, required for others)" },
+                    name: { type: "string", description: "Table name (for create)" },
+                    paper_ids: { type: "array", items: { type: "integer" }, description: "Paper IDs (for create/add_papers)" },
+                    column_name: { type: "string", description: "Column name (for add_column)" },
+                    ai_prompt: { type: "string", description: "AI prompt for column data generation (for add_column)" },
+                    column_id: { type: "string", description: "Specific column ID (for generate)" },
+                    item_ids: { type: "array", items: { type: "integer" }, description: "Specific items (for generate)" },
+                    include_data: { type: "boolean", description: "Include cell data (for read)" }
+                },
+                required: ["action"]
+            }
+        }
+    },
+
+    {
+        type: "function",
+        function: {
+            name: TOOL_NAMES.NOTE,
+            description: "Create or edit Zotero notes. Create new notes attached to items/collections, or edit existing notes with replace/insert/append/prepend/delete operations.",
+            parameters: {
+                type: "object",
+                properties: {
+                    action: {
+                        type: "string",
+                        enum: ["create", "edit"],
+                        description: "Action: 'create' new note or 'edit' existing note"
+                    },
+                    parent_item_id: { type: "integer", description: "Parent item ID (for create)" },
+                    collection_id: { type: "integer", description: "Collection ID for orphan note (for create)" },
+                    title: { type: "string", description: "Note title (for create)" },
+                    content: { type: "string", description: "Note content in markdown (for create)" },
+                    tags: { type: "array", items: { type: "string" }, description: "Tags (for create)" },
+                    note_id: { type: "integer", description: "Note ID to edit (for edit)" },
+                    operations: {
+                        type: "array",
+                        description: "Edit operations (for edit)",
+                        items: {
+                            type: "object",
+                            properties: {
+                                type: { type: "string", enum: ["replace", "insert", "append", "prepend", "delete"] },
+                                search: { type: "string" },
+                                content: { type: "string" },
+                                position: { type: "string" },
+                                replace_all: { type: "boolean" }
+                            },
+                            required: ["type"]
+                        }
+                    },
+                    convert_markdown: { type: "boolean", description: "Convert markdown to HTML (for edit)" }
+                },
+                required: ["action"]
+            }
+        }
+    },
+
+    {
+        type: "function",
+        function: {
+            name: TOOL_NAMES.RELATED_PAPERS,
+            description: "Get related papers via citation network. Find papers that cite a given paper (forward citations) or papers it references (backward references).",
+            parameters: {
+                type: "object",
+                properties: {
+                    action: {
+                        type: "string",
+                        enum: ["citations", "references"],
+                        description: "Action: 'citations' for papers citing this one, 'references' for papers this one cites"
+                    },
+                    paper_id: { type: "string", description: "Semantic Scholar paper ID" },
+                    limit: { type: "integer", description: "Maximum results (default: 10)" }
+                },
+                required: ["action", "paper_id"]
+            }
+        }
+    },
+
+    {
+        type: "function",
+        function: {
+            name: TOOL_NAMES.WEB,
+            description: "Web research tools. Search the web for information or read/scrape a specific webpage.",
+            parameters: {
+                type: "object",
+                properties: {
+                    action: {
+                        type: "string",
+                        enum: ["search", "read"],
+                        description: "Action: 'search' the web or 'read' a specific URL"
+                    },
+                    query: { type: "string", description: "Search query (for search)" },
+                    url: { type: "string", description: "URL to read (for read)" },
+                    limit: { type: "integer", description: "Max results (for search, default: 5)" }
+                },
+                required: ["action"]
+            }
+        }
     }
 ];
 

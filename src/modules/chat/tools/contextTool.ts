@@ -6,12 +6,38 @@
 import {
     AddToContextParams,
     RemoveFromContextParams,
+    ContextParams,
     ContextOperationResult,
     ToolResult,
     AgentConfig,
 } from "./toolTypes";
 import { ChatContextManager } from "../context/contextManager";
 import { ContextItemType } from "../context/contextTypes";
+
+/**
+ * Unified context tool dispatcher
+ * Routes to add, remove, or list actions based on params.action
+ */
+export async function executeContext(
+    params: ContextParams,
+    config: AgentConfig
+): Promise<ToolResult> {
+    Zotero.debug(`[seerai] Tool: context action=${params.action}`);
+
+    switch (params.action) {
+        case "add":
+            return executeAddToContext({ items: params.items! }, config);
+        case "remove":
+            return executeRemoveFromContext({ items: params.items! }, config);
+        case "list":
+            return executeListContext(config);
+        default:
+            return {
+                success: false,
+                error: `Unknown context action: ${(params as any).action}`,
+            };
+    }
+}
 
 /**
  * Execute add_to_context tool

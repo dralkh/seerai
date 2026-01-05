@@ -7,9 +7,30 @@ import {
     AgentConfig,
     ReadWebPageParams,
     SearchWebParams,
+    WebParams,
     ToolResult
 } from "./toolTypes";
 import { getActiveProvider, getActiveProviderType, getProviderDisplayName } from "../../webSearchProvider";
+
+/**
+ * Unified web tool dispatcher
+ * Routes to search or read actions
+ */
+export async function executeWeb(
+    params: WebParams,
+    config: AgentConfig
+): Promise<ToolResult> {
+    Zotero.debug(`[seerai] Tool: web action=${params.action}`);
+
+    switch (params.action) {
+        case "search":
+            return executeSearchWeb({ query: params.query!, limit: params.limit }, config);
+        case "read":
+            return executeReadWebPage({ url: params.url! }, config);
+        default:
+            return { success: false, error: `Unknown web action: ${(params as any).action}` };
+    }
+}
 
 /**
  * Execute search_web tool

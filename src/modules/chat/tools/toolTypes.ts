@@ -223,24 +223,26 @@ export interface CreateNoteParams {
 }
 
 /**
- * Parameters for add_to_context tool
+ * Context item for context operations
  */
-export interface AddToContextParams {
-    items: Array<{
-        type: "paper" | "tag" | "author" | "collection" | "topic" | "table";
-        id?: number | string;
-        name?: string;
-    }>;
+export interface ContextItem {
+    type: "paper" | "tag" | "author" | "collection" | "topic" | "table";
+    id?: number | string;
+    name?: string;
 }
 
 /**
- * Parameters for remove_from_context tool
+ * Parameters for add_to_context tool (LEGACY - use ContextParams)
+ */
+export interface AddToContextParams {
+    items: ContextItem[];
+}
+
+/**
+ * Parameters for remove_from_context tool (LEGACY - use ContextParams)
  */
 export interface RemoveFromContextParams {
-    items: Array<{
-        type: "paper" | "tag" | "author" | "collection" | "topic" | "table";
-        id?: number | string;
-    }>;
+    items: ContextItem[];
 }
 
 /**
@@ -693,36 +695,159 @@ export interface EditNoteResult {
     new_content_length: number;
 }
 
+// ==================== Unified Tool Parameters (Consolidated) ====================
+
+/**
+ * Unified context tool parameters
+ * Consolidates: add_to_context, remove_from_context, list_context
+ */
+export interface ContextParams {
+    action: "add" | "remove" | "list";
+    items?: ContextItem[];  // Required for add/remove
+}
+
+/**
+ * Unified collection tool parameters
+ * Consolidates: find_collection, create_collection, list_collection, move_item, remove_item_from_collection
+ */
+export interface CollectionParams {
+    action: "find" | "create" | "list" | "add_item" | "remove_item";
+    // For find
+    name?: string;
+    // For list/add_item/remove_item
+    collection_id?: number;
+    // For create
+    parent_id?: number;
+    library_id?: number;
+    // For add_item/remove_item
+    item_ids?: number[];
+    remove_from_others?: boolean;
+}
+
+/**
+ * Unified table tool parameters
+ * Consolidates: list_tables, create_table, add_to_table, create_table_column, generate_table_data, read_table
+ */
+export interface TableParams {
+    action: "list" | "create" | "add_papers" | "add_column" | "generate" | "read";
+    // Common
+    table_id?: string;
+    // For create
+    name?: string;
+    // For add_papers
+    paper_ids?: number[];
+    // For add_column
+    column_name?: string;
+    ai_prompt?: string;
+    // For generate
+    column_id?: string;
+    item_ids?: number[];
+    // For read
+    include_data?: boolean;
+}
+
+/**
+ * Unified note tool parameters
+ * Consolidates: create_note, edit_note
+ */
+export interface NoteParams {
+    action: "create" | "edit";
+    // For create
+    parent_item_id?: number;
+    collection_id?: number;
+    title?: string;
+    content?: string;
+    tags?: string[];
+    // For edit
+    note_id?: number;
+    operations?: EditNoteOperation[];
+    convert_markdown?: boolean;
+}
+
+/**
+ * Unified related papers tool parameters
+ * Consolidates: get_citations, get_references
+ */
+export interface RelatedPapersParams {
+    action: "citations" | "references";
+    paper_id: string;
+    limit?: number;
+}
+
+/**
+ * Unified web tool parameters
+ * Consolidates: search_web, read_webpage
+ */
+export interface WebParams {
+    action: "search" | "read";
+    // For search
+    query?: string;
+    limit?: number;
+    // For read
+    url?: string;
+}
+
 // ==================== Tool Name Constants ====================
 
 export const TOOL_NAMES = {
+    // Core tools (unchanged)
     SEARCH_LIBRARY: "search_library",
+    SEARCH_EXTERNAL: "search_external",
     GET_ITEM_METADATA: "get_item_metadata",
     READ_ITEM_CONTENT: "read_item_content",
-    CREATE_NOTE: "create_note",
-    ADD_TO_CONTEXT: "add_to_context",
-    REMOVE_FROM_CONTEXT: "remove_from_context",
-    LIST_CONTEXT: "list_context",
-    LIST_TABLES: "list_tables",
-    CREATE_TABLE: "create_table",
-    ADD_TO_TABLE: "add_to_table",
-    CREATE_TABLE_COLUMN: "create_table_column",
-    GENERATE_TABLE_DATA: "generate_table_data",
-    READ_TABLE: "read_table",
-    SEARCH_EXTERNAL: "search_external",
     IMPORT_PAPER: "import_paper",
-    MOVE_ITEM: "move_item",
-    REMOVE_ITEM_FROM_COLLECTION: "remove_item_from_collection",
-    FIND_COLLECTION: "find_collection",
-    CREATE_COLLECTION: "create_collection",
-    LIST_COLLECTION: "list_collection",
-    // New Tools
-    SEARCH_WEB: "search_web",
-    READ_WEBPAGE: "read_webpage",
-    GET_CITATIONS: "get_citations",
-    GET_REFERENCES: "get_references",
     GENERATE_ITEM_TAGS: "generate_item_tags",
+
+    // Consolidated tools
+    CONTEXT: "context",
+    COLLECTION: "collection",
+    TABLE: "table",
+    NOTE: "note",
+    RELATED_PAPERS: "related_papers",
+    WEB: "web",
+
+    // Legacy aliases (for backwards compatibility during migration)
+    /** @deprecated Use CONTEXT with action="add" */
+    ADD_TO_CONTEXT: "add_to_context",
+    /** @deprecated Use CONTEXT with action="remove" */
+    REMOVE_FROM_CONTEXT: "remove_from_context",
+    /** @deprecated Use CONTEXT with action="list" */
+    LIST_CONTEXT: "list_context",
+    /** @deprecated Use TABLE with action="list" */
+    LIST_TABLES: "list_tables",
+    /** @deprecated Use TABLE with action="create" */
+    CREATE_TABLE: "create_table",
+    /** @deprecated Use TABLE with action="add_papers" */
+    ADD_TO_TABLE: "add_to_table",
+    /** @deprecated Use TABLE with action="add_column" */
+    CREATE_TABLE_COLUMN: "create_table_column",
+    /** @deprecated Use TABLE with action="generate" */
+    GENERATE_TABLE_DATA: "generate_table_data",
+    /** @deprecated Use TABLE with action="read" */
+    READ_TABLE: "read_table",
+    /** @deprecated Use NOTE with action="create" */
+    CREATE_NOTE: "create_note",
+    /** @deprecated Use NOTE with action="edit" */
     EDIT_NOTE: "edit_note",
+    /** @deprecated Use COLLECTION with action="find" */
+    FIND_COLLECTION: "find_collection",
+    /** @deprecated Use COLLECTION with action="create" */
+    CREATE_COLLECTION: "create_collection",
+    /** @deprecated Use COLLECTION with action="list" */
+    LIST_COLLECTION: "list_collection",
+    /** @deprecated Use COLLECTION with action="add_item" */
+    MOVE_ITEM: "move_item",
+    /** @deprecated Use COLLECTION with action="remove_item" */
+    REMOVE_ITEM_FROM_COLLECTION: "remove_item_from_collection",
+    /** @deprecated Use WEB with action="search" */
+    SEARCH_WEB: "search_web",
+    /** @deprecated Use WEB with action="read" */
+    READ_WEBPAGE: "read_webpage",
+    /** @deprecated Use RELATED_PAPERS with action="citations" */
+    GET_CITATIONS: "get_citations",
+    /** @deprecated Use RELATED_PAPERS with action="references" */
+    GET_REFERENCES: "get_references",
 } as const;
 
 export type ToolName = typeof TOOL_NAMES[keyof typeof TOOL_NAMES];
+

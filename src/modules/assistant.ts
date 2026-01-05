@@ -1726,7 +1726,14 @@ export class Assistant {
       try {
         Zotero.debug(`[seerai] Restoring active agent session UI - isThinking: ${activeAgentSession.isThinking}, toolResults: ${activeAgentSession.toolResults.length}, fullResponse length: ${activeAgentSession.fullResponse?.length || 0}`);
 
-        const streamingDiv = this.appendMessage(messagesArea, "Assistant", "");
+        const streamingDiv = this.appendMessage(
+          messagesArea,
+          "Assistant",
+          activeAgentSession.fullResponse,
+          "",
+          false,
+          activeAgentSession.toolResults
+        );
         const contentDiv = streamingDiv.querySelector(
           "[data-content]",
         ) as HTMLElement;
@@ -1735,52 +1742,85 @@ export class Assistant {
         activeAgentSession.messagesArea = messagesArea;
         activeAgentSession.contentDiv = contentDiv;
 
-        // Restore response content
-        if (activeAgentSession.isThinking && !activeAgentSession.fullResponse) {
-          contentDiv.innerHTML = `
-            <div class="typing-indicator" style="display: flex; align-items: center; gap: 4px; color: var(--text-secondary); font-style: italic;">
-                <span>Thinking</span>
-                <span class="dot" style="animation: blink 1.4s infinite .2s;">.</span>
-                <span class="dot" style="animation: blink 1.4s infinite .4s;">.</span>
-                <span class="dot" style="animation: blink 1.4s infinite .6s;">.</span>
-            </div>
-          `;
-        } else if (activeAgentSession.fullResponse) {
-          // Create markdown container for text content
-          const mdContainer = doc.createElement("div");
-          mdContainer.className = "markdown-content";
-          mdContainer.setAttribute("data-raw", activeAgentSession.fullResponse);
-          mdContainer.innerHTML = parseMarkdown(activeAgentSession.fullResponse);
-          contentDiv.appendChild(mdContainer);
+        // If it's thinking and has NO text yet AND no tools yet, ensure indicator is visible
+        if (activeAgentSession.isThinking && !activeAgentSession.fullResponse && activeAgentSession.toolResults.length === 0) {
+          if (!contentDiv.querySelector(".typing-indicator")) {
+            contentDiv.innerHTML = `
+              <div class="typing-indicator" style="display: flex; align-items: center; gap: 4px; color: var(--text-secondary); font-style: italic;">
+                  <span>Thinking</span>
+                  <span class="dot" style="animation: blink 1.4s infinite .2s;">.</span>
+                  <span class="dot" style="animation: blink 1.4s infinite .4s;">.</span>
+                  <span class="dot" style="animation: blink 1.4s infinite .6s;">.</span>
+              </div>
+            `;
+          }
         }
 
-        // ALWAYS create toolProcessState if session is active (even with 0 results)
-        // This ensures subsequent tool calls have a valid container
-        const { container, setThinking, setExecutingTool, setCompleted, setFailed } = createToolProcessUI(doc);
-        contentDiv.appendChild(container);
+        // Re-extract the toolProcessState helpers for the restored UI
+        // We find the existing container created by appendMessage
+        const toolProcessContainer = streamingDiv.querySelector('.tool-process-container') as HTMLElement;
+        if (toolProcessContainer) {
+          const label = toolProcessContainer.querySelector('.process-label') as HTMLElement;
+          const icon = toolProcessContainer.querySelector('.process-icon') as HTMLElement;
+          const listContainer = toolProcessContainer.querySelector('.tool-list-container') as HTMLElement;
 
-        // Access internal list container
-        const listContainer = container.querySelector(".tool-list-container");
-        const targetContainer = (listContainer || container) as HTMLElement;
+          const setThinking = () => {
+            if (label) label.textContent = "Processing task...";
+            if (icon) {
+              icon.textContent = "⚡";
+              icon.style.animation = "pulse 1.5s infinite";
+            }
+            (toolProcessContainer as any).open = false;
+          };
+          const setExecutingTool = (toolName: string) => {
+            const displayName = toolName.replace(/_/g, " ");
+            if (label) label.textContent = `Calling ${displayName}...`;
+            if (icon) {
+              icon.textContent = "🔧";
+              icon.style.animation = "pulse 1s infinite";
+            }
+          };
+          const setCompleted = (count: number) => {
+            if (label) label.textContent = `Completed ${count} step${count !== 1 ? 's' : ''}`;
+            if (icon) {
+              icon.textContent = "✓";
+              icon.style.animation = "none";
+              icon.style.color = "var(--accent-green, #34C759)";
+            }
+          };
+          const setFailed = (error: string) => {
+            if (label) {
+              label.textContent = `Failed: ${error}`;
+              label.style.color = "var(--accent-red, #FF3B30)";
+            }
+            if (icon) {
+              icon.textContent = "✗";
+              icon.style.animation = "none";
+              icon.style.color = "var(--accent-red, #FF3B30)";
+            }
+            (toolProcessContainer as any).open = true;
+          };
 
-        // Update session references for tool container
-        activeAgentSession.toolProcessState = { container, setThinking, setExecutingTool, setCompleted, setFailed };
-        activeAgentSession.toolContainer = targetContainer;
+          activeAgentSession.toolProcessState = { container: toolProcessContainer, setThinking, setExecutingTool, setCompleted, setFailed };
+          activeAgentSession.toolContainer = listContainer;
 
-        // Re-hydrate existing tool cards
-        activeAgentSession.toolResults.forEach(tr => {
-          const toolUI = createToolExecutionUI(doc, tr.toolCall, tr.result);
-          targetContainer.appendChild(toolUI);
-          // CRITICAL: Update the reference so the observer updates THIS element
-          tr.uiElement = toolUI;
-        });
+          // Set appropriate state indicator
+          if (activeAgentSession.isThinking || activeAgentSession.toolResults.some(tr => !tr.result)) {
+            setThinking();
+          } else if (activeAgentSession.toolResults.length > 0) {
+            setCompleted(activeAgentSession.toolResults.length);
+          }
 
-        // Set appropriate state indicator
-        if (activeAgentSession.isThinking || activeAgentSession.toolResults.some(tr => !tr.result)) {
-          setThinking();
-        } else if (activeAgentSession.toolResults.length > 0) {
-          setCompleted(activeAgentSession.toolResults.length);
+          // CRITICAL: Update the uiElement references in toolResults so observer updates THIS element
+          const toolCards = listContainer.querySelectorAll('.tool-execution-card');
+          activeAgentSession.toolResults.forEach((tr, idx) => {
+            if (toolCards[idx]) {
+              tr.uiElement = toolCards[idx] as HTMLElement;
+            }
+          });
         }
+
+
 
         // Show stop button if streaming
         const stopBtn = doc.getElementById("stop-btn") as HTMLElement | null;
@@ -19367,25 +19407,24 @@ ${tableRows}  </tbody>
             return;
           }
 
+          if (session.isThinking && displayContent) {
+            // Clear initial typing indicator if present
+            if (session.contentDiv.querySelector(".typing-indicator")) {
+              session.contentDiv.innerHTML = "";
+            }
+            session.isThinking = false;
+          }
+
           // Ensure markdown container exists
           let mdContainer = session.contentDiv.querySelector(".markdown-content");
           if (!mdContainer) {
-            // If we are upgrading from a plain div, wrap existing content? 
-            // Or just create it. For streaming, we are usually starting fresh or appending.
             mdContainer = session.contentDiv.ownerDocument!.createElement("div");
             mdContainer.className = "markdown-content";
-            // Prepend or append? If tools exist, tools are appended. 
-            // Text usually comes first or wraps. For simplicity, we keep text at top.
             if (session.contentDiv.firstChild) {
               session.contentDiv.insertBefore(mdContainer, session.contentDiv.firstChild);
             } else {
               session.contentDiv.appendChild(mdContainer);
             }
-          }
-
-          if (session.isThinking && displayContent) {
-            mdContainer.innerHTML = "";
-            session.isThinking = false;
           }
 
           // Only update if we have content to display
@@ -19399,6 +19438,14 @@ ${tableRows}  </tbody>
           smartScrollToBottom();
         }
       },
+      onIterationStarted: (iteration: number) => {
+        if (!Assistant.isStreaming) return;
+        session.isThinking = true;
+
+        if (session.toolProcessState) {
+          session.toolProcessState.setThinking();
+        }
+      },
       onToolCallStarted: (toolCall: ToolCall) => {
         if (!Assistant.isStreaming) return;
         session.isThinking = false;
@@ -19408,6 +19455,11 @@ ${tableRows}  </tbody>
 
           // Initial creation of the process container logic
           if (!session.toolProcessState) {
+            // Clear initial typing indicator if it's the only thing there
+            if (session.contentDiv.querySelector(".typing-indicator") && !session.fullResponse) {
+              session.contentDiv.innerHTML = "";
+            }
+
             const processUI = createToolProcessUI(doc);
             session.toolProcessState = processUI;
             session.contentDiv.appendChild(processUI.container);
@@ -19457,6 +19509,11 @@ ${tableRows}  </tbody>
         const cleanedContent = stripThinkTags(content);
         session.fullResponse = cleanedContent;
         if (session.contentDiv) {
+          // Clear initial typing indicator if we now have cleaned content to show
+          if (cleanedContent && session.contentDiv.querySelector(".typing-indicator")) {
+            session.contentDiv.innerHTML = "";
+          }
+
           let mdContainer = session.contentDiv.querySelector(".markdown-content");
           if (!mdContainer) {
             mdContainer = session.contentDiv.ownerDocument!.createElement("div");
@@ -19471,7 +19528,9 @@ ${tableRows}  </tbody>
         }
       },
       onComplete: async (content: string) => {
-        if (!Assistant.isStreaming) return;
+        // NOTE: Removed early return check for isStreaming - we MUST render final content
+        // even if streaming was stopped, otherwise the response is hidden from user
+
         // Strip think tags from the final content
         const cleanedContent = stripThinkTags(content);
         session.fullResponse = cleanedContent;
@@ -19482,6 +19541,23 @@ ${tableRows}  </tbody>
           const typingIndicator = session.contentDiv.querySelector('.typing-indicator');
           if (typingIndicator) {
             typingIndicator.remove();
+          }
+
+          // CRITICAL: Ensure final content is rendered to DOM
+          // This fixes the hidden text bug after many tool calls
+          let mdContainer = session.contentDiv.querySelector(".markdown-content");
+          if (!mdContainer) {
+            mdContainer = session.contentDiv.ownerDocument!.createElement("div");
+            mdContainer.className = "markdown-content";
+            if (session.contentDiv.firstChild) {
+              session.contentDiv.insertBefore(mdContainer, session.contentDiv.firstChild);
+            } else {
+              session.contentDiv.appendChild(mdContainer);
+            }
+          }
+          if (cleanedContent) {
+            mdContainer.setAttribute("data-raw", cleanedContent);
+            mdContainer.innerHTML = parseMarkdown(cleanedContent);
           }
         }
 
@@ -20248,11 +20324,16 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
       attributes: { "data-content": "true", "data-raw": text },
       styles: { lineHeight: "1.6" }, // Increased line height
     });
-    // Parse markdown to HTML for rendering
-    contentDiv.innerHTML = parseMarkdown(text);
+
+    // Standard markdown container structure (used by streaming logic)
+    const mdContainer = doc.createElement("div");
+    mdContainer.className = "markdown-content";
+    mdContainer.setAttribute("data-raw", text);
+    mdContainer.innerHTML = parseMarkdown(text);
+    contentDiv.appendChild(mdContainer);
 
     // Bind copy button events for code blocks
-    const copyBtns = contentDiv.querySelectorAll(".code-copy-btn");
+    const copyBtns = mdContainer.querySelectorAll(".code-copy-btn");
     copyBtns.forEach((btn: Element) => {
       btn.addEventListener("click", () => {
         const codeId = btn.getAttribute("data-code-id");
@@ -20517,6 +20598,7 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
         msg.content,
         msg.id,
         isLastUserMsg,
+        msg.toolResults, // Pass toolResults so they're re-rendered on tab switch
       );
     });
   }
