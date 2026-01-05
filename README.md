@@ -1,10 +1,8 @@
 # seerai
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/70e618aa-5c92-45fc-bec0-bf253de09ad4" 
-       alt="seerai logo"
-       width="300"
-       height="300">
+  <img width="200" height="200" alt="logo" src="https://github.com/user-attachments/assets/26e6aa5b-4b70-464a-8198-6ec48544593d" />
+  
 </p>
 
 <p align="center">
