@@ -10152,52 +10152,28 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               cell.innerHTML = `<span style="color: #c62828; font-size: 11px;">✗ ${message || 'Error'}</span>`;
               cell.title = message || '';
               break;
-            case 'notfound':
-              // Show fallback buttons
-              cell.innerHTML = "";
-              const container = doc.createElement("div");
-              container.className = "fallback-actions";
-              container.style.display = "flex";
-              container.style.gap = "6px";
-              container.style.justifyContent = "center";
-              container.style.alignItems = "center";
-
-              // Semantic Scholar Link
-              const ssLink = doc.createElement("a");
-              ssLink.innerText = "[Semantic Search]";
-              ssLink.title = "Search Metadata and PDF on Semantic Scholar";
-              ssLink.style.color = "var(--highlight-primary)";
-              ssLink.style.cursor = "pointer";
-              ssLink.style.fontSize = "10px";
-              ssLink.style.textDecoration = "underline";
+            case 'notfound': {
               const taskItem = tasks.find(t => t.paperId === paperId);
-              if (taskItem) {
-                ssLink.onclick = (e) => {
-                  e.stopPropagation();
-                  Assistant.searchSemanticScholarForTableItem(taskItem.item, ssLink);
-                };
-              }
-              container.appendChild(ssLink);
-
-              // Firecrawl Link (if configured)
-              if (firecrawlService.isConfigured() && taskItem) {
-                const fireLink = doc.createElement("a");
-                fireLink.innerText = "[Firecrawl Search]";
-                fireLink.title = "Deep web search for PDF via Firecrawl";
-                fireLink.style.color = "var(--highlight-primary)";
-                fireLink.style.cursor = "pointer";
-                fireLink.style.fontSize = "10px";
-                fireLink.style.textDecoration = "underline";
-                fireLink.style.marginLeft = "4px";
-                fireLink.onclick = (e) => {
-                  e.stopPropagation();
-                  Assistant.searchFirecrawlForTableItem(taskItem.item, fireLink);
-                };
-                container.appendChild(fireLink);
+              if (!taskItem) {
+                cell.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">❌ Not found</span>`;
+                break;
               }
 
-              cell.appendChild(container);
+              // Resolve identifiers and source link
+              const doi = taskItem.item.getField("DOI") as string;
+              const arxiv = extractArxivFromItem(taskItem.item);
+              const pmid = extractPmidFromItem(taskItem.item);
+              const itemUrl = taskItem.item.getField("url") as string;
+              const sourceLink = getSourceLinkForPaper(doi, arxiv, pmid, undefined, itemUrl);
+
+              if (sourceLink) {
+                // Clicking this will trigger the expanded menu (Attach, Retry, Note) via the TD click listener
+                cell.innerHTML = `<span class="source-link-btn" data-url="${sourceLink}" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer; text-decoration: underline;">🔗 Source-Link</span>`;
+              } else {
+                cell.innerHTML = `<span class="attach-pdf-btn" data-item-id="${paperId}" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer; text-decoration: underline;">⬇️ Attach</span>`;
+              }
               break;
+            }
           }
         }
       });
@@ -10232,12 +10208,41 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         return success;
       },
 
-      onTaskComplete: (task, success) => {
+      onTaskComplete: async (task, success) => {
         if (success) {
           Zotero.debug(`[seerai] Found PDF for item ${task.paperId}`);
           updateCellStatus(task.paperId, 'found');
+
+          // Persist the success state
+          if (currentTableConfig) {
+            if (!currentTableConfig.pdfDiscoveryData) currentTableConfig.pdfDiscoveryData = {};
+            currentTableConfig.pdfDiscoveryData[task.paperId] = {
+              status: 'found',
+              discoveredAt: new Date().toISOString(),
+            };
+            const tableStore = getTableStore();
+            await tableStore.saveConfig(currentTableConfig);
+          }
         } else {
           updateCellStatus(task.paperId, 'notfound');
+
+          // Persist the failure/source-link state
+          if (currentTableConfig) {
+            const doi = task.item.getField("DOI") as string;
+            const arxiv = extractArxivFromItem(task.item);
+            const pmid = extractPmidFromItem(task.item);
+            const itemUrl = task.item.getField("url") as string;
+            const sourceLink = getSourceLinkForPaper(doi, arxiv, pmid, undefined, itemUrl);
+
+            if (!currentTableConfig.pdfDiscoveryData) currentTableConfig.pdfDiscoveryData = {};
+            currentTableConfig.pdfDiscoveryData[task.paperId] = {
+              status: sourceLink ? 'source_link' : 'not_found',
+              sourceUrl: sourceLink || undefined,
+              discoveredAt: new Date().toISOString(),
+            };
+            const tableStore = getTableStore();
+            await tableStore.saveConfig(currentTableConfig);
+          }
         }
       },
 
@@ -10247,12 +10252,24 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           updateCellStatus(task.paperId, 'retrying');
         } else {
           Zotero.debug(`[seerai] PDF search failed for ${task.paperId}: ${error.message}`);
+          updateCellStatus(task.paperId, 'error', error.message);
         }
       },
 
-      onTaskSkip: (task, reason) => {
+      onTaskSkip: async (task, reason) => {
         Zotero.debug(`[seerai] Skipped PDF search for ${task.paperId}: ${reason}`);
         updateCellStatus(task.paperId, 'skipped', reason);
+
+        // Persist skip state
+        if (currentTableConfig) {
+          if (!currentTableConfig.pdfDiscoveryData) currentTableConfig.pdfDiscoveryData = {};
+          currentTableConfig.pdfDiscoveryData[task.paperId] = {
+            status: 'error',
+            discoveredAt: new Date().toISOString(),
+          };
+          const tableStore = getTableStore();
+          await tableStore.saveConfig(currentTableConfig);
+        }
       },
     });
 
@@ -10386,29 +10403,23 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           }
         }
 
-        // Step 2: Run full PDF discovery pipeline with updated item (now has identifiers)
+        // Step 2: Update table cell metadata and feedback
+        // We no longer trigger the full findAndAttachPdfForItem automatically here 
+        // because it's redundant if the batch search just finished and failed.
         if (!pdfAttached) {
-          btn.innerText = "🔍 Searching...";
-          const success = await findAndAttachPdfForItem(item, (step) => {
-            // Truncate step text to fit in button
-            btn.innerText = step.length > 15 ? step.slice(0, 15) + "..." : step;
-          });
-          if (success) {
-            btn.innerText = "✓";
-            btn.title = "PDF Attached via discovery pipeline!";
-            pdfAttached = true;
+          if (metadataUpdated) {
+            btn.innerText = "✓ Metadata Updated";
+            btn.title = "Found new identifiers (DOI/PMID). Re-rendering row for better direct links...";
 
-            // Update cell to show "Process PDF"
-            const tr = btn.closest("tr");
-            if (tr) {
-              const cells = tr.querySelectorAll("td");
-              cells.forEach((td: HTMLElement) => {
-                if (td.contains(btn)) {
-                  td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">📄 Process PDF</span>`;
-                }
-              });
-            }
-            return;
+            // Re-render interface after a short delay to show updated buttons (Source-Link will now be better)
+            setTimeout(() => {
+              if (currentContainer && currentItem) {
+                Assistant.renderInterface(currentContainer, currentItem);
+              }
+            }, 1500);
+          } else {
+            btn.innerText = "🔍 No PDF";
+            btn.title = "Search finished: Metadata already correct, no OA PDF found on Semantic Scholar.";
           }
         }
 
