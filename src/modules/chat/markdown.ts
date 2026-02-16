@@ -8,104 +8,119 @@ import { highlightCode } from "./syntaxHighlight";
 /**
  * Strip <think> tags and their content from text.
  * Handles both complete <think>...</think> blocks and incomplete ones during streaming.
- * 
+ *
  * @param text - The input text that may contain think tags
  * @returns The text with think tags removed
  */
 export function stripThinkTags(text: string): string {
-    if (!text) return '';
+  if (!text) return "";
 
-    // Remove complete <think>...</think> blocks (including multiline content)
-    let result = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+  // Remove complete <think>...</think> blocks (including multiline content)
+  let result = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
 
-    // Remove incomplete opening <think> tag with any content after it (for streaming)
-    // This handles the case where we're mid-stream inside a think block
-    result = result.replace(/<think>[\s\S]*$/gi, '');
+  // Remove incomplete opening <think> tag with any content after it (for streaming)
+  // This handles the case where we're mid-stream inside a think block
+  result = result.replace(/<think>[\s\S]*$/gi, "");
 
-    return result.trim();
+  return result.trim();
 }
 
 /**
  * Check if content is currently inside an incomplete think block (streaming).
  * Used to determine if we should show "Thinking..." indicator.
- * 
+ *
  * @param text - The streaming text content
  * @returns true if currently inside an incomplete think block
  */
 export function isInsideThinkBlock(text: string): boolean {
-    if (!text) return false;
+  if (!text) return false;
 
-    // Count opening and closing think tags
-    const openTags = (text.match(/<think>/gi) || []).length;
-    const closeTags = (text.match(/<\/think>/gi) || []).length;
+  // Count opening and closing think tags
+  const openTags = (text.match(/<think>/gi) || []).length;
+  const closeTags = (text.match(/<\/think>/gi) || []).length;
 
-    // If we have more opening than closing, we're inside a think block
-    return openTags > closeTags;
+  // If we have more opening than closing, we're inside a think block
+  return openTags > closeTags;
 }
 
 /**
  * Process streaming content, handling think tags appropriately.
  * Returns the content to display, or empty string if should show "Thinking...".
- * 
+ *
  * @param text - The full streaming response so far
  * @returns Object with displayContent and isThinking flag
  */
-export function processStreamingContent(text: string): { displayContent: string; isThinking: boolean } {
-    if (!text) return { displayContent: '', isThinking: false };
+export function processStreamingContent(text: string): {
+  displayContent: string;
+  isThinking: boolean;
+} {
+  if (!text) return { displayContent: "", isThinking: false };
 
-    const strippedContent = stripThinkTags(text);
-    const inThinkBlock = isInsideThinkBlock(text);
+  const strippedContent = stripThinkTags(text);
+  const inThinkBlock = isInsideThinkBlock(text);
 
-    // If we're inside a think block and have no visible content yet, show thinking indicator
-    if (inThinkBlock && strippedContent.length === 0) {
-        return { displayContent: '', isThinking: true };
-    }
+  // If we're inside a think block and have no visible content yet, show thinking indicator
+  if (inThinkBlock && strippedContent.length === 0) {
+    return { displayContent: "", isThinking: true };
+  }
 
-    return { displayContent: strippedContent, isThinking: false };
+  return { displayContent: strippedContent, isThinking: false };
 }
 
 /**
  * Escape HTML entities to prevent XSS
  */
 function escapeHtml(text: string): string {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 /**
  * Parse inline markdown elements
  */
 function parseInline(text: string): string {
-    let result = escapeHtml(text);
+  let result = escapeHtml(text);
 
-    // Bold: **text** or __text__
-    result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    result = result.replace(/__(.+?)__/g, '<strong>$1</strong>');
+  // Bold: **text** or __text__
+  result = result.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  result = result.replace(/__(.+?)__/g, "<strong>$1</strong>");
 
-    // Italic: *text* or _text_
-    result = result.replace(/\*([^*]+?)\*/g, '<em>$1</em>');
-    result = result.replace(/(?<![\\w])_([^_]+?)_(?![\\w])/g, '<em>$1</em>');
+  // Italic: *text* or _text_
+  result = result.replace(/\*([^*]+?)\*/g, "<em>$1</em>");
+  result = result.replace(/(?<![\\w])_([^_]+?)_(?![\\w])/g, "<em>$1</em>");
 
-    // Strikethrough: ~~text~~
-    result = result.replace(/~~(.+?)~~/g, '<del>$1</del>');
+  // Strikethrough: ~~text~~
+  result = result.replace(/~~(.+?)~~/g, "<del>$1</del>");
 
-    // Inline code: `code`
-    result = result.replace(/`([^`]+?)`/g, '<code style="background: rgba(0,0,0,0.08); padding: 2px 4px; border-radius: 3px; font-family: monospace; font-size: 0.9em;">$1</code>');
+  // Inline code: `code`
+  result = result.replace(
+    /`([^`]+?)`/g,
+    '<code style="background: rgba(0,0,0,0.08); padding: 2px 4px; border-radius: 3px; font-family: monospace; font-size: 0.9em;">$1</code>',
+  );
 
-    // Standard Links: [text](url) - only http/https links work in Zotero
-    result = result.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" style="color: #1976d2; text-decoration: underline;">$1</a>');
+  // Standard Links: [text](url) - only http/https links work in Zotero
+  result = result.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+    '<a href="$2" style="color: #1976d2; text-decoration: underline;">$1</a>',
+  );
 
-    // Style quoted paper titles (but not as links since Zotero blocks custom URIs)
-    result = result.replace(/&quot;([^&]+)&quot;/g, '<em style="color: #2e7d32;">"$1"</em>');
+  // Style quoted paper titles (but not as links since Zotero blocks custom URIs)
+  result = result.replace(
+    /&quot;([^&]+)&quot;/g,
+    '<em style="color: #2e7d32;">"$1"</em>',
+  );
 
-    // Citation references: [1], [1,2], [1, 2], etc. - make clickable for navigation
-    result = result.replace(/\[(\d+(?:\s*,\s*\d+)*)\]/g, '<span class="citation-link" data-citation-indices="$1" style="color: #1976d2; cursor: pointer; text-decoration: underline; font-weight: 500;" title="Click to scroll to paper">[$1]</span>');
+  // Citation references: [1], [1,2], [1, 2], etc. - make clickable for navigation
+  result = result.replace(
+    /\[(\d+(?:\s*,\s*\d+)*)\]/g,
+    '<span class="citation-link" data-citation-indices="$1" style="color: #1976d2; cursor: pointer; text-decoration: underline; font-weight: 500;" title="Click to scroll to paper">[$1]</span>',
+  );
 
-    return result;
+  return result;
 }
 
 /**
@@ -113,261 +128,291 @@ function parseInline(text: string): string {
  * Especially important for streaming content.
  */
 export function balanceTags(html: string): string {
-    if (!html) return '';
+  if (!html) return "";
 
-    const stack: string[] = [];
-    let result = '';
-    const tagRegex = /<(\/?[a-z1-6]+)([^>]*?)(\/?)>/gi;
-    let lastIndex = 0;
-    let match;
+  const stack: string[] = [];
+  let result = "";
+  const tagRegex = /<(\/?[a-z1-6]+)([^>]*?)(\/?)>/gi;
+  let lastIndex = 0;
+  let match;
 
-    while ((match = tagRegex.exec(html)) !== null) {
-        // Add text before the tag
-        result += html.substring(lastIndex, match.index);
-        lastIndex = tagRegex.lastIndex;
+  while ((match = tagRegex.exec(html)) !== null) {
+    // Add text before the tag
+    result += html.substring(lastIndex, match.index);
+    lastIndex = tagRegex.lastIndex;
 
-        const fullTag = match[0];
-        const tag = match[1].toLowerCase();
-        const isSelfClosing = match[3] === '/' || ['hr', 'br', 'img', 'br'].includes(tag);
+    const fullTag = match[0];
+    const tag = match[1].toLowerCase();
+    const isSelfClosing =
+      match[3] === "/" || ["hr", "br", "img", "br"].includes(tag);
 
-        if (isSelfClosing) {
-            result += fullTag;
-        } else if (tag.startsWith('/')) {
-            const tagName = tag.substring(1);
-            const index = stack.lastIndexOf(tagName);
-            if (index !== -1) {
-                // Close everything on top of it to maintain LIFO/XHTML validity
-                while (stack.length > index) {
-                    result += `</${stack.pop()}>`;
-                }
-            }
-            // If not found, ignore the orphaned closing tag
-        } else {
-            stack.push(tag);
-            result += fullTag;
+    if (isSelfClosing) {
+      result += fullTag;
+    } else if (tag.startsWith("/")) {
+      const tagName = tag.substring(1);
+      const index = stack.lastIndexOf(tagName);
+      if (index !== -1) {
+        // Close everything on top of it to maintain LIFO/XHTML validity
+        while (stack.length > index) {
+          result += `</${stack.pop()}>`;
         }
+      }
+      // If not found, ignore the orphaned closing tag
+    } else {
+      stack.push(tag);
+      result += fullTag;
     }
+  }
 
-    // Add remaining text
-    result += html.substring(lastIndex);
+  // Add remaining text
+  result += html.substring(lastIndex);
 
-    // Close any remaining open tags (crucial for streaming)
-    while (stack.length > 0) {
-        result += `</${stack.pop()}>`;
-    }
+  // Close any remaining open tags (crucial for streaming)
+  while (stack.length > 0) {
+    result += `</${stack.pop()}>`;
+  }
 
-    return result;
+  return result;
 }
 
 /**
  * Parse markdown text to HTML
  */
 export function parseMarkdown(markdown: string): string {
-    if (!markdown) return '';
+  if (!markdown) return "";
 
-    // Strip think tags before processing markdown
-    const cleanedMarkdown = stripThinkTags(markdown);
-    if (!cleanedMarkdown) return '';
+  // Strip think tags before processing markdown
+  const cleanedMarkdown = stripThinkTags(markdown);
+  if (!cleanedMarkdown) return "";
 
-    const lines = cleanedMarkdown.split('\n');
-    const htmlParts: string[] = [];
-    let inCodeBlock = false;
-    let codeBlockContent: string[] = [];
-    let codeLanguage = '';
-    let inList = false;
-    let listItems: string[] = [];
-    let listType: 'ul' | 'ol' = 'ul';
-    let inTable = false;
-    let tableRows: string[][] = [];
-    let tableHeader: string[] = [];
+  const lines = cleanedMarkdown.split("\n");
+  const htmlParts: string[] = [];
+  let inCodeBlock = false;
+  let codeBlockContent: string[] = [];
+  let codeLanguage = "";
+  let inList = false;
+  let listItems: string[] = [];
+  let listType: "ul" | "ol" = "ul";
+  let inTable = false;
+  let tableRows: string[][] = [];
+  let tableHeader: string[] = [];
 
-    const flushList = () => {
-        if (inList && listItems.length > 0) {
-            const tag = listType;
-            htmlParts.push(`<${tag} style="margin: 8px 0; padding-left: 20px;">${listItems.map(item => `<li style="margin: 4px 0;">${parseInline(item)}</li>`).join('')}</${tag}>`);
-            listItems = [];
-            inList = false;
-        }
-    };
+  const flushList = () => {
+    if (inList && listItems.length > 0) {
+      const tag = listType;
+      htmlParts.push(
+        `<${tag} style="margin: 8px 0; padding-left: 20px;">${listItems.map((item) => `<li style="margin: 4px 0;">${parseInline(item)}</li>`).join("")}</${tag}>`,
+      );
+      listItems = [];
+      inList = false;
+    }
+  };
 
-    const flushTable = () => {
-        if (inTable && (tableHeader.length > 0 || tableRows.length > 0)) {
-            // Wrap table in scrollable container to prevent sidebar overflow
-            let tableHtml = '<div style="overflow-x: auto; margin: 8px 0; max-width: 100%;">';
-            tableHtml += '<table style="border-collapse: collapse; width: max-content; min-width: 100%; font-size: 0.85em; table-layout: auto;">';
-            if (tableHeader.length > 0) {
-                tableHtml += '<thead><tr>';
-                tableHeader.forEach(cell => {
-                    tableHtml += `<th style="border: 1px solid var(--border-primary, #ddd); padding: 4px 6px; background: var(--background-secondary, rgba(0,0,0,0.05)); text-align: left; white-space: nowrap; font-size: 0.9em;">${parseInline(cell.trim())}</th>`;
-                });
-                tableHtml += '</tr></thead>';
-            }
-            if (tableRows.length > 0) {
-                tableHtml += '<tbody>';
-                tableRows.forEach(row => {
-                    tableHtml += '<tr>';
-                    row.forEach(cell => {
-                        tableHtml += `<td style="border: 1px solid var(--border-primary, #ddd); padding: 4px 6px; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${parseInline(cell.trim())}</td>`;
-                    });
-                    tableHtml += '</tr>';
-                });
-                tableHtml += '</tbody>';
-            }
-            tableHtml += '</table>';
-            tableHtml += '</div>';
-            htmlParts.push(tableHtml);
-            tableHeader = [];
-            tableRows = [];
-            inTable = false;
-        }
-    };
+  const flushTable = () => {
+    if (inTable && (tableHeader.length > 0 || tableRows.length > 0)) {
+      // Wrap table in scrollable container to prevent sidebar overflow
+      let tableHtml =
+        '<div style="overflow-x: auto; margin: 8px 0; max-width: 100%;">';
+      tableHtml +=
+        '<table style="border-collapse: collapse; width: max-content; min-width: 100%; font-size: 0.85em; table-layout: auto;">';
+      if (tableHeader.length > 0) {
+        tableHtml += "<thead><tr>";
+        tableHeader.forEach((cell) => {
+          tableHtml += `<th style="border: 1px solid var(--border-primary, #ddd); padding: 4px 6px; background: var(--background-secondary, rgba(0,0,0,0.05)); text-align: left; white-space: nowrap; font-size: 0.9em;">${parseInline(cell.trim())}</th>`;
+        });
+        tableHtml += "</tr></thead>";
+      }
+      if (tableRows.length > 0) {
+        tableHtml += "<tbody>";
+        tableRows.forEach((row) => {
+          tableHtml += "<tr>";
+          row.forEach((cell) => {
+            tableHtml += `<td style="border: 1px solid var(--border-primary, #ddd); padding: 4px 6px; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${parseInline(cell.trim())}</td>`;
+          });
+          tableHtml += "</tr>";
+        });
+        tableHtml += "</tbody>";
+      }
+      tableHtml += "</table>";
+      tableHtml += "</div>";
+      htmlParts.push(tableHtml);
+      tableHeader = [];
+      tableRows = [];
+      inTable = false;
+    }
+  };
 
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
 
-        // Code blocks: ```language
-        if (line.trim().startsWith('```')) {
-            if (inCodeBlock) {
-                // End code block - create enhanced code block with copy button and syntax highlighting
-                const highlightedCode = codeLanguage
-                    ? highlightCode(codeBlockContent.join('\n'), codeLanguage)
-                    : escapeHtml(codeBlockContent.join('\n'));
-                const uniqueId = `code-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // Code blocks: ```language
+    if (line.trim().startsWith("```")) {
+      if (inCodeBlock) {
+        // End code block - create enhanced code block with copy button and syntax highlighting
+        const highlightedCode = codeLanguage
+          ? highlightCode(codeBlockContent.join("\n"), codeLanguage)
+          : escapeHtml(codeBlockContent.join("\n"));
+        const uniqueId = `code-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-                htmlParts.push(`
+        htmlParts.push(`
                     <div style="position: relative; margin: 8px 0; max-width: 100%;">
-                        ${codeLanguage ? `<div style="position: absolute; top: 0; left: 12px; font-size: 10px; color: #aaa; background: #2d2d2d; padding: 2px 6px; border-radius: 0 0 4px 4px; text-transform: uppercase;">${codeLanguage}</div>` : ''}
-                        <pre style="background: #1e1e1e; color: #d4d4d4; padding: ${codeLanguage ? '28px' : '12px'} 12px 12px; border-radius: 6px; overflow-x: auto; font-family: 'SF Mono', Consolas, monospace; font-size: 0.9em; margin: 0; white-space: pre-wrap; word-break: break-word;"><code>${highlightedCode}</code></pre>
+                        ${codeLanguage ? `<div style="position: absolute; top: 0; left: 12px; font-size: 10px; color: #aaa; background: #2d2d2d; padding: 2px 6px; border-radius: 0 0 4px 4px; text-transform: uppercase;">${codeLanguage}</div>` : ""}
+                        <pre style="background: #1e1e1e; color: #d4d4d4; padding: ${codeLanguage ? "28px" : "12px"} 12px 12px; border-radius: 6px; overflow-x: auto; font-family: 'SF Mono', Consolas, monospace; font-size: 0.9em; margin: 0; white-space: pre-wrap; word-break: break-word;"><code>${highlightedCode}</code></pre>
                     </div>
                 `);
-                codeBlockContent = [];
-                codeLanguage = '';
-                inCodeBlock = false;
-            } else {
-                // Start code block - extract language
-                flushList();
-                flushTable();
-                const langMatch = line.trim().match(/^```(\w+)?/);
-                codeLanguage = langMatch && langMatch[1] ? langMatch[1] : '';
-                inCodeBlock = true;
-            }
-            continue;
-        }
-
-        if (inCodeBlock) {
-            codeBlockContent.push(line);
-            continue;
-        }
-
-        // Horizontal rule: --- or *** or ___
-        if (/^[-*_]{3,}$/.test(line.trim())) {
-            flushList();
-            flushTable();
-            htmlParts.push('<hr style="border: none; border-top: 1px solid #ddd; margin: 16px 0;" />');
-            continue;
-        }
-
-        // Table row: | cell | cell |
-        if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
-            flushList();
-            const cells = line.trim().slice(1, -1).split('|');
-
-            // Check if this is a separator row (|---|---|)
-            if (cells.every(cell => /^[-:]+$/.test(cell.trim()))) {
-                // This is the separator after header
-                continue;
-            }
-
-            if (!inTable) {
-                inTable = true;
-                tableHeader = cells;
-            } else {
-                tableRows.push(cells);
-            }
-            continue;
-        } else if (inTable) {
-            flushTable();
-        }
-
-        // Headers: # ## ### etc.
-        const headerMatch = line.match(/^(#{1,6})\s+(.+)$/);
-        if (headerMatch) {
-            flushList();
-            flushTable();
-            const level = headerMatch[1].length;
-            const text = headerMatch[2];
-            const sizes: Record<number, string> = { 1: '1.5em', 2: '1.3em', 3: '1.15em', 4: '1.05em', 5: '1em', 6: '0.95em' };
-            const weights: Record<number, string> = { 1: '700', 2: '700', 3: '600', 4: '600', 5: '600', 6: '600' };
-            htmlParts.push(`<div style="font-size: ${sizes[level]}; font-weight: ${weights[level]}; margin: 12px 0 8px 0;">${parseInline(text)}</div>`);
-            continue;
-        }
-
-        // Unordered list: - item or * item or + item
-        const ulMatch = line.match(/^[-*+]\s+(.+)$/);
-        if (ulMatch) {
-            flushTable();
-            if (!inList || listType !== 'ul') {
-                flushList();
-                inList = true;
-                listType = 'ul';
-            }
-            listItems.push(ulMatch[1]);
-            continue;
-        }
-
-        // Ordered list: 1. item (any number followed by period)
-        const olMatch = line.match(/^\d+\.\s+(.+)$/);
-        if (olMatch) {
-            flushTable();
-            if (!inList || listType !== 'ol') {
-                flushList();
-                inList = true;
-                listType = 'ol';
-            }
-            listItems.push(olMatch[1]);
-            continue;
-        }
-
-        // Continuation of list item (indented text following a list)
-        // Lines that start with whitespace while in a list should be appended to last item
-        if (inList && line.match(/^\s+\S/) && listItems.length > 0) {
-            listItems[listItems.length - 1] += ' ' + line.trim();
-            continue;
-        }
-
-        // Blockquote: > text
-        const blockquoteMatch = line.match(/^>\s*(.*)$/);
-        if (blockquoteMatch) {
-            flushList();
-            flushTable();
-            htmlParts.push(`<blockquote style="border-left: 3px solid #ddd; padding-left: 12px; margin: 8px 0; color: #666; font-style: italic;">${parseInline(blockquoteMatch[1])}</blockquote>`);
-            continue;
-        }
-
-        // Empty line
-        if (line.trim() === '') {
-            flushTable();
-            // Add spacing for paragraph breaks
-            if (htmlParts.length > 0 && !htmlParts[htmlParts.length - 1].includes('margin')) {
-                htmlParts.push('<div style="height: 8px;"></div>');
-            }
-            continue;
-        }
-
-        // Regular paragraph
+        codeBlockContent = [];
+        codeLanguage = "";
+        inCodeBlock = false;
+      } else {
+        // Start code block - extract language
         flushList();
         flushTable();
-        htmlParts.push(`<div style="margin: 4px 0;">${parseInline(line)}</div>`);
+        const langMatch = line.trim().match(/^```(\w+)?/);
+        codeLanguage = langMatch && langMatch[1] ? langMatch[1] : "";
+        inCodeBlock = true;
+      }
+      continue;
     }
 
-    // Flush remaining items
+    if (inCodeBlock) {
+      codeBlockContent.push(line);
+      continue;
+    }
+
+    // Horizontal rule: --- or *** or ___
+    if (/^[-*_]{3,}$/.test(line.trim())) {
+      flushList();
+      flushTable();
+      htmlParts.push(
+        '<hr style="border: none; border-top: 1px solid #ddd; margin: 16px 0;" />',
+      );
+      continue;
+    }
+
+    // Table row: | cell | cell |
+    if (line.trim().startsWith("|") && line.trim().endsWith("|")) {
+      flushList();
+      const cells = line.trim().slice(1, -1).split("|");
+
+      // Check if this is a separator row (|---|---|)
+      if (cells.every((cell) => /^[-:]+$/.test(cell.trim()))) {
+        // This is the separator after header
+        continue;
+      }
+
+      if (!inTable) {
+        inTable = true;
+        tableHeader = cells;
+      } else {
+        tableRows.push(cells);
+      }
+      continue;
+    } else if (inTable) {
+      flushTable();
+    }
+
+    // Headers: # ## ### etc.
+    const headerMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    if (headerMatch) {
+      flushList();
+      flushTable();
+      const level = headerMatch[1].length;
+      const text = headerMatch[2];
+      const sizes: Record<number, string> = {
+        1: "1.5em",
+        2: "1.3em",
+        3: "1.15em",
+        4: "1.05em",
+        5: "1em",
+        6: "0.95em",
+      };
+      const weights: Record<number, string> = {
+        1: "700",
+        2: "700",
+        3: "600",
+        4: "600",
+        5: "600",
+        6: "600",
+      };
+      htmlParts.push(
+        `<div style="font-size: ${sizes[level]}; font-weight: ${weights[level]}; margin: 12px 0 8px 0;">${parseInline(text)}</div>`,
+      );
+      continue;
+    }
+
+    // Unordered list: - item or * item or + item
+    const ulMatch = line.match(/^[-*+]\s+(.+)$/);
+    if (ulMatch) {
+      flushTable();
+      if (!inList || listType !== "ul") {
+        flushList();
+        inList = true;
+        listType = "ul";
+      }
+      listItems.push(ulMatch[1]);
+      continue;
+    }
+
+    // Ordered list: 1. item (any number followed by period)
+    const olMatch = line.match(/^\d+\.\s+(.+)$/);
+    if (olMatch) {
+      flushTable();
+      if (!inList || listType !== "ol") {
+        flushList();
+        inList = true;
+        listType = "ol";
+      }
+      listItems.push(olMatch[1]);
+      continue;
+    }
+
+    // Continuation of list item (indented text following a list)
+    // Lines that start with whitespace while in a list should be appended to last item
+    if (inList && line.match(/^\s+\S/) && listItems.length > 0) {
+      listItems[listItems.length - 1] += " " + line.trim();
+      continue;
+    }
+
+    // Blockquote: > text
+    const blockquoteMatch = line.match(/^>\s*(.*)$/);
+    if (blockquoteMatch) {
+      flushList();
+      flushTable();
+      htmlParts.push(
+        `<blockquote style="border-left: 3px solid #ddd; padding-left: 12px; margin: 8px 0; color: #666; font-style: italic;">${parseInline(blockquoteMatch[1])}</blockquote>`,
+      );
+      continue;
+    }
+
+    // Empty line
+    if (line.trim() === "") {
+      flushTable();
+      // Add spacing for paragraph breaks
+      if (
+        htmlParts.length > 0 &&
+        !htmlParts[htmlParts.length - 1].includes("margin")
+      ) {
+        htmlParts.push('<div style="height: 8px;"></div>');
+      }
+      continue;
+    }
+
+    // Regular paragraph
     flushList();
     flushTable();
+    htmlParts.push(`<div style="margin: 4px 0;">${parseInline(line)}</div>`);
+  }
 
-    // Handle unclosed code block
-    if (inCodeBlock && codeBlockContent.length > 0) {
-        htmlParts.push(`<pre style="background: rgba(0,0,0,0.08); padding: 12px; border-radius: 6px; overflow-x: auto; font-family: monospace; font-size: 0.9em; margin: 8px 0; white-space: pre-wrap; word-break: break-word;"><code>${escapeHtml(codeBlockContent.join('\n'))}</code></pre>`);
-    }
+  // Flush remaining items
+  flushList();
+  flushTable();
 
-    return balanceTags(htmlParts.join(''));
+  // Handle unclosed code block
+  if (inCodeBlock && codeBlockContent.length > 0) {
+    htmlParts.push(
+      `<pre style="background: rgba(0,0,0,0.08); padding: 12px; border-radius: 6px; overflow-x: auto; font-family: monospace; font-size: 0.9em; margin: 8px 0; white-space: pre-wrap; word-break: break-word;"><code>${escapeHtml(codeBlockContent.join("\n"))}</code></pre>`,
+    );
+  }
+
+  return balanceTags(htmlParts.join(""));
 }

@@ -11,6 +11,7 @@ Download `seerai-mcp.cjs` from the mcp-server/dist folder or from the [latest re
 ### 2. Configure Claude Desktop
 
 Add to your config file:
+
 - **Linux**: `~/.config/claude-desktop/claude_desktop_config.json`
 - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Windows**: `%AppData%\Claude\claude_desktop_config.json`
@@ -48,36 +49,37 @@ curl http://127.0.0.1:23119/seerai/health
 ```
 
 Should return:
+
 ```json
-{"status":"ok","version":"1.0.0","tools":20}
+{ "status": "ok", "version": "1.0.0", "tools": 20 }
 ```
 
 ---
 
 ## Available Tools (20)
 
-| Tool | Description |
-|------|-------------|
-| `search_library` | Search Zotero library |
-| `get_item_metadata` | Get item metadata |
-| `read_item_content` | Read paper content |
-| `create_note` | Create a note |
-| `add_to_context` | Add to context |
-| `remove_from_context` | Remove from context |
-| `list_context` | List context |
-| `list_tables` | List tables |
-| `create_table` | Create table |
-| `add_to_table` | Add to table |
-| `create_table_column` | Add AI column |
-| `generate_table_data` | Generate AI data |
-| `read_table` | Read table |
-| `search_external` | Search Semantic Scholar |
-| `import_paper` | Import paper |
-| `move_item` | Move to collection |
-| `remove_item_from_collection` | Remove from collection |
-| `find_collection` | Find collection |
-| `create_collection` | Create collection |
-| `list_collection` | List collection |
+| Tool                          | Description             |
+| ----------------------------- | ----------------------- |
+| `search_library`              | Search Zotero library   |
+| `get_item_metadata`           | Get item metadata       |
+| `read_item_content`           | Read paper content      |
+| `create_note`                 | Create a note           |
+| `add_to_context`              | Add to context          |
+| `remove_from_context`         | Remove from context     |
+| `list_context`                | List context            |
+| `list_tables`                 | List tables             |
+| `create_table`                | Create table            |
+| `add_to_table`                | Add to table            |
+| `create_table_column`         | Add AI column           |
+| `generate_table_data`         | Generate AI data        |
+| `read_table`                  | Read table              |
+| `search_external`             | Search Semantic Scholar |
+| `import_paper`                | Import paper            |
+| `move_item`                   | Move to collection      |
+| `remove_item_from_collection` | Remove from collection  |
+| `find_collection`             | Find collection         |
+| `create_collection`           | Create collection       |
+| `list_collection`             | List collection         |
 
 ---
 
@@ -88,6 +90,7 @@ npx @seerai/mcp-server
 ```
 
 Config:
+
 ```json
 {
   "mcpServers": {

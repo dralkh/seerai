@@ -7,7 +7,7 @@
   --button-hover-background-color: #e0e0e0;
   --button-disabled-background-color: #f5f5f5;
   --button-disabled-text-color: #999;
-  
+
   /* Model Configuration UI Variables - Light Mode */
   --model-item-bg: #ffffff;
   --model-item-bg-default: #e3f2fd;
@@ -47,7 +47,7 @@ body.dark {
   --button-hover-background-color: #666;
   --button-disabled-background-color: #444;
   --button-disabled-text-color: #777;
-  
+
   /* Model Configuration UI Variables - Dark Mode */
   --model-item-bg: #2a2a2a;
   --model-item-bg-default: #1a3a5c;

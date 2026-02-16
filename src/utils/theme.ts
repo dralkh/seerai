@@ -20,7 +20,10 @@ export function initThemeObserver(win: _ZoteroTypes.MainWindow) {
 
   const observer = new win.MutationObserver((mutations: MutationRecord[]) => {
     for (const mutation of mutations) {
-      if (mutation.type === "attributes" && mutation.attributeName === "theme") {
+      if (
+        mutation.type === "attributes" &&
+        mutation.attributeName === "theme"
+      ) {
         const newTheme = docElement.getAttribute("theme") as Theme;
         if (newTheme && newTheme !== currentTheme) {
           currentTheme = newTheme;
@@ -35,7 +38,7 @@ export function initThemeObserver(win: _ZoteroTypes.MainWindow) {
   observer.observe(docElement, { attributes: true });
 
   // Set initial theme
-  currentTheme = docElement.getAttribute("theme") as Theme || "light";
+  currentTheme = (docElement.getAttribute("theme") as Theme) || "light";
   updateBodyClass(win, currentTheme);
 
   // Return a function to disconnect the observer when the window is unloaded

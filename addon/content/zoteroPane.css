@@ -75,7 +75,7 @@
 }
 
 body.dark,
-:root[data-theme='dark'],
+:root[data-theme="dark"],
 html.dark {
   --background-primary: #333;
   --background-secondary: #2a2a2a;
@@ -168,7 +168,7 @@ html.dark {
 
 /* Dark mode chip overrides (Class/Attribute) */
 body.dark .chip-items,
-:root[data-theme='dark'] .chip-items,
+:root[data-theme="dark"] .chip-items,
 html.dark .chip-items {
   background-color: #0d47a1;
   border-color: #4dabf5;
@@ -176,7 +176,7 @@ html.dark .chip-items {
 }
 
 body.dark .chip-creators,
-:root[data-theme='dark'] .chip-creators,
+:root[data-theme="dark"] .chip-creators,
 html.dark .chip-creators {
   background-color: #4a148c;
   border-color: #ab47bc;
@@ -184,7 +184,7 @@ html.dark .chip-creators {
 }
 
 body.dark .chip-tags,
-:root[data-theme='dark'] .chip-tags,
+:root[data-theme="dark"] .chip-tags,
 html.dark .chip-tags {
   background-color: #6d4d00;
   border-color: #ffc94d;
@@ -192,7 +192,7 @@ html.dark .chip-tags {
 }
 
 body.dark .chip-collections,
-:root[data-theme='dark'] .chip-collections,
+:root[data-theme="dark"] .chip-collections,
 html.dark .chip-collections {
   background-color: #1b5e20;
   border-color: #66bb6a;
@@ -200,7 +200,7 @@ html.dark .chip-collections {
 }
 
 body.dark .chip-notes,
-:root[data-theme='dark'] .chip-notes,
+:root[data-theme="dark"] .chip-notes,
 html.dark .chip-notes {
   background-color: #fff59d;
   border-color: #ffc107;
@@ -208,7 +208,7 @@ html.dark .chip-notes {
 }
 
 body.dark .chip-notes-summary,
-:root[data-theme='dark'] .chip-notes-summary,
+:root[data-theme="dark"] .chip-notes-summary,
 html.dark .chip-notes-summary {
   background-color: #fff59d;
   border: 1px solid #ffc107;
@@ -216,7 +216,7 @@ html.dark .chip-notes-summary {
 }
 
 body.dark .chip-attachments,
-:root[data-theme='dark'] .chip-attachments,
+:root[data-theme="dark"] .chip-attachments,
 html.dark .chip-attachments {
   background-color: #880e4f;
   border-color: #f06292;
@@ -224,7 +224,7 @@ html.dark .chip-attachments {
 }
 
 body.dark .chip-images,
-:root[data-theme='dark'] .chip-images,
+:root[data-theme="dark"] .chip-images,
 html.dark .chip-images {
   background-color: #01579b;
   border-color: #4fc3f7;
@@ -232,7 +232,7 @@ html.dark .chip-images {
 }
 
 body.dark .chip-tables,
-:root[data-theme='dark'] .chip-tables,
+:root[data-theme="dark"] .chip-tables,
 html.dark .chip-tables {
   background-color: #4a148c;
   border-color: #ab47bc;
@@ -297,21 +297,15 @@ html.dark .chip-tables {
 }
 
 .message-user {
-
   background-color: var(--message-user-background);
 
   color: var(--message-user-text);
-
 }
 
-
-
 .message-assistant {
-
   background-color: var(--message-assistant-background);
 
   color: var(--message-assistant-text);
-
 }
 
 /* Tab Bar Styles */
@@ -325,7 +319,7 @@ html.dark .chip-tables {
 }
 
 .tab-item {
-  padding: 8px 16px;
+  padding: 4px 12px;
   cursor: pointer;
   font-size: 12px;
   font-weight: 500;
@@ -445,7 +439,7 @@ html.dark .chip-tables {
 }
 
 .papers-table th.sortable::after {
-  content: '';
+  content: "";
   display: inline-block;
   margin-left: 4px;
   width: 0;
@@ -844,7 +838,9 @@ html.dark .chip-tables {
 
 .delete-btn {
   opacity: 0.6;
-  transition: opacity 0.2s, color 0.2s;
+  transition:
+    opacity 0.2s,
+    color 0.2s;
 }
 
 .delete-btn:hover {
@@ -899,13 +895,13 @@ html.dark .chip-tables {
 }
 
 body.dark .prompt-picker-overlay,
-:root[data-theme='dark'] .prompt-picker-overlay,
+:root[data-theme="dark"] .prompt-picker-overlay,
 html.dark .prompt-picker-overlay {
   background: rgba(0, 0, 0, 0.5);
 }
 
 body.dark .prompt-card:hover,
-:root[data-theme='dark'] .prompt-card:hover,
+:root[data-theme="dark"] .prompt-card:hover,
 html.dark .prompt-card:hover {
   background: var(--background-tertiary);
 }

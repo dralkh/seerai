@@ -1,46 +1,46 @@
 {
-    "name": "@seerai/mcp-server",
-    "version": "1.0.0",
-    "description": "MCP Server for Seer-AI Zotero Plugin",
-    "type": "module",
-    "main": "./dist/index.js",
-    "bin": {
-        "seerai-mcp": "./dist/index.js"
-    },
-    "scripts": {
-        "build": "tsc",
-        "bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --outfile=dist/seerai-mcp.cjs --format=cjs",
-        "start": "node dist/index.js",
-        "dev": "tsx src/index.ts"
-    },
-    "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.0.0",
-        "zod": "^3.22.0",
-        "zod-to-json-schema": "^3.22.0"
-    },
-    "devDependencies": {
-        "@types/node": "^20.0.0",
-        "esbuild": "^0.27.2",
-        "tsx": "^4.0.0",
-        "typescript": "^5.0.0"
-    },
-    "engines": {
-        "node": ">=18.0.0"
-    },
-    "files": [
-        "dist"
-    ],
-    "keywords": [
-        "mcp",
-        "zotero",
-        "seerai",
-        "ai",
-        "research"
-    ],
-    "author": "Seer-AI",
-    "license": "MIT",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/dralkh/seerai"
-    }
+  "name": "@seerai/mcp-server",
+  "version": "1.0.0",
+  "description": "MCP Server for Seer-AI Zotero Plugin",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "seerai-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --outfile=dist/seerai-mcp.cjs --format=cjs",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.22.0",
+    "zod-to-json-schema": "^3.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.27.2",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "mcp",
+    "zotero",
+    "seerai",
+    "ai",
+    "research"
+  ],
+  "author": "Seer-AI",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dralkh/seerai"
+  }
 }

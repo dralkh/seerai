@@ -20,9 +20,18 @@ user_pref("startup.homepage_welcome_url.additional", "");
 user_pref("devtools.errorconsole.enabled", true);
 user_pref("devtools.chrome.enabled", true);
 user_pref("urlclassifier.updateinterval", 172800);
-user_pref("browser.safebrowsing.provider.0.gethashURL", "http://localhost/safebrowsing-dummy/gethash");
-user_pref("browser.safebrowsing.provider.0.keyURL", "http://localhost/safebrowsing-dummy/newkey");
-user_pref("browser.safebrowsing.provider.0.updateURL", "http://localhost/safebrowsing-dummy/update");
+user_pref(
+  "browser.safebrowsing.provider.0.gethashURL",
+  "http://localhost/safebrowsing-dummy/gethash",
+);
+user_pref(
+  "browser.safebrowsing.provider.0.keyURL",
+  "http://localhost/safebrowsing-dummy/newkey",
+);
+user_pref(
+  "browser.safebrowsing.provider.0.updateURL",
+  "http://localhost/safebrowsing-dummy/update",
+);
 user_pref("browser.selfsupport.url", "https://localhost/selfrepair");
 user_pref("browser.reader.detectedFirstArticle", true);
 user_pref("datareporting.policy.firstRunURL", "");

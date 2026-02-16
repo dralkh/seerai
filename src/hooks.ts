@@ -61,9 +61,13 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
 
     // Generate Tags menu item
     const generateTagsMenuItemId = "seerai-generate-tags";
-    let generateTagsMenuItem = win.document.getElementById(generateTagsMenuItemId) as XUL.MenuItem;
+    let generateTagsMenuItem = win.document.getElementById(
+      generateTagsMenuItemId,
+    ) as XUL.MenuItem;
     if (!generateTagsMenuItem) {
-      generateTagsMenuItem = win.document.createXULElement("menuitem") as XUL.MenuItem;
+      generateTagsMenuItem = win.document.createXULElement(
+        "menuitem",
+      ) as XUL.MenuItem;
       generateTagsMenuItem.setAttribute("id", generateTagsMenuItemId);
       generateTagsMenuItem.setAttribute("label", "✨ Generate Tags");
       generateTagsMenuItem.setAttribute("class", "menuitem-iconic");
@@ -343,7 +347,8 @@ async function searchPdfsForSelectedItems() {
 
   // Import concurrent runner and PDF finder
   const { findAndAttachPdfForItem } = await import("./modules/assistant");
-  const { runConcurrentTasks, formatTaskStats } = await import("./utils/concurrentRunner");
+  const { runConcurrentTasks, formatTaskStats } =
+    await import("./utils/concurrentRunner");
 
   // Create progress window using native Zotero.ProgressWindow for proper close behavior
   const pw = new Zotero.ProgressWindow({ closeOnClick: true });
@@ -352,20 +357,21 @@ async function searchPdfsForSelectedItems() {
   pw.show();
 
   // Get settings
-  const timeoutMs = (Zotero.Prefs.get(
-    `${addon.data.config.prefsPrefix}.pdfSearchTimeout`,
-  ) as number) || 60000;
+  const timeoutMs =
+    (Zotero.Prefs.get(
+      `${addon.data.config.prefsPrefix}.pdfSearchTimeout`,
+    ) as number) || 60000;
   const activeConfig = getActiveModelConfig();
   let concurrency = 5;
-  if (activeConfig?.rateLimit?.type === 'concurrency') {
+  if (activeConfig?.rateLimit?.type === "concurrency") {
     concurrency = activeConfig.rateLimit.value;
-  } else if (activeConfig?.rateLimit?.type === 'rpm') {
+  } else if (activeConfig?.rateLimit?.type === "rpm") {
     // For RPM, we limit concurrency to the RPM value (capped at 10)
     // This prevents a huge queue buildup that causes timeouts.
     // e.g. if RPM is 2, running 10 parallel tasks ensures the 10th waits ~5 minutes!
     // By matching concurrency to RPM, we ensure a smooth flow with minimal waiting.
     concurrency = Math.max(1, Math.min(10, activeConfig.rateLimit.value));
-  } else if (activeConfig?.rateLimit?.type === 'tpm') {
+  } else if (activeConfig?.rateLimit?.type === "tpm") {
     concurrency = 10;
   }
 
@@ -373,11 +379,13 @@ async function searchPdfsForSelectedItems() {
   const results = await runConcurrentTasks({
     tasks: itemsToSearch.map((item, index) => ({ item, index })),
     concurrency,
-    // If using strict rate limiting (RPM/TPM), we need a much larger timeout 
+    // If using strict rate limiting (RPM/TPM), we need a much larger timeout
     // because tasks will sit in the rate limiter queue.
-    timeoutMs: (activeConfig?.rateLimit?.type === 'rpm' || activeConfig?.rateLimit?.type === 'tpm')
-      ? Math.max(timeoutMs, 300000) // 5 minutes if rate limited
-      : timeoutMs,
+    timeoutMs:
+      activeConfig?.rateLimit?.type === "rpm" ||
+      activeConfig?.rateLimit?.type === "tpm"
+        ? Math.max(timeoutMs, 300000) // 5 minutes if rate limited
+        : timeoutMs,
     maxRetries: 3,
     retryDelayMs: 2000,
 
@@ -404,16 +412,24 @@ async function searchPdfsForSelectedItems() {
   });
 
   // Calculate stats
-  const succeeded = results.filter(r => r.status === 'success' && r.result === true).length;
-  const notFound = results.filter(r => r.status === 'success' && r.result === false).length;
-  const failed = results.filter(r => r.status === 'failed').length;
-  const skipped = results.filter(r => r.status === 'skipped').length;
+  const succeeded = results.filter(
+    (r) => r.status === "success" && r.result === true,
+  ).length;
+  const notFound = results.filter(
+    (r) => r.status === "success" && r.result === false,
+  ).length;
+  const failed = results.filter((r) => r.status === "failed").length;
+  const skipped = results.filter((r) => r.status === "skipped").length;
 
-  ztoolkit.log(`Search PDF: Done! ${succeeded} found, ${notFound} not found, ${failed} failed, ${skipped} skipped`);
+  ztoolkit.log(
+    `Search PDF: Done! ${succeeded} found, ${notFound} not found, ${failed} failed, ${skipped} skipped`,
+  );
 
   // Show final result
   pw.changeHeadline("Search Complete");
-  pw.addDescription(`✓ ${succeeded}📄 found, ${notFound + failed + skipped} not found`);
+  pw.addDescription(
+    `✓ ${succeeded}📄 found, ${notFound + failed + skipped} not found`,
+  );
   pw.startCloseTimer(3000);
 }
 
@@ -467,11 +483,11 @@ async function processAllLibraryItems() {
 async function processParentItemsInBatches(parentItems: Zotero.Item[]) {
   const activeConfig = getActiveModelConfig();
   let maxConcurrent = 5;
-  if (activeConfig?.rateLimit?.type === 'concurrency') {
+  if (activeConfig?.rateLimit?.type === "concurrency") {
     maxConcurrent = activeConfig.rateLimit.value;
-  } else if (activeConfig?.rateLimit?.type === 'rpm') {
+  } else if (activeConfig?.rateLimit?.type === "rpm") {
     maxConcurrent = Math.max(1, Math.min(10, activeConfig.rateLimit.value));
-  } else if (activeConfig?.rateLimit?.type === 'tpm') {
+  } else if (activeConfig?.rateLimit?.type === "tpm") {
     maxConcurrent = 10;
   }
   ztoolkit.log(
@@ -502,7 +518,7 @@ async function processParentItemsInBatches(parentItems: Zotero.Item[]) {
  */
 async function processGenerateTagsForSelectedItems() {
   const items = Zotero.getActiveZoteroPane().getSelectedItems();
-  const regularItems = items.filter(i => i.isRegularItem());
+  const regularItems = items.filter((i) => i.isRegularItem());
 
   if (regularItems.length === 0) {
     return;
@@ -510,7 +526,9 @@ async function processGenerateTagsForSelectedItems() {
 
   const activeModel = getActiveModelConfig();
   if (!activeModel) {
-    Zotero.getMainWindow().alert("Please configure an AI model in settings first.");
+    Zotero.getMainWindow().alert(
+      "Please configure an AI model in settings first.",
+    );
     return;
   }
 
@@ -526,7 +544,7 @@ async function processGenerateTagsForSelectedItems() {
     const line = pw.createLine({
       text: `Generating tags for "${title}"...`,
       progress: -1,
-      icon: "default"
+      icon: "default",
     });
 
     // Skip if already tagged by Seer AI
@@ -534,7 +552,7 @@ async function processGenerateTagsForSelectedItems() {
       line.changeLine({
         text: `Skipped "${title}" (Already tagged)`,
         progress: 100,
-        icon: "default"
+        icon: "default",
       });
       skippedCount++;
       continue;
@@ -543,21 +561,21 @@ async function processGenerateTagsForSelectedItems() {
     try {
       const result = await executeGenerateItemTags(
         { item_id: item.id },
-        defaultAgentConfig
+        defaultAgentConfig,
       );
 
       if (result.success) {
         line.changeLine({
           text: `Tags generated for "${title}"`,
           progress: 100,
-          icon: "default"
+          icon: "default",
         });
         successCount++;
       } else {
         line.changeLine({
           text: `Error for "${title}": ${result.error}`,
           progress: 100,
-          icon: "warning"
+          icon: "warning",
         });
         errorCount++;
       }
@@ -565,7 +583,7 @@ async function processGenerateTagsForSelectedItems() {
       line.changeLine({
         text: `Error for "${title}": ${e.message || e}`,
         progress: 100,
-        icon: "warning"
+        icon: "warning",
       });
       errorCount++;
     }

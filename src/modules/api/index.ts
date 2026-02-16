@@ -3,4 +3,8 @@
  */
 
 export { registerApiEndpoints } from "./endpoints";
-export { handleApiRequest, type ApiRequest, type ApiResponse } from "./handlers";
+export {
+  handleApiRequest,
+  type ApiRequest,
+  type ApiResponse,
+} from "./handlers";

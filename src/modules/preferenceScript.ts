@@ -21,10 +21,10 @@ function getCssVar(name: string): string {
   const win = addon.data.prefs!.window;
   const doc = win.document;
   const rootElement = doc.documentElement;
-  if (!rootElement) return '';
+  if (!rootElement) return "";
   const styles = win.getComputedStyle(rootElement);
-  if (!styles) return '';
-  return styles.getPropertyValue(name).trim() || '';
+  if (!styles) return "";
+  return styles.getPropertyValue(name).trim() || "";
 }
 
 export async function registerPrefsScripts(_window: Window) {
@@ -155,11 +155,15 @@ function bindPrefEvents() {
 
   // Helper to bind a checkbox element to a boolean preference
   function bindCheckbox(checkboxId: string, prefKey: string) {
-    const checkbox = doc?.querySelector(`#${checkboxId}`) as HTMLInputElement | null;
+    const checkbox = doc?.querySelector(
+      `#${checkboxId}`,
+    ) as HTMLInputElement | null;
     if (!checkbox) return;
 
     // Load current value from preferences
-    const currentValue = Zotero.Prefs.get(`${prefPrefix}.${prefKey}`) as boolean;
+    const currentValue = Zotero.Prefs.get(
+      `${prefPrefix}.${prefKey}`,
+    ) as boolean;
     checkbox.checked = currentValue ?? false;
 
     // Save value when changed
@@ -171,9 +175,15 @@ function bindPrefEvents() {
 
   // Function to show/hide settings based on mode selection
   function updateModeVisibility(mode: string) {
-    const localSettings = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-localSettings`) as HTMLElement;
-    const cloudSettings = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-cloudSettings`) as HTMLElement;
-    const mistralSettings = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-mistralSettings`) as HTMLElement;
+    const localSettings = doc?.querySelector(
+      `#zotero-prefpane-${config.addonRef}-localSettings`,
+    ) as HTMLElement;
+    const cloudSettings = doc?.querySelector(
+      `#zotero-prefpane-${config.addonRef}-cloudSettings`,
+    ) as HTMLElement;
+    const mistralSettings = doc?.querySelector(
+      `#zotero-prefpane-${config.addonRef}-mistralSettings`,
+    ) as HTMLElement;
 
     if (localSettings) {
       localSettings.style.display = mode === "local" ? "" : "none";
@@ -187,13 +197,17 @@ function bindPrefEvents() {
   }
 
   // Bind menulist for mode selection
-  const modeSelect = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-datalabMode`) as XUL.MenuList;
+  const modeSelect = doc?.querySelector(
+    `#zotero-prefpane-${config.addonRef}-datalabMode`,
+  ) as XUL.MenuList;
   if (modeSelect) {
     // Load current value from preference (fallback to datalabUseLocal for backward compat)
     let currentMode = Zotero.Prefs.get(`${prefPrefix}.datalabMode`) as string;
     if (!currentMode) {
       // Backward compatibility: check old boolean preference
-      const useLocal = Zotero.Prefs.get(`${prefPrefix}.datalabUseLocal`) as boolean;
+      const useLocal = Zotero.Prefs.get(
+        `${prefPrefix}.datalabUseLocal`,
+      ) as boolean;
       currentMode = useLocal ? "local" : "cloud";
     }
     modeSelect.value = currentMode;
@@ -212,56 +226,110 @@ function bindPrefEvents() {
 
   // Bind other DataLab settings
   bindInput(`zotero-prefpane-${config.addonRef}-datalabUrl`, "datalabUrl");
-  bindInput(`zotero-prefpane-${config.addonRef}-datalabApiKey`, "datalabApiKey");
-  bindInput(`zotero-prefpane-${config.addonRef}-mistralApiKey`, "mistralApiKey");
-
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-datalabApiKey`,
+    "datalabApiKey",
+  );
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-mistralApiKey`,
+    "mistralApiKey",
+  );
 
   // AI Insights settings
-  bindCheckbox(`zotero-prefpane-${config.addonRef}-searchAutoAiInsights`, "searchAutoAiInsights");
-  bindInput(`zotero-prefpane-${config.addonRef}-searchAiInsightsPrompt`, "searchAiInsightsPrompt");
-  bindInput(`zotero-prefpane-${config.addonRef}-searchAiInsightsResponseLength`, "searchAiInsightsResponseLength");
+  bindCheckbox(
+    `zotero-prefpane-${config.addonRef}-searchAutoAiInsights`,
+    "searchAutoAiInsights",
+  );
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-searchAiInsightsPrompt`,
+    "searchAiInsightsPrompt",
+  );
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-searchAiInsightsResponseLength`,
+    "searchAiInsightsResponseLength",
+  );
 
   // Bind menulist for citation style
-  const styleSelect = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-searchAiInsightsCitationStyle`) as XUL.MenuList;
+  const styleSelect = doc?.querySelector(
+    `#zotero-prefpane-${config.addonRef}-searchAiInsightsCitationStyle`,
+  ) as XUL.MenuList;
   if (styleSelect) {
-    styleSelect.value = Zotero.Prefs.get(`${prefPrefix}.searchAiInsightsCitationStyle`) as string || "numbered";
+    styleSelect.value =
+      (Zotero.Prefs.get(
+        `${prefPrefix}.searchAiInsightsCitationStyle`,
+      ) as string) || "numbered";
     styleSelect.addEventListener("command", () => {
-      Zotero.Prefs.set(`${prefPrefix}.searchAiInsightsCitationStyle`, styleSelect.value);
+      Zotero.Prefs.set(
+        `${prefPrefix}.searchAiInsightsCitationStyle`,
+        styleSelect.value,
+      );
     });
   }
 
   // Local-specific settings
-  bindCheckbox(`zotero-prefpane-${config.addonRef}-localForceOcr`, "localForceOcr");
+  bindCheckbox(
+    `zotero-prefpane-${config.addonRef}-localForceOcr`,
+    "localForceOcr",
+  );
 
   // Cloud-specific settings
-  bindCheckbox(`zotero-prefpane-${config.addonRef}-cloudForceOcr`, "cloudForceOcr");
+  bindCheckbox(
+    `zotero-prefpane-${config.addonRef}-cloudForceOcr`,
+    "cloudForceOcr",
+  );
   bindCheckbox(`zotero-prefpane-${config.addonRef}-cloudUseLlm`, "cloudUseLlm");
 
   // Semantic Scholar settings
-  bindInput(`zotero-prefpane-${config.addonRef}-semanticScholarApiKey`, "semanticScholarApiKey");
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-semanticScholarApiKey`,
+    "semanticScholarApiKey",
+  );
 
   // Firecrawl settings
-  bindInput(`zotero-prefpane-${config.addonRef}-firecrawlApiKey`, "firecrawlApiKey");
-  bindInput(`zotero-prefpane-${config.addonRef}-firecrawlApiUrl`, "firecrawlApiUrl");
-  bindInput(`zotero-prefpane-${config.addonRef}-firecrawlSearchLimit`, "firecrawlSearchLimit");
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-firecrawlApiKey`,
+    "firecrawlApiKey",
+  );
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-firecrawlApiUrl`,
+    "firecrawlApiUrl",
+  );
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-firecrawlSearchLimit`,
+    "firecrawlSearchLimit",
+  );
 
   // Tavily settings
   bindInput(`zotero-prefpane-${config.addonRef}-tavilyApiKey`, "tavilyApiKey");
-  bindInput(`zotero-prefpane-${config.addonRef}-tavilySearchLimit`, "tavilySearchLimit");
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-tavilySearchLimit`,
+    "tavilySearchLimit",
+  );
 
   // Tavily search depth menulist
-  const tavilyDepthSelect = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-tavilySearchDepth`) as XUL.MenuList;
+  const tavilyDepthSelect = doc?.querySelector(
+    `#zotero-prefpane-${config.addonRef}-tavilySearchDepth`,
+  ) as XUL.MenuList;
   if (tavilyDepthSelect) {
-    tavilyDepthSelect.value = Zotero.Prefs.get(`${prefPrefix}.tavilySearchDepth`) as string || "basic";
+    tavilyDepthSelect.value =
+      (Zotero.Prefs.get(`${prefPrefix}.tavilySearchDepth`) as string) ||
+      "basic";
     tavilyDepthSelect.addEventListener("command", () => {
-      Zotero.Prefs.set(`${prefPrefix}.tavilySearchDepth`, tavilyDepthSelect.value);
+      Zotero.Prefs.set(
+        `${prefPrefix}.tavilySearchDepth`,
+        tavilyDepthSelect.value,
+      );
     });
   }
 
   // Web Search Provider selection with show/hide logic
   function updateWebSearchProviderVisibility(provider: string) {
-    const firecrawlSettings = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-firecrawlSettings`) as HTMLElement;
-    const tavilySettings = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-tavilySettings`) as HTMLElement;
+    const firecrawlSettings = doc?.querySelector(
+      `#zotero-prefpane-${config.addonRef}-firecrawlSettings`,
+    ) as HTMLElement;
+    const tavilySettings = doc?.querySelector(
+      `#zotero-prefpane-${config.addonRef}-tavilySettings`,
+    ) as HTMLElement;
 
     if (firecrawlSettings) {
       firecrawlSettings.style.display = provider === "firecrawl" ? "" : "none";
@@ -271,14 +339,21 @@ function bindPrefEvents() {
     }
   }
 
-  const webSearchProviderSelect = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-webSearchProvider`) as XUL.MenuList;
+  const webSearchProviderSelect = doc?.querySelector(
+    `#zotero-prefpane-${config.addonRef}-webSearchProvider`,
+  ) as XUL.MenuList;
   if (webSearchProviderSelect) {
-    const currentProvider = Zotero.Prefs.get(`${prefPrefix}.webSearchProvider`) as string || "firecrawl";
+    const currentProvider =
+      (Zotero.Prefs.get(`${prefPrefix}.webSearchProvider`) as string) ||
+      "firecrawl";
     webSearchProviderSelect.value = currentProvider;
     updateWebSearchProviderVisibility(currentProvider);
 
     webSearchProviderSelect.addEventListener("command", () => {
-      Zotero.Prefs.set(`${prefPrefix}.webSearchProvider`, webSearchProviderSelect.value);
+      Zotero.Prefs.set(
+        `${prefPrefix}.webSearchProvider`,
+        webSearchProviderSelect.value,
+      );
       updateWebSearchProviderVisibility(webSearchProviderSelect.value);
       ztoolkit.log(`Saved webSearchProvider: ${webSearchProviderSelect.value}`);
     });
@@ -291,7 +366,9 @@ function bindPrefEvents() {
   try {
     initAdvancedDataManagementUI();
   } catch (e) {
-    Zotero.debug(`[seerai] Error initializing Advanced Data Management UI: ${e}`);
+    Zotero.debug(
+      `[seerai] Error initializing Advanced Data Management UI: ${e}`,
+    );
   }
 }
 
@@ -300,19 +377,23 @@ function bindPrefEvents() {
  */
 function initMcpIntegrationUI() {
   const doc = addon.data.prefs!.window.document;
-  const configArea = doc.getElementById(`zotero-prefpane-${config.addonRef}-mcpConfigJson`) as any; // HTMLTextAreaElement
-  const copyBtn = doc.getElementById(`zotero-prefpane-${config.addonRef}-copyMcpConfig`);
+  const configArea = doc.getElementById(
+    `zotero-prefpane-${config.addonRef}-mcpConfigJson`,
+  ) as any; // HTMLTextAreaElement
+  const copyBtn = doc.getElementById(
+    `zotero-prefpane-${config.addonRef}-copyMcpConfig`,
+  );
 
   if (!configArea) return;
 
   // Default config showing structure
   const mcpConfig = {
-    "mcpServers": {
+    mcpServers: {
       "seerai-zotero": {
-        "command": "node",
-        "args": ["/absolute/path/to/seerai-mcp.cjs"]
-      }
-    }
+        command: "node",
+        args: ["/absolute/path/to/seerai-mcp.cjs"],
+      },
+    },
   };
 
   configArea.value = JSON.stringify(mcpConfig, null, 2);
@@ -320,15 +401,19 @@ function initMcpIntegrationUI() {
   copyBtn?.addEventListener("command", () => {
     // Copy to clipboard
     try {
-      const clipboard = (Components.classes as any)["@mozilla.org/widget/clipboardhelper;1"]
-        .getService((Components.interfaces as any).nsIClipboardHelper);
+      const clipboard = (Components.classes as any)[
+        "@mozilla.org/widget/clipboardhelper;1"
+      ].getService((Components.interfaces as any).nsIClipboardHelper);
       clipboard.copyString(configArea.value);
 
       // Visual feedback
       const originalLabel = copyBtn.getAttribute("label");
       copyBtn.setAttribute("label", "Copied!");
       setTimeout(() => {
-        copyBtn.setAttribute("label", originalLabel || "Copy Config to Clipboard");
+        copyBtn.setAttribute(
+          "label",
+          originalLabel || "Copy Config to Clipboard",
+        );
       }, 2000);
     } catch (e) {
       addon.data.prefs!.window.alert("Failed to copy to clipboard");
@@ -342,8 +427,12 @@ function initMcpIntegrationUI() {
  */
 function initAdvancedDataManagementUI() {
   const doc = addon.data.prefs!.window.document;
-  const exportBtn = doc.getElementById(`zotero-prefpane-${config.addonRef}-exportConfig`);
-  const importBtn = doc.getElementById(`zotero-prefpane-${config.addonRef}-importConfig`);
+  const exportBtn = doc.getElementById(
+    `zotero-prefpane-${config.addonRef}-exportConfig`,
+  );
+  const importBtn = doc.getElementById(
+    `zotero-prefpane-${config.addonRef}-importConfig`,
+  );
 
   if (!exportBtn || !importBtn) return;
 
@@ -360,7 +449,9 @@ function initAdvancedDataManagementUI() {
       const Cc = (Components as any).classes;
       const Ci = (Components as any).interfaces;
 
-      const fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
+      const fp = Cc["@mozilla.org/filepicker;1"].createInstance(
+        Ci.nsIFilePicker,
+      );
       fp.init(win, "Export Seer-AI Configuration", Ci.nsIFilePicker.modeSave);
       fp.appendFilter("JSON Files", "*.json");
       fp.defaultString = `seerai-config-${new Date().toISOString().slice(0, 10)}.json`;
@@ -383,7 +474,9 @@ function initAdvancedDataManagementUI() {
       const Cc = (Components as any).classes;
       const Ci = (Components as any).interfaces;
 
-      const fp = Cc["@mozilla.org/filepicker;1"].createInstance(Ci.nsIFilePicker);
+      const fp = Cc["@mozilla.org/filepicker;1"].createInstance(
+        Ci.nsIFilePicker,
+      );
       fp.init(win, "Import Seer-AI Configuration", Ci.nsIFilePicker.modeOpen);
       fp.appendFilter("JSON Files", "*.json");
 
@@ -425,10 +518,18 @@ function initModelConfigUI() {
   renderModelList();
 
   // Bind button events
-  const addBtn = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-models-add`);
-  const editBtn = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-models-edit`);
-  const deleteBtn = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-models-delete`);
-  const defaultBtn = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-models-default`);
+  const addBtn = doc?.querySelector(
+    `#zotero-prefpane-${config.addonRef}-models-add`,
+  );
+  const editBtn = doc?.querySelector(
+    `#zotero-prefpane-${config.addonRef}-models-edit`,
+  );
+  const deleteBtn = doc?.querySelector(
+    `#zotero-prefpane-${config.addonRef}-models-delete`,
+  );
+  const defaultBtn = doc?.querySelector(
+    `#zotero-prefpane-${config.addonRef}-models-default`,
+  );
 
   addBtn?.addEventListener("command", () => {
     showModelConfigDialog();
@@ -436,7 +537,7 @@ function initModelConfigUI() {
 
   editBtn?.addEventListener("command", () => {
     if (selectedConfigId) {
-      const cfg = getModelConfigs().find(c => c.id === selectedConfigId);
+      const cfg = getModelConfigs().find((c) => c.id === selectedConfigId);
       if (cfg) showModelConfigDialog(cfg);
     }
   });
@@ -444,7 +545,7 @@ function initModelConfigUI() {
   deleteBtn?.addEventListener("command", () => {
     if (selectedConfigId) {
       const configs = getModelConfigs();
-      const cfg = configs.find(c => c.id === selectedConfigId);
+      const cfg = configs.find((c) => c.id === selectedConfigId);
       if (cfg && addon.data.prefs!.window.confirm(`Delete "${cfg.name}"?`)) {
         deleteModelConfig(selectedConfigId);
         selectedConfigId = null;
@@ -473,30 +574,35 @@ function renderModelList() {
   if (!listContainer) return;
 
   // Clear existing items (except empty message)
-  const existingItems = listContainer.querySelectorAll('.model-config-item');
+  const existingItems = listContainer.querySelectorAll(".model-config-item");
   existingItems.forEach((item: Element) => item.remove());
 
   const configs = getModelConfigs();
 
   if (configs.length === 0) {
-    if (emptyMsg) (emptyMsg as HTMLElement).style.display = 'block';
+    if (emptyMsg) (emptyMsg as HTMLElement).style.display = "block";
     return;
   }
 
-  if (emptyMsg) (emptyMsg as HTMLElement).style.display = 'none';
+  if (emptyMsg) (emptyMsg as HTMLElement).style.display = "none";
 
-  configs.forEach(cfg => {
-    const item = doc.createElementNS(HTML_NS, 'div') as HTMLElement;
-    item.className = 'model-config-item';
-    item.setAttribute('data-id', cfg.id);
+  configs.forEach((cfg) => {
+    const item = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    item.className = "model-config-item";
+    item.setAttribute("data-id", cfg.id);
 
     // Get CSS variables for theme-aware colors
-    const itemBg = cfg.isDefault ? getCssVar('--model-item-bg-default') : getCssVar('--model-item-bg');
-    const itemBorder = selectedConfigId === cfg.id
-      ? getCssVar('--model-item-border-selected')
-      : (cfg.isDefault ? getCssVar('--model-item-border-default') : getCssVar('--model-item-border'));
-    const accentColor = getCssVar('--model-item-accent');
-    const secondaryTextColor = getCssVar('--model-item-text-secondary');
+    const itemBg = cfg.isDefault
+      ? getCssVar("--model-item-bg-default")
+      : getCssVar("--model-item-bg");
+    const itemBorder =
+      selectedConfigId === cfg.id
+        ? getCssVar("--model-item-border-selected")
+        : cfg.isDefault
+          ? getCssVar("--model-item-border-default")
+          : getCssVar("--model-item-border");
+    const accentColor = getCssVar("--model-item-accent");
+    const secondaryTextColor = getCssVar("--model-item-text-secondary");
 
     item.style.cssText = `
       padding: 8px 12px;
@@ -510,17 +616,17 @@ function renderModelList() {
       align-items: center;
     `;
 
-    const info = doc.createElementNS(HTML_NS, 'div') as HTMLElement;
+    const info = doc.createElementNS(HTML_NS, "div") as HTMLElement;
     info.innerHTML = `
       <strong style="font-size: 13px;">${escapeHtml(cfg.name)}</strong>
-      ${cfg.isDefault ? `<span style="color: ${accentColor}; font-size: 11px; margin-left: 8px;">★ Default</span>` : ''}
+      ${cfg.isDefault ? `<span style="color: ${accentColor}; font-size: 11px; margin-left: 8px;">★ Default</span>` : ""}
       <div style="font-size: 11px; color: ${secondaryTextColor}; margin-top: 2px;">
         ${escapeHtml(cfg.model)} • ${escapeHtml(new URL(cfg.apiURL).hostname)}
       </div>
     `;
 
     item.appendChild(info);
-    item.addEventListener('click', () => {
+    item.addEventListener("click", () => {
       selectedConfigId = cfg.id;
       renderModelList();
       updateButtonStates();
@@ -535,9 +641,15 @@ function renderModelList() {
  */
 function updateButtonStates() {
   const doc = addon.data.prefs!.window.document;
-  const editBtn = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-models-edit`) as HTMLButtonElement;
-  const deleteBtn = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-models-delete`) as HTMLButtonElement;
-  const defaultBtn = doc?.querySelector(`#zotero-prefpane-${config.addonRef}-models-default`) as HTMLButtonElement;
+  const editBtn = doc?.querySelector(
+    `#zotero-prefpane-${config.addonRef}-models-edit`,
+  ) as HTMLButtonElement;
+  const deleteBtn = doc?.querySelector(
+    `#zotero-prefpane-${config.addonRef}-models-delete`,
+  ) as HTMLButtonElement;
+  const defaultBtn = doc?.querySelector(
+    `#zotero-prefpane-${config.addonRef}-models-default`,
+  ) as HTMLButtonElement;
 
   const hasSelection = selectedConfigId !== null;
   if (editBtn) editBtn.disabled = !hasSelection;
@@ -556,21 +668,21 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   const win = addon.data.prefs!.window;
 
   // Remove any existing modal
-  const existingModal = doc.getElementById('model-config-modal-overlay');
+  const existingModal = doc.getElementById("model-config-modal-overlay");
   if (existingModal) existingModal.remove();
 
   // Get CSS variables for modal colors
-  const modalBg = getCssVar('--modal-bg');
-  const modalTitleColor = getCssVar('--modal-title-color');
+  const modalBg = getCssVar("--modal-bg");
+  const modalTitleColor = getCssVar("--modal-title-color");
 
   // Detect color scheme for fallbacks
-  const isDark = !!(win?.matchMedia?.('(prefers-color-scheme: dark)')?.matches);
-  const defaultBg = isDark ? '#1e1e1e' : '#ffffff';
-  const defaultTitleColor = isDark ? '#eeeeee' : '#111111';
+  const isDark = !!win?.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+  const defaultBg = isDark ? "#1e1e1e" : "#ffffff";
+  const defaultTitleColor = isDark ? "#eeeeee" : "#111111";
 
   // Create modal overlay
-  const overlay = doc.createElementNS(HTML_NS, 'div') as HTMLElement;
-  overlay.id = 'model-config-modal-overlay';
+  const overlay = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  overlay.id = "model-config-modal-overlay";
   overlay.style.cssText = `
     position: fixed;
     top: 0;
@@ -585,7 +697,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   `;
 
   // Create modal container
-  const modal = doc.createElementNS(HTML_NS, 'div') as HTMLElement;
+  const modal = doc.createElementNS(HTML_NS, "div") as HTMLElement;
   modal.style.cssText = `
     background: ${modalBg || defaultBg};
     color: ${modalTitleColor || defaultTitleColor};
@@ -598,7 +710,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   `;
 
   // Modal title
-  const titleEl = doc.createElementNS(HTML_NS, 'h3') as HTMLElement;
+  const titleEl = doc.createElementNS(HTML_NS, "h3") as HTMLElement;
   titleEl.textContent = title;
   titleEl.style.cssText = `
     margin: 0 0 20px 0;
@@ -610,27 +722,82 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
 
   // Provider presets
   const providerPresets = [
-    { name: '— Select a preset —', apiURL: '', model: '', placeholder: '' },
-    { name: 'OpenAI', apiURL: 'https://api.openai.com/v1/', model: 'gpt-5-mini', placeholder: 'sk-...' },
-    { name: 'Anthropic', apiURL: 'https://api.anthropic.com/v1/', model: 'claude-sonnet-4.5', placeholder: 'sk-ant-...' },
-    { name: 'Google AI (Gemini)', apiURL: 'https://generativelanguage.googleapis.com/v1beta/openai/', model: 'gemini-2.5-flash', placeholder: 'AIza...' },
-    { name: 'Mistral AI', apiURL: 'https://api.mistral.ai/v1/', model: 'mistral-large-latest', placeholder: '' },
-    { name: 'OpenRouter', apiURL: 'https://openrouter.ai/api/v1/', model: 'openai/gpt-5-mini', placeholder: 'sk-or-...' },
-    { name: 'Groq', apiURL: 'https://api.groq.com/openai/v1/', model: 'openai/gpt-oss-120b', placeholder: 'gsk_...' },
-    { name: 'DeepSeek', apiURL: 'https://api.deepseek.com/v1/', model: 'deepseek-chat', placeholder: 'sk-...' },
-    { name: 'xAI (Grok)', apiURL: 'https://api.x.ai/v1/', model: 'grok-4.1-fast', placeholder: 'xai-...' },
-    { name: 'Together AI', apiURL: 'https://api.together.xyz/v1/', model: 'openai/gpt-oss-120b', placeholder: '' },
-    { name: 'Ollama (Local)', apiURL: 'http://localhost:11434/v1/', model: 'qwen3-vl:8b-thinking-q8_0', placeholder: '(optional)' },
-    { name: 'OpenAI Compatible', apiURL: 'http://seerai.com:1234/v1/', model: 'local-model', placeholder: '(optional)' },
+    { name: "— Select a preset —", apiURL: "", model: "", placeholder: "" },
+    {
+      name: "OpenAI",
+      apiURL: "https://api.openai.com/v1/",
+      model: "gpt-5-mini",
+      placeholder: "sk-...",
+    },
+    {
+      name: "Anthropic",
+      apiURL: "https://api.anthropic.com/v1/",
+      model: "claude-sonnet-4.5",
+      placeholder: "sk-ant-...",
+    },
+    {
+      name: "Google AI (Gemini)",
+      apiURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+      model: "gemini-2.5-flash",
+      placeholder: "AIza...",
+    },
+    {
+      name: "Mistral AI",
+      apiURL: "https://api.mistral.ai/v1/",
+      model: "mistral-large-latest",
+      placeholder: "",
+    },
+    {
+      name: "OpenRouter",
+      apiURL: "https://openrouter.ai/api/v1/",
+      model: "openai/gpt-5-mini",
+      placeholder: "sk-or-...",
+    },
+    {
+      name: "Groq",
+      apiURL: "https://api.groq.com/openai/v1/",
+      model: "openai/gpt-oss-120b",
+      placeholder: "gsk_...",
+    },
+    {
+      name: "DeepSeek",
+      apiURL: "https://api.deepseek.com/v1/",
+      model: "deepseek-chat",
+      placeholder: "sk-...",
+    },
+    {
+      name: "xAI (Grok)",
+      apiURL: "https://api.x.ai/v1/",
+      model: "grok-4.1-fast",
+      placeholder: "xai-...",
+    },
+    {
+      name: "Together AI",
+      apiURL: "https://api.together.xyz/v1/",
+      model: "openai/gpt-oss-120b",
+      placeholder: "",
+    },
+    {
+      name: "Ollama (Local)",
+      apiURL: "http://localhost:11434/v1/",
+      model: "qwen3-vl:8b-thinking-q8_0",
+      placeholder: "(optional)",
+    },
+    {
+      name: "OpenAI Compatible",
+      apiURL: "http://seerai.com:1234/v1/",
+      model: "local-model",
+      placeholder: "(optional)",
+    },
   ];
 
   // Get CSS variables for form elements
-  const labelColor = getCssVar('--modal-label-color');
-  const inputBg = getCssVar('--modal-input-bg');
-  const inputBorder = getCssVar('--modal-input-border');
-  const inputFocusBorder = getCssVar('--modal-input-focus-border');
-  const inputText = getCssVar('--modal-input-text');
-  const inputPlaceholder = getCssVar('--modal-input-placeholder');
+  const labelColor = getCssVar("--modal-label-color");
+  const inputBg = getCssVar("--modal-input-bg");
+  const inputBorder = getCssVar("--modal-input-border");
+  const inputFocusBorder = getCssVar("--modal-input-focus-border");
+  const inputText = getCssVar("--modal-input-text");
+  const inputPlaceholder = getCssVar("--modal-input-placeholder");
 
   // Field styles
   const labelStyle = `
@@ -643,24 +810,24 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   const inputStyle = `
     width: 100%;
     padding: 10px 12px;
-    border: 1px solid ${inputBorder || (isDark ? '#444' : '#ccc')};
+    border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
     border-radius: 6px;
     font-size: 14px;
     margin-bottom: 16px;
     box-sizing: border-box;
     transition: border-color 0.2s;
-    background: ${inputBg || (isDark ? '#2d2d2d' : '#ffffff')};
+    background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
     color: ${inputText || defaultTitleColor};
   `;
   const selectStyle = `
     width: 100%;
     padding: 10px 12px;
-    border: 1px solid ${inputBorder || (isDark ? '#444' : '#ccc')};
+    border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
     border-radius: 6px;
     font-size: 14px;
     margin-bottom: 16px;
     box-sizing: border-box;
-    background: ${inputBg || (isDark ? '#2d2d2d' : '#ffffff')};
+    background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
     color: ${inputText || defaultTitleColor};
     cursor: pointer;
   `;
@@ -669,47 +836,54 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   const inputs: Record<string, HTMLInputElement> = {};
 
   if (!isEdit) {
-    const presetLabel = doc.createElementNS(HTML_NS, 'label') as HTMLElement;
-    presetLabel.textContent = 'Provider Preset';
+    const presetLabel = doc.createElementNS(HTML_NS, "label") as HTMLElement;
+    presetLabel.textContent = "Provider Preset";
     presetLabel.style.cssText = labelStyle;
     modal.appendChild(presetLabel);
 
-    const presetSelect = doc.createElementNS(HTML_NS, 'select') as HTMLSelectElement;
+    const presetSelect = doc.createElementNS(
+      HTML_NS,
+      "select",
+    ) as HTMLSelectElement;
     presetSelect.style.cssText = selectStyle;
 
     providerPresets.forEach((preset, idx) => {
-      const option = doc.createElementNS(HTML_NS, 'option') as HTMLOptionElement;
+      const option = doc.createElementNS(
+        HTML_NS,
+        "option",
+      ) as HTMLOptionElement;
       option.value = String(idx);
       option.textContent = preset.name;
       presetSelect.appendChild(option);
     });
 
-    presetSelect.addEventListener('change', () => {
+    presetSelect.addEventListener("change", () => {
       const idx = parseInt(presetSelect.value);
       const preset = providerPresets[idx];
       if (preset && idx > 0) {
         if (inputs.name && !inputs.name.value) inputs.name.value = preset.name;
         if (inputs.apiURL) inputs.apiURL.value = preset.apiURL;
         if (inputs.model) inputs.model.value = preset.model;
-        if (inputs.apiKey) inputs.apiKey.placeholder = preset.placeholder || 'API Key';
+        if (inputs.apiKey)
+          inputs.apiKey.placeholder = preset.placeholder || "API Key";
       }
     });
 
     modal.appendChild(presetSelect);
 
     // Divider
-    const dividerBg = getCssVar('--divider-bg');
-    const dividerTextBg = getCssVar('--divider-text-bg');
-    const dividerTextColor = getCssVar('--divider-text-color');
+    const dividerBg = getCssVar("--divider-bg");
+    const dividerTextBg = getCssVar("--divider-text-bg");
+    const dividerTextColor = getCssVar("--divider-text-color");
 
-    const divider = doc.createElementNS(HTML_NS, 'div') as HTMLElement;
+    const divider = doc.createElementNS(HTML_NS, "div") as HTMLElement;
     divider.style.cssText = `
       border-top: 1px solid ${dividerBg};
       margin: 4px 0 16px 0;
       position: relative;
     `;
-    const dividerText = doc.createElementNS(HTML_NS, 'span') as HTMLElement;
-    dividerText.textContent = 'or fill manually';
+    const dividerText = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+    dividerText.textContent = "or fill manually";
     dividerText.style.cssText = `
       position: absolute;
       top: -9px;
@@ -726,19 +900,43 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
 
   // Create form fields
   const fields = [
-    { id: 'name', label: 'Name', placeholder: 'My OpenAI Config', value: existingConfig?.name || '', type: 'text' },
-    { id: 'apiURL', label: 'API URL', placeholder: 'https://api.openai.com/v1/', value: existingConfig?.apiURL || 'https://api.openai.com/v1/', type: 'text' },
-    { id: 'apiKey', label: 'API Key', placeholder: 'sk-...', value: existingConfig?.apiKey || '', type: 'password' },
-    { id: 'model', label: 'Model', placeholder: 'gpt-4o-mini', value: existingConfig?.model || 'gpt-4o-mini', type: 'text' },
+    {
+      id: "name",
+      label: "Name",
+      placeholder: "My OpenAI Config",
+      value: existingConfig?.name || "",
+      type: "text",
+    },
+    {
+      id: "apiURL",
+      label: "API URL",
+      placeholder: "https://api.openai.com/v1/",
+      value: existingConfig?.apiURL || "https://api.openai.com/v1/",
+      type: "text",
+    },
+    {
+      id: "apiKey",
+      label: "API Key",
+      placeholder: "sk-...",
+      value: existingConfig?.apiKey || "",
+      type: "password",
+    },
+    {
+      id: "model",
+      label: "Model",
+      placeholder: "gpt-4o-mini",
+      value: existingConfig?.model || "gpt-4o-mini",
+      type: "text",
+    },
   ];
 
-  fields.forEach(field => {
-    const label = doc.createElementNS(HTML_NS, 'label') as HTMLElement;
+  fields.forEach((field) => {
+    const label = doc.createElementNS(HTML_NS, "label") as HTMLElement;
     label.textContent = field.label;
     label.style.cssText = labelStyle;
     modal.appendChild(label);
 
-    const input = doc.createElementNS(HTML_NS, 'input') as HTMLInputElement;
+    const input = doc.createElementNS(HTML_NS, "input") as HTMLInputElement;
     input.type = field.type;
     input.placeholder = field.placeholder;
     input.value = field.value;
@@ -748,22 +946,22 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     modal.appendChild(input);
 
     // Add focus effect
-    input.addEventListener('focus', () => {
+    input.addEventListener("focus", () => {
       input.style.borderColor = inputFocusBorder;
-      input.style.outline = 'none';
+      input.style.outline = "none";
     });
-    input.addEventListener('blur', () => {
+    input.addEventListener("blur", () => {
       input.style.borderColor = inputBorder;
     });
   });
 
   // --- Rate Limit Section ---
-  const rlLabel = doc.createElementNS(HTML_NS, 'label') as HTMLElement;
-  rlLabel.textContent = 'Rate Limit';
+  const rlLabel = doc.createElementNS(HTML_NS, "label") as HTMLElement;
+  rlLabel.textContent = "Rate Limit";
   rlLabel.style.cssText = labelStyle;
   modal.appendChild(rlLabel);
 
-  const rlContainer = doc.createElementNS(HTML_NS, 'div') as HTMLElement;
+  const rlContainer = doc.createElementNS(HTML_NS, "div") as HTMLElement;
   rlContainer.style.cssText = `
     display: flex;
     gap: 12px;
@@ -771,19 +969,22 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   `;
 
   // Type Selector
-  const rlTypeSelect = doc.createElementNS(HTML_NS, 'select') as HTMLSelectElement;
+  const rlTypeSelect = doc.createElementNS(
+    HTML_NS,
+    "select",
+  ) as HTMLSelectElement;
   rlTypeSelect.style.cssText = selectStyle;
-  rlTypeSelect.style.marginBottom = '0';
-  rlTypeSelect.style.flex = '1';
+  rlTypeSelect.style.marginBottom = "0";
+  rlTypeSelect.style.flex = "1";
 
   const rlTypes = [
-    { value: 'concurrency', label: 'Concurrency (Simultaneous)' },
-    { value: 'rpm', label: 'RPM (Requests / Minute)' },
-    { value: 'tpm', label: 'TPM (Tokens / Minute)' }
+    { value: "concurrency", label: "Concurrency (Simultaneous)" },
+    { value: "rpm", label: "RPM (Requests / Minute)" },
+    { value: "tpm", label: "TPM (Tokens / Minute)" },
   ];
 
-  rlTypes.forEach(t => {
-    const opt = doc.createElementNS(HTML_NS, 'option') as HTMLOptionElement;
+  rlTypes.forEach((t) => {
+    const opt = doc.createElementNS(HTML_NS, "option") as HTMLOptionElement;
     opt.value = t.value;
     opt.textContent = t.label;
     if (existingConfig?.rateLimit?.type === t.value) {
@@ -794,21 +995,26 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   rlContainer.appendChild(rlTypeSelect);
 
   // Value Input
-  const rlValueInput = doc.createElementNS(HTML_NS, 'input') as HTMLInputElement;
-  rlValueInput.type = 'number';
-  rlValueInput.min = '1';
-  rlValueInput.placeholder = 'Limit';
-  rlValueInput.value = existingConfig?.rateLimit?.value ? String(existingConfig.rateLimit.value) : '5';
+  const rlValueInput = doc.createElementNS(
+    HTML_NS,
+    "input",
+  ) as HTMLInputElement;
+  rlValueInput.type = "number";
+  rlValueInput.min = "1";
+  rlValueInput.placeholder = "Limit";
+  rlValueInput.value = existingConfig?.rateLimit?.value
+    ? String(existingConfig.rateLimit.value)
+    : "5";
   rlValueInput.style.cssText = inputStyle;
-  rlValueInput.style.marginBottom = '0';
-  rlValueInput.style.flex = '1';
+  rlValueInput.style.marginBottom = "0";
+  rlValueInput.style.flex = "1";
 
   // Add focus effect
-  rlValueInput.addEventListener('focus', () => {
+  rlValueInput.addEventListener("focus", () => {
     rlValueInput.style.borderColor = inputFocusBorder;
-    rlValueInput.style.outline = 'none';
+    rlValueInput.style.outline = "none";
   });
-  rlValueInput.addEventListener('blur', () => {
+  rlValueInput.addEventListener("blur", () => {
     rlValueInput.style.borderColor = inputBorder;
   });
 
@@ -816,26 +1022,29 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   modal.appendChild(rlContainer);
 
   // --- Reasoning Effort Section ---
-  const reLabel = doc.createElementNS(HTML_NS, 'label') as HTMLElement;
-  reLabel.textContent = 'Reasoning Effort (for o1/o3/reasoning models)';
+  const reLabel = doc.createElementNS(HTML_NS, "label") as HTMLElement;
+  reLabel.textContent = "Reasoning Effort (for o1/o3/reasoning models)";
   reLabel.style.cssText = labelStyle;
   modal.appendChild(reLabel);
 
-  const reSelect = doc.createElementNS(HTML_NS, 'select') as HTMLSelectElement;
+  const reSelect = doc.createElementNS(HTML_NS, "select") as HTMLSelectElement;
   reSelect.style.cssText = selectStyle;
 
   const reOptions = [
-    { value: '', label: 'Disabled (Use Provider Default)' },
-    { value: 'low', label: 'Low' },
-    { value: 'medium', label: 'Medium' },
-    { value: 'high', label: 'High' }
+    { value: "", label: "Disabled (Use Provider Default)" },
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
   ];
 
-  reOptions.forEach(opt => {
-    const option = doc.createElementNS(HTML_NS, 'option') as HTMLOptionElement;
+  reOptions.forEach((opt) => {
+    const option = doc.createElementNS(HTML_NS, "option") as HTMLOptionElement;
     option.value = opt.value;
     option.textContent = opt.label;
-    if (existingConfig?.reasoningEffort === opt.value || (!existingConfig?.reasoningEffort && opt.value === '')) {
+    if (
+      existingConfig?.reasoningEffort === opt.value ||
+      (!existingConfig?.reasoningEffort && opt.value === "")
+    ) {
       option.selected = true;
     }
     reSelect.appendChild(option);
@@ -843,12 +1052,11 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
 
   modal.appendChild(reSelect);
 
-
   // Error message container
-  const errorBg = getCssVar('--modal-error-bg');
-  const errorText = getCssVar('--modal-error-text');
+  const errorBg = getCssVar("--modal-error-bg");
+  const errorText = getCssVar("--modal-error-text");
 
-  const errorContainer = doc.createElementNS(HTML_NS, 'div') as HTMLElement;
+  const errorContainer = doc.createElementNS(HTML_NS, "div") as HTMLElement;
   errorContainer.style.cssText = `
     color: ${errorText};
     font-size: 12px;
@@ -861,7 +1069,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   modal.appendChild(errorContainer);
 
   // Button container
-  const buttonContainer = doc.createElementNS(HTML_NS, 'div') as HTMLElement;
+  const buttonContainer = doc.createElementNS(HTML_NS, "div") as HTMLElement;
   buttonContainer.style.cssText = `
     display: flex;
     justify-content: flex-end;
@@ -870,17 +1078,17 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   `;
 
   // Get button colors
-  const btnBg = getCssVar('--modal-btn-bg');
-  const btnHoverBg = getCssVar('--modal-btn-hover-bg');
-  const btnText = getCssVar('--modal-btn-text');
-  const btnPrimaryBg = getCssVar('--modal-btn-primary-bg');
-  const btnPrimaryHoverBg = getCssVar('--modal-btn-primary-hover-bg');
-  const btnPrimaryText = getCssVar('--modal-btn-primary-text');
-  const btnBorder = getCssVar('--modal-input-border');
+  const btnBg = getCssVar("--modal-btn-bg");
+  const btnHoverBg = getCssVar("--modal-btn-hover-bg");
+  const btnText = getCssVar("--modal-btn-text");
+  const btnPrimaryBg = getCssVar("--modal-btn-primary-bg");
+  const btnPrimaryHoverBg = getCssVar("--modal-btn-primary-hover-bg");
+  const btnPrimaryText = getCssVar("--modal-btn-primary-text");
+  const btnBorder = getCssVar("--modal-input-border");
 
   // Cancel button
-  const cancelBtn = doc.createElementNS(HTML_NS, 'button') as HTMLButtonElement;
-  cancelBtn.textContent = 'Cancel';
+  const cancelBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+  cancelBtn.textContent = "Cancel";
   cancelBtn.style.cssText = `
     padding: 10px 20px;
     border: 1px solid ${btnBorder};
@@ -891,19 +1099,19 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     cursor: pointer;
     transition: all 0.2s;
   `;
-  cancelBtn.addEventListener('mouseenter', () => {
+  cancelBtn.addEventListener("mouseenter", () => {
     cancelBtn.style.background = btnHoverBg;
   });
-  cancelBtn.addEventListener('mouseleave', () => {
+  cancelBtn.addEventListener("mouseleave", () => {
     cancelBtn.style.background = btnBg;
   });
-  cancelBtn.addEventListener('click', () => {
+  cancelBtn.addEventListener("click", () => {
     overlay.remove();
   });
 
   // Save button
-  const saveBtn = doc.createElementNS(HTML_NS, 'button') as HTMLButtonElement;
-  saveBtn.textContent = isEdit ? 'Save Changes' : 'Add Configuration';
+  const saveBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+  saveBtn.textContent = isEdit ? "Save Changes" : "Add Configuration";
   saveBtn.style.cssText = `
     padding: 10px 20px;
     border: none;
@@ -915,31 +1123,33 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     cursor: pointer;
     transition: all 0.2s;
   `;
-  saveBtn.addEventListener('mouseenter', () => {
+  saveBtn.addEventListener("mouseenter", () => {
     saveBtn.style.background = btnPrimaryHoverBg;
   });
-  saveBtn.addEventListener('mouseleave', () => {
+  saveBtn.addEventListener("mouseleave", () => {
     saveBtn.style.background = btnPrimaryBg;
   });
 
-  saveBtn.addEventListener('click', () => {
+  saveBtn.addEventListener("click", () => {
     const newConfig = {
       name: inputs.name.value.trim(),
       apiURL: inputs.apiURL.value.trim(),
       apiKey: inputs.apiKey.value.trim(),
       model: inputs.model.value.trim(),
       rateLimit: {
-        type: rlTypeSelect.value as 'tpm' | 'rpm' | 'concurrency',
-        value: parseInt(rlValueInput.value) || 5
+        type: rlTypeSelect.value as "tpm" | "rpm" | "concurrency",
+        value: parseInt(rlValueInput.value) || 5,
       },
-      ...(reSelect.value && { reasoningEffort: reSelect.value as 'low' | 'medium' | 'high' })
+      ...(reSelect.value && {
+        reasoningEffort: reSelect.value as "low" | "medium" | "high",
+      }),
     };
 
     // Validate
     const errors = validateModelConfig(newConfig);
     if (errors.length > 0) {
-      errorContainer.textContent = errors.join('\n');
-      errorContainer.style.display = 'block';
+      errorContainer.textContent = errors.join("\n");
+      errorContainer.style.display = "block";
       return;
     }
 
@@ -959,7 +1169,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   modal.appendChild(buttonContainer);
 
   // Close on overlay click
-  overlay.addEventListener('click', (e) => {
+  overlay.addEventListener("click", (e) => {
     if (e.target === overlay) {
       overlay.remove();
     }
@@ -967,12 +1177,12 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
 
   // Close on Escape key
   const handleEscape = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') {
+    if (e.key === "Escape") {
       overlay.remove();
-      win.removeEventListener('keydown', handleEscape);
+      win.removeEventListener("keydown", handleEscape);
     }
   };
-  win.addEventListener('keydown', handleEscape);
+  win.addEventListener("keydown", handleEscape);
 
   overlay.appendChild(modal);
 
@@ -989,8 +1199,10 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
  * Escape HTML for safe display
  */
 function escapeHtml(text: string): string {
-  const div = addon.data.prefs!.window.document.createElementNS(HTML_NS, 'div') as HTMLElement;
+  const div = addon.data.prefs!.window.document.createElementNS(
+    HTML_NS,
+    "div",
+  ) as HTMLElement;
   div.textContent = text;
   return div.innerHTML as string;
 }
-

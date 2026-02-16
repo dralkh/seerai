@@ -2,7 +2,9 @@
   <html:link rel="localization" href="__addonRef__-preferences.ftl" />
   <html:link rel="stylesheet" href="preferences.css" />
 </linkset>
-<groupbox onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window });">
+<groupbox
+  onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
+>
   <label>
     <html:h2 data-l10n-id="pref-title"></html:h2>
   </label>
@@ -11,56 +13,111 @@
   <label>
     <html:h3 data-l10n-id="pref-models-title">AI Model Configurations</html:h3>
   </label>
-  <hbox align="center" style="margin-bottom: 8px;">
-    <button id="zotero-prefpane-__addonRef__-models-add" data-l10n-id="pref-models-add" />
-    <button id="zotero-prefpane-__addonRef__-models-edit" data-l10n-id="pref-models-edit" disabled="true" />
-    <button id="zotero-prefpane-__addonRef__-models-delete" data-l10n-id="pref-models-delete" disabled="true" />
-    <button id="zotero-prefpane-__addonRef__-models-default" data-l10n-id="pref-models-set-default" disabled="true" />
+  <hbox align="center" style="margin-bottom: 8px">
+    <button
+      id="zotero-prefpane-__addonRef__-models-add"
+      data-l10n-id="pref-models-add"
+    />
+    <button
+      id="zotero-prefpane-__addonRef__-models-edit"
+      data-l10n-id="pref-models-edit"
+      disabled="true"
+    />
+    <button
+      id="zotero-prefpane-__addonRef__-models-delete"
+      data-l10n-id="pref-models-delete"
+      disabled="true"
+    />
+    <button
+      id="zotero-prefpane-__addonRef__-models-default"
+      data-l10n-id="pref-models-set-default"
+      disabled="true"
+    />
   </hbox>
   <html:div id="__addonRef__-models-list">
-    <html:p id="__addonRef__-models-empty" data-l10n-id="pref-models-empty"></html:p>
+    <html:p
+      id="__addonRef__-models-empty"
+      data-l10n-id="pref-models-empty"
+    ></html:p>
   </html:div>
 
-
-
-  <html:hr style="margin: 16px 0;" />
+  <html:hr style="margin: 16px 0" />
 
   <!-- MCP Server Integration -->
   <label>
     <html:h3>MCP Server Integration (Claude Desktop)</html:h3>
   </label>
-  <vbox style="margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.03); border-radius: 4px;">
-    <hbox align="center" style="margin-bottom: 8px; gap: 16px;">
-      <button label="GitHub Repo" oncommand="Zotero.launchURL('https://github.com/dralkh/seerai');" />
-      <button label="Download Release" oncommand="Zotero.launchURL('https://github.com/dralkh/seerai/releases');" />
+  <vbox
+    style="
+      margin-bottom: 12px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.03);
+      border-radius: 4px;
+    "
+  >
+    <hbox align="center" style="margin-bottom: 8px; gap: 16px">
+      <button
+        label="GitHub Repo"
+        oncommand="Zotero.launchURL('https://github.com/dralkh/seerai')"
+      />
+      <button
+        label="Download Release"
+        oncommand="
+          Zotero.launchURL('https://github.com/dralkh/seerai/releases')
+        "
+      />
     </hbox>
 
-    <description style="margin-bottom: 4px; font-weight: bold;">Configuration (mcp_config.json):</description>
-    <hbox style="margin-bottom: 4px;">
-      <html:textarea id="zotero-prefpane-__addonRef__-mcpConfigJson" readonly="true"
-        style="width: 100%; height: 120px; font-family: monospace; font-size: 11px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; resize: vertical;" />
+    <description style="margin-bottom: 4px; font-weight: bold"
+      >Configuration (mcp_config.json):</description
+    >
+    <hbox style="margin-bottom: 4px">
+      <html:textarea
+        id="zotero-prefpane-__addonRef__-mcpConfigJson"
+        readonly="true"
+        style="
+          width: 100%;
+          height: 120px;
+          font-family: monospace;
+          font-size: 11px;
+          padding: 8px;
+          border: 1px solid #ccc;
+          border-radius: 4px;
+          resize: vertical;
+        "
+      />
     </hbox>
 
     <hbox pack="end">
-      <button id="zotero-prefpane-__addonRef__-copyMcpConfig" label="Copy Config to Clipboard" />
+      <button
+        id="zotero-prefpane-__addonRef__-copyMcpConfig"
+        label="Copy Config to Clipboard"
+      />
     </hbox>
   </vbox>
 
-  <html:hr style="margin: 16px 0;" />
-  
+  <html:hr style="margin: 16px 0" />
+
   <!-- Advanced Data Management -->
   <label>
     <html:h3>Advanced Data Management</html:h3>
   </label>
-  <description style="margin-bottom: 8px; font-size: 11px; color: #666;">
-    Export or import your entire Seer-AI configuration, including models, prompts, tables, and API keys.
+  <description style="margin-bottom: 8px; font-size: 11px; color: #666">
+    Export or import your entire Seer-AI configuration, including models,
+    prompts, tables, and API keys.
   </description>
-  <hbox align="center" style="gap: 12px; margin-bottom: 12px;">
-    <button id="zotero-prefpane-__addonRef__-exportConfig" label="Export Configuration" />
-    <button id="zotero-prefpane-__addonRef__-importConfig" label="Import Configuration" />
+  <hbox align="center" style="gap: 12px; margin-bottom: 12px">
+    <button
+      id="zotero-prefpane-__addonRef__-exportConfig"
+      label="Export Configuration"
+    />
+    <button
+      id="zotero-prefpane-__addonRef__-importConfig"
+      label="Import Configuration"
+    />
   </hbox>
 
-  <html:hr style="margin: 16px 0;" />
+  <html:hr style="margin: 16px 0" />
 
   <!-- OCR Configurations -->
   <label>
@@ -68,9 +125,12 @@
   </label>
 
   <!-- Service Selection with Menulist Dropdown -->
-  <hbox align="center" style="margin-bottom: 12px;">
-    <label style="width: 120px; font-weight: bold;">OCR Service:</label>
-    <menulist id="zotero-prefpane-__addonRef__-datalabMode" style="min-width: 200px;">
+  <hbox align="center" style="margin-bottom: 12px">
+    <label style="width: 120px; font-weight: bold">OCR Service:</label>
+    <menulist
+      id="zotero-prefpane-__addonRef__-datalabMode"
+      style="min-width: 200px"
+    >
       <menupopup>
         <menuitem value="local" label="Local Marker Server" />
         <menuitem value="cloud" label="Cloud (DataLab.to)" />
@@ -80,82 +140,167 @@
   </hbox>
 
   <!-- Local Server Settings -->
-  <vbox id="zotero-prefpane-__addonRef__-localSettings"
-    style="margin-left: 20px; margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.03); border-radius: 4px;">
-    <hbox align="center" style="margin-bottom: 8px;">
-      <label style="width: 100px;">Server URL:</label>
-      <html:input type="text" id="zotero-prefpane-__addonRef__-datalabUrl" placeholder="http://localhost:8001"
-        style="flex: 1; min-width: 200px;"></html:input>
+  <vbox
+    id="zotero-prefpane-__addonRef__-localSettings"
+    style="
+      margin-left: 20px;
+      margin-bottom: 12px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.03);
+      border-radius: 4px;
+    "
+  >
+    <hbox align="center" style="margin-bottom: 8px">
+      <label style="width: 100px">Server URL:</label>
+      <html:input
+        type="text"
+        id="zotero-prefpane-__addonRef__-datalabUrl"
+        placeholder="http://localhost:8001"
+        style="flex: 1; min-width: 200px"
+      ></html:input>
     </hbox>
-    <hbox align="center" style="margin-bottom: 8px;">
-      <checkbox id="zotero-prefpane-__addonRef__-localForceOcr" label="Force OCR" checked="true" />
+    <hbox align="center" style="margin-bottom: 8px">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-localForceOcr"
+        label="Force OCR"
+        checked="true"
+      />
     </hbox>
     <hbox align="center">
-      <html:a href="https://github.com/dralkh/seerai#option-b-local-marker-server"
-        style="color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 12px;"
-        onclick="Zotero.launchURL(this.href); return false;">
+      <html:a
+        href="https://github.com/dralkh/seerai#option-b-local-marker-server"
+        style="
+          color: #0066cc;
+          text-decoration: underline;
+          cursor: pointer;
+          font-size: 12px;
+        "
+        onclick="
+          Zotero.launchURL(this.href);
+          return false;
+        "
+      >
         📖 Setup Tutorial
       </html:a>
     </hbox>
   </vbox>
 
   <!-- Cloud DataLab Settings -->
-  <vbox id="zotero-prefpane-__addonRef__-cloudSettings"
-    style="margin-left: 20px; margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.03); border-radius: 4px;">
-    <hbox align="center" style="margin-bottom: 8px;">
-      <label style="width: 100px;">API Key:</label>
-      <html:input type="password" id="zotero-prefpane-__addonRef__-datalabApiKey" placeholder="Token from datalab.to"
-        style="flex: 1; min-width: 200px;"></html:input>
+  <vbox
+    id="zotero-prefpane-__addonRef__-cloudSettings"
+    style="
+      margin-left: 20px;
+      margin-bottom: 12px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.03);
+      border-radius: 4px;
+    "
+  >
+    <hbox align="center" style="margin-bottom: 8px">
+      <label style="width: 100px">API Key:</label>
+      <html:input
+        type="password"
+        id="zotero-prefpane-__addonRef__-datalabApiKey"
+        placeholder="Token from datalab.to"
+        style="flex: 1; min-width: 200px"
+      ></html:input>
     </hbox>
-    <hbox align="center" style="margin-bottom: 6px;">
-      <checkbox id="zotero-prefpane-__addonRef__-cloudForceOcr" label="Force OCR" />
+    <hbox align="center" style="margin-bottom: 6px">
+      <checkbox
+        id="zotero-prefpane-__addonRef__-cloudForceOcr"
+        label="Force OCR"
+      />
     </hbox>
     <hbox align="center">
-      <checkbox id="zotero-prefpane-__addonRef__-cloudUseLlm" label="Use LLM (AI-enhanced extraction)" />
+      <checkbox
+        id="zotero-prefpane-__addonRef__-cloudUseLlm"
+        label="Use LLM (AI-enhanced extraction)"
+      />
     </hbox>
   </vbox>
 
   <!-- Mistral OCR Settings -->
-  <vbox id="zotero-prefpane-__addonRef__-mistralSettings"
-    style="margin-left: 20px; margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.03); border-radius: 4px;">
-    <hbox align="center" style="margin-bottom: 8px;">
-      <label style="width: 100px;">API Key:</label>
-      <html:input type="password" id="zotero-prefpane-__addonRef__-mistralApiKey" placeholder="Mistral API Key"
-        style="flex: 1; min-width: 200px;"></html:input>
+  <vbox
+    id="zotero-prefpane-__addonRef__-mistralSettings"
+    style="
+      margin-left: 20px;
+      margin-bottom: 12px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.03);
+      border-radius: 4px;
+    "
+  >
+    <hbox align="center" style="margin-bottom: 8px">
+      <label style="width: 100px">API Key:</label>
+      <html:input
+        type="password"
+        id="zotero-prefpane-__addonRef__-mistralApiKey"
+        placeholder="Mistral API Key"
+        style="flex: 1; min-width: 200px"
+      ></html:input>
     </hbox>
     <hbox align="center">
-      <html:a href="https://docs.mistral.ai/capabilities/document/"
-        style="color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 12px;"
-        onclick="Zotero.launchURL(this.href); return false;">
+      <html:a
+        href="https://docs.mistral.ai/capabilities/document/"
+        style="
+          color: #0066cc;
+          text-decoration: underline;
+          cursor: pointer;
+          font-size: 12px;
+        "
+        onclick="
+          Zotero.launchURL(this.href);
+          return false;
+        "
+      >
         📖 Mistral OCR Docs
       </html:a>
     </hbox>
   </vbox>
 
-
-
-  <html:hr style="margin: 16px 0;" />
+  <html:hr style="margin: 16px 0" />
 
   <!-- Semantic Scholar Settings -->
   <label>
     <html:h3>Semantic Scholar Integration</html:h3>
   </label>
-  <vbox style="margin-left: 20px; padding: 10px; background: rgba(0,0,0,0.03); border-radius: 4px;">
-    <hbox align="center" style="margin-bottom: 8px;">
-      <label style="width: 100px;">API Key:</label>
-      <html:input type="password" id="zotero-prefpane-__addonRef__-semanticScholarApiKey" placeholder="S2 API Key"
-        style="flex: 1; min-width: 200px;"></html:input>
+  <vbox
+    style="
+      margin-left: 20px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.03);
+      border-radius: 4px;
+    "
+  >
+    <hbox align="center" style="margin-bottom: 8px">
+      <label style="width: 100px">API Key:</label>
+      <html:input
+        type="password"
+        id="zotero-prefpane-__addonRef__-semanticScholarApiKey"
+        placeholder="S2 API Key"
+        style="flex: 1; min-width: 200px"
+      ></html:input>
     </hbox>
     <hbox align="center">
-      <html:a href="https://www.semanticscholar.org/product/api#api-key"
-        style="color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 12px;"
-        onclick="Zotero.launchURL(this.href); return false;">
+      <html:a
+        href="https://www.semanticscholar.org/product/api#api-key"
+        style="
+          color: #0066cc;
+          text-decoration: underline;
+          cursor: pointer;
+          font-size: 12px;
+        "
+        onclick="
+          Zotero.launchURL(this.href);
+          return false;
+        "
+      >
         📖 Get API Key
       </html:a>
     </hbox>
   </vbox>
 
-  <html:hr style="margin: 16px 0;" />
+  <html:hr style="margin: 16px 0" />
 
   <!-- Web Search Integration -->
   <label>
@@ -163,9 +308,12 @@
   </label>
 
   <!-- Provider Selection -->
-  <hbox align="center" style="margin-bottom: 12px;">
-    <label style="width: 120px; font-weight: bold;">Search Provider:</label>
-    <menulist id="zotero-prefpane-__addonRef__-webSearchProvider" style="min-width: 150px;">
+  <hbox align="center" style="margin-bottom: 12px">
+    <label style="width: 120px; font-weight: bold">Search Provider:</label>
+    <menulist
+      id="zotero-prefpane-__addonRef__-webSearchProvider"
+      style="min-width: 150px"
+    >
       <menupopup>
         <menuitem value="firecrawl" label="Firecrawl" />
         <menuitem value="tavily" label="Tavily" />
@@ -174,84 +322,181 @@
   </hbox>
 
   <!-- Firecrawl Settings -->
-  <vbox id="zotero-prefpane-__addonRef__-firecrawlSettings"
-    style="margin-left: 20px; margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.03); border-radius: 4px;">
-    <hbox align="center" style="margin-bottom: 8px;">
-      <label style="width: 100px;">API Key:</label>
-      <html:input type="password" id="zotero-prefpane-__addonRef__-firecrawlApiKey" placeholder="fc-YOUR-API-KEY"
-        style="flex: 1; min-width: 200px;"></html:input>
+  <vbox
+    id="zotero-prefpane-__addonRef__-firecrawlSettings"
+    style="
+      margin-left: 20px;
+      margin-bottom: 12px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.03);
+      border-radius: 4px;
+    "
+  >
+    <hbox align="center" style="margin-bottom: 8px">
+      <label style="width: 100px">API Key:</label>
+      <html:input
+        type="password"
+        id="zotero-prefpane-__addonRef__-firecrawlApiKey"
+        placeholder="fc-YOUR-API-KEY"
+        style="flex: 1; min-width: 200px"
+      ></html:input>
     </hbox>
-    <hbox align="center" style="margin-bottom: 8px;">
-      <label style="width: 100px;">API URL:</label>
-      <html:input type="text" id="zotero-prefpane-__addonRef__-firecrawlApiUrl"
-        placeholder="https://api.firecrawl.dev/v2 or http://localhost:3002/v2" style="flex: 1; min-width: 200px;">
+    <hbox align="center" style="margin-bottom: 8px">
+      <label style="width: 100px">API URL:</label>
+      <html:input
+        type="text"
+        id="zotero-prefpane-__addonRef__-firecrawlApiUrl"
+        placeholder="https://api.firecrawl.dev/v2 or http://localhost:3002/v2"
+        style="flex: 1; min-width: 200px"
+      >
       </html:input>
     </hbox>
-    <hbox align="center" style="margin-bottom: 8px;">
-      <label style="width: 100px;">Search Limit:</label>
-      <html:input type="number" id="zotero-prefpane-__addonRef__-firecrawlSearchLimit" placeholder="3" min="1" max="10"
-        style="width: 60px;"></html:input>
-      <label style="margin-left: 8px; font-size: 11px; color: #666;">Results per query (1-10)</label>
+    <hbox align="center" style="margin-bottom: 8px">
+      <label style="width: 100px">Search Limit:</label>
+      <html:input
+        type="number"
+        id="zotero-prefpane-__addonRef__-firecrawlSearchLimit"
+        placeholder="3"
+        min="1"
+        max="10"
+        style="width: 60px"
+      ></html:input>
+      <label style="margin-left: 8px; font-size: 11px; color: #666"
+        >Results per query (1-10)</label
+      >
     </hbox>
-    <hbox align="center" style="margin-bottom: 8px;">
-      <label style="width: 100px;">Max Concurrent:</label>
-      <html:input type="number" id="zotero-prefpane-__addonRef__-firecrawlMaxConcurrent" placeholder="3" min="1"
-        max="10" style="width: 60px;"></html:input>
-      <label style="margin-left: 8px; font-size: 11px; color: #666;">Parallel requests (1-10)</label>
+    <hbox align="center" style="margin-bottom: 8px">
+      <label style="width: 100px">Max Concurrent:</label>
+      <html:input
+        type="number"
+        id="zotero-prefpane-__addonRef__-firecrawlMaxConcurrent"
+        placeholder="3"
+        min="1"
+        max="10"
+        style="width: 60px"
+      ></html:input>
+      <label style="margin-left: 8px; font-size: 11px; color: #666"
+        >Parallel requests (1-10)</label
+      >
     </hbox>
-    <hbox align="center" style="gap: 16px;">
-      <html:a href="https://firecrawl.dev"
-        style="color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 12px;"
-        onclick="Zotero.launchURL(this.href); return false;">
+    <hbox align="center" style="gap: 16px">
+      <html:a
+        href="https://firecrawl.dev"
+        style="
+          color: #0066cc;
+          text-decoration: underline;
+          cursor: pointer;
+          font-size: 12px;
+        "
+        onclick="
+          Zotero.launchURL(this.href);
+          return false;
+        "
+      >
         🔥 Get Firecrawl API Key
       </html:a>
-      <html:a href="https://github.com/mendableai/firecrawl"
-        style="color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 12px;"
-        onclick="Zotero.launchURL(this.href); return false;">
+      <html:a
+        href="https://github.com/mendableai/firecrawl"
+        style="
+          color: #0066cc;
+          text-decoration: underline;
+          cursor: pointer;
+          font-size: 12px;
+        "
+        onclick="
+          Zotero.launchURL(this.href);
+          return false;
+        "
+      >
         🖥️ Setup Firecrawl Locally
       </html:a>
     </hbox>
   </vbox>
 
   <!-- Tavily Settings -->
-  <vbox id="zotero-prefpane-__addonRef__-tavilySettings"
-    style="margin-left: 20px; margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.03); border-radius: 4px;">
-    <hbox align="center" style="margin-bottom: 8px;">
-      <label style="width: 100px;">API Key:</label>
-      <html:input type="password" id="zotero-prefpane-__addonRef__-tavilyApiKey" placeholder="tvly-YOUR-API-KEY"
-        style="flex: 1; min-width: 200px;"></html:input>
+  <vbox
+    id="zotero-prefpane-__addonRef__-tavilySettings"
+    style="
+      margin-left: 20px;
+      margin-bottom: 12px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.03);
+      border-radius: 4px;
+    "
+  >
+    <hbox align="center" style="margin-bottom: 8px">
+      <label style="width: 100px">API Key:</label>
+      <html:input
+        type="password"
+        id="zotero-prefpane-__addonRef__-tavilyApiKey"
+        placeholder="tvly-YOUR-API-KEY"
+        style="flex: 1; min-width: 200px"
+      ></html:input>
     </hbox>
-    <hbox align="center" style="margin-bottom: 8px;">
-      <label style="width: 100px;">Search Depth:</label>
-      <menulist id="zotero-prefpane-__addonRef__-tavilySearchDepth" style="min-width: 120px;">
+    <hbox align="center" style="margin-bottom: 8px">
+      <label style="width: 100px">Search Depth:</label>
+      <menulist
+        id="zotero-prefpane-__addonRef__-tavilySearchDepth"
+        style="min-width: 120px"
+      >
         <menupopup>
           <menuitem value="basic" label="Basic (faster)" />
           <menuitem value="advanced" label="Advanced (deeper)" />
         </menupopup>
       </menulist>
     </hbox>
-    <hbox align="center" style="margin-bottom: 8px;">
-      <label style="width: 100px;">Search Limit:</label>
-      <html:input type="number" id="zotero-prefpane-__addonRef__-tavilySearchLimit" placeholder="5" min="1" max="20"
-        style="width: 60px;"></html:input>
-      <label style="margin-left: 8px; font-size: 11px; color: #666;">Results per query (1-20)</label>
+    <hbox align="center" style="margin-bottom: 8px">
+      <label style="width: 100px">Search Limit:</label>
+      <html:input
+        type="number"
+        id="zotero-prefpane-__addonRef__-tavilySearchLimit"
+        placeholder="5"
+        min="1"
+        max="20"
+        style="width: 60px"
+      ></html:input>
+      <label style="margin-left: 8px; font-size: 11px; color: #666"
+        >Results per query (1-20)</label
+      >
     </hbox>
-    <hbox align="center" style="gap: 16px;">
-      <html:a href="https://app.tavily.com"
-        style="color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 12px;"
-        onclick="Zotero.launchURL(this.href); return false;">
+    <hbox align="center" style="gap: 16px">
+      <html:a
+        href="https://app.tavily.com"
+        style="
+          color: #0066cc;
+          text-decoration: underline;
+          cursor: pointer;
+          font-size: 12px;
+        "
+        onclick="
+          Zotero.launchURL(this.href);
+          return false;
+        "
+      >
         🔍 Get Tavily API Key
       </html:a>
-      <html:a href="https://docs.tavily.com"
-        style="color: #0066cc; text-decoration: underline; cursor: pointer; font-size: 12px;"
-        onclick="Zotero.launchURL(this.href); return false;">
+      <html:a
+        href="https://docs.tavily.com"
+        style="
+          color: #0066cc;
+          text-decoration: underline;
+          cursor: pointer;
+          font-size: 12px;
+        "
+        onclick="
+          Zotero.launchURL(this.href);
+          return false;
+        "
+      >
         📖 Tavily Documentation
       </html:a>
     </hbox>
   </vbox>
-
 </groupbox>
-<vbox style="margin-top: 16px;">
-  <html:label data-l10n-id="pref-help" style="font-size: 11px; color: #666;"
-    data-l10n-args='{"time": "__buildTime__","name": "__addonName__","version":"__buildVersion__"}'></html:label>
+<vbox style="margin-top: 16px">
+  <html:label
+    data-l10n-id="pref-help"
+    style="font-size: 11px; color: #666"
+    data-l10n-args='{"time": "__buildTime__","name": "__addonName__","version":"__buildVersion__"}'
+  ></html:label>
 </vbox>

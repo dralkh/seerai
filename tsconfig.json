@@ -1,17 +1,8 @@
 {
   "extends": "zotero-types/entries/sandbox/",
   "compilerOptions": {
-    "lib": [
-      "dom",
-      "es2018"
-    ]
+    "lib": ["dom", "es2018"]
   },
-  "include": [
-    "src",
-    "typings"
-  ],
-  "exclude": [
-    "build",
-    "addon"
-  ]
+  "include": ["src", "typings"],
+  "exclude": ["build", "addon"]
 }

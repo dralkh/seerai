@@ -17,7 +17,6 @@
   </a>
 </p>
 
-
 <p align="center">
   <img src="https://github.com/user-attachments/assets/90f68a0d-fec0-41e7-a988-f557c18bd150" width="600" />
 </p>
@@ -30,15 +29,14 @@
   <img src="https://github.com/user-attachments/assets/fe543d48-eb68-47e4-b5f6-1d954e1597a2" width="600" />
 </p>
 
-
 **seerai** is an intelligent research assistant plugin for Zotero 7 that integrates AI-powered chat, advanced search, and data extraction capabilities directly into your research workflow. Chat with your papers, extract structured data, and accelerate your literature review with a local-first, privacy-focused design.
 
 ---
 
-
 ## Features
 
 ### AI-Powered Chat Interface
+
 - **Contextual Conversations**: Chat with AI about your selected papers with full context awareness.
 - **Smart Context Priority**: Automatically prioritizes content sources:
   1. **Zotero Notes** (OCR note, and other notes for highest priority)
@@ -51,7 +49,7 @@
 - **Interactive Follow-ups**: Deepen the conversation with streaming follow-up questions.
 - **Configurable Citations**: Choose your preferred citation style for AI insights and chat.
 - **Smart Copy**: Select and copy text with preserved formatting (Markdown) directly from chat bubbles.
-- **Enhanced Keybindings**: 
+- **Enhanced Keybindings**:
   - `Enter`: Insert new line
   - `Shift+Enter`: Send message
   - `Ctrl+Shift+S`: Toggle/Focus detachable window
@@ -59,6 +57,7 @@
 - **Themed UI**: Enhanced dialogs and components with full theme support for a consistent look across Zotero's Light and Dark modes.
 
 ### Semantic Search & Discovery
+
 - **Web Search**: Integrated Firecrawl & Tavily support for finding high-quality full-text content.
 - **Semantic Scholar Agent**: Advanced paper search with:
   - **Advanced Filters**: Fine-tune results by Year, Venue, and Citation Count.
@@ -72,6 +71,7 @@
 - **Smart Regex matching**: Improved search precision with intelligent handling of word boundaries and special characters.
 
 ### Agentic Chat & Tool Use
+
 - **Autonomous Agents**: AI can now use tools to interact with your Zotero library and the web.
 - **Rich Tool Suite**:
   - **Search Tool**: Search through your library with advanced filters.
@@ -86,6 +86,7 @@
 - **Model-as-a-Tool**: Seamless integration with LLM tool-calling capabilities.
 
 ### Papers Tables
+
 - **Structured Extraction**: Extract specific data points from multiple papers into a comparative table.
 - **AI-Powered Columns**: Define custom columns with AI prompts (e.g., "Methodology", "Sample Size").
 - **Inline Editing**: innovative inline editor for column titles and prompts.
@@ -94,6 +95,7 @@
 - **Side Strip Actions**: Unified controls for adding, removing columns, generating triggers, and settings.
 
 ### OCR & Text Extraction
+
 - **Flexible OCR Options**:
   - **Mistral OCR**: High-quality cloud OCR (Recommended).
   - **DataLab.to**: Reliable cloud-based extraction.
@@ -101,6 +103,7 @@
 - **Auto-Processing**: Automatically processes unindexed PDFs when needed.
 
 ### Customizable AI
+
 - **Model Presets**: Pre-configured settings for popular providers:
   - OpenAI (GPT-5, o3)
   - Anthropic (Claude Sonnet 4.5)
@@ -149,13 +152,17 @@ npm run build
 Go to **Zotero → Settings → seerai** to configure your AI providers and services.
 
 ### 1. AI Models
+
 Use the **Add Configuration** button to set up your AI models.
+
 - **Presets**: Select from built-in presets (OpenAI, Anthropic, Ollama, etc.) for quick setup.
 - **Custom**: Manually configure API URL, Key, and Model ID for any OpenAI-compatible provider.
 - **Default**: Set a preferred model as your default for new conversations.
 
 ### 2. OCR Services
+
 Choose your preferred text extraction engine:
+
 - **Mistral OCR**: Requires [Mistral API Key](https://console.mistral.ai/). Best for accuracy.
 - **Cloud (DataLab.to)**: Requires DataLab API Key.
 - **Local Marker Server**: Requires running a local Python server.
@@ -163,12 +170,15 @@ Choose your preferred text extraction engine:
   - See [Marker Project](https://github.com/VikParuchuri/marker) for setup.
 
 ### 3. Search Integrations
+
 - **Semantic Scholar**: Add your [API Key](https://www.semanticscholar.org/product/api) for higher rate limits and faster searches.
 - **Firecrawl**: Add [API Key](https://firecrawl.dev) to enable deep web search capabilities - local instance with ([GitHub](https://github.com/firecrawl/firecrawl)).
 - **Tavily**: Add [API Key](https://tavily.com/) for optimized search results tailored for AI agents.
 
 ### 4. MCP Server & API
+
 Seer-AI now includes a Model Context Protocol (MCP) server and a local API for external integrations.
+
 - **MCP Server**: Located in [`mcp-server/`](mcp-server/README.md). Allows external LLMs (like Claude Desktop) to interact with your Zotero library. See the [MCP Setup Guide](mcp-server/README.md) for configuration instructions.
 - **Local API**: Provides endpoints for chat, tool execution, and library management.
   - **Settings → seerai → API**.
@@ -181,17 +191,21 @@ This mode requires highly sophistecated models with good tool function capabilit
 ## Usage Guide
 
 ### Chatting with Papers
+
 1. Select a paper (or multiple) in your library.
 2. Open the **SeerAI** sidebar tab.
 3. (Optional) Customize context inclusions via the settings icon (Abstracts, Notes).
 4. Type your question or use templates from the **Prompt Library** (Book icon).
+
 ### Detachable Window
+
 - **Pop-out**: Click the `⇱` button in the SeerAI tab bar to open a floating window.
 - **Hotkey**: Press `Ctrl+Shift+S` to instantly detach, toggle, or focus the window.
 - **Auto-Sync**: The detached window automatically updates its context when you select different items in Zotero.
 - **Attach**: Close the floating window or click the dock button (within the sidebar placeholder) to return to the sidebar.
 
 ### Creating Data Tables
+
 1. Open the **Tables** tab in the main view.
 2. Click `+` on the side strip to add a new column.
 3. Define the column header and AI prompt (e.g., "What is the sample size?").
@@ -199,56 +213,62 @@ This mode requires highly sophistecated models with good tool function capabilit
 5. Click **Generate** on cells to extract data.
 
 ### Prompt Library
+
 - Access via the **Book Icon** 📖 in chat.
 - Use built-in templates (Summarize, Critique, Compare).
 - Create custom templates with placeholders:
   - `!`: Saved Prompts
-  - `/`: Papers 
+  - `/`: Papers
   - `^`: Folders
-  - `~`: Tags 
+  - `~`: Tags
   - `@`: Authors
   - `#`: Topics
 
 ---
-
 
 ## Future Implementations Ideas
 
 Propose several advanced features to enhance seerai's capabilities. These are currently in the just idea board.
 
 ### 1. Advanced Search Capabilities
+
 Enhanced search functionality to help users find relevant literature more effectively.
+
 - **Autocomplete**: Intelligent suggestions for tags, creators, and collections as you type.
 - **Complex Queries**: Support for boolean logic (AND/OR) and nested search conditions (e.g., "Title contains X AND Year > 2020").
 - **Field-Specific Search**: Dedicated filters for titles, authors, years, and tags.
 
 ### 2. Semantic Vector Search
+
 - **Voice, Transcription, Embedding Integration**: Support for OpenAI-compatible embedding, voice, transcription models (e.g., `text-embedding-3-small`, local Ollama embeddings).
 - **Contextual Retrieval**: Find papers based on conceptual similarity rather than just exact text matches.
 - **In-Memory Vector Store** — Fast, local indexing of session-relevant papers for semantic analysis.
 - **RAG** - used when 80% limit reached to context size
 
 ### 3. Data Verification & Quality Control
+
 - **Verifier Button** — One-click verification to check all extracted data against source text.
 - **Confidence Scores** — AI-generated confidence ratings for each extracted data point.
 - **Source Highlighting** — Click a cell to see the exact passage in the paper where the data came from.
 
 ### Others
-Citations referencing within tables and chat on generation 
+
+Citations referencing within tables and chat on generation
 Internal custom support mcp json presets
 Connectors
 UI revamp
 
 ---
 
-
 ## Development
 
 ### Prerequisites
+
 - Node.js 18+
 - Zotero 7
 
 ### Project Structure
+
 The codebase follows a modular architecture:
 
 ```
@@ -269,6 +289,7 @@ seerai/
 ```
 
 ### Commands
+
 ```bash
 npm start       # Start dev server with hot reload
 npm run build   # Build for production
@@ -280,6 +301,7 @@ npm run lint:fix # Fix code style issues
 ## Contributing
 
 Contributions are welcome!
+
 1. Fork the repo.
 2. Create a feature branch (`git checkout -b feature/MyFeature`).
 3. Commit changes (`git commit -m 'Add MyFeature'`).
@@ -293,6 +315,7 @@ Contributions are welcome!
 MIT License - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
+
 - [Zotero](https://www.zotero.org)
 - [Mistral AI](https://mistral.ai)
 - [Semantic Scholar](https://www.semanticscholar.org)

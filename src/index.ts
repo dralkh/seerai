@@ -28,7 +28,10 @@ if (!basicTool.getGlobal("Zotero")[config.addonInstance]) {
   });
   Object.defineProperty(addon.api, "ConfigManager", {
     get() {
-      const { exportAllData, importAllData } = require("./modules/chat/configManager");
+      const {
+        exportAllData,
+        importAllData,
+      } = require("./modules/chat/configManager");
       return { exportAllData, importAllData };
     },
   });
@@ -43,4 +46,3 @@ function defineGlobal(name: string, getter?: () => any) {
     },
   });
 }
-

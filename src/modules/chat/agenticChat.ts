@@ -1,28 +1,28 @@
 /**
  * Agentic Chat Handler
  * Manages the agentic chat loop with tool calling support
- * 
+ *
  * @see agentic.md Section 2.1 - ARTIST Framework (Reasoning-Action loops)
  * @see agentic.md Section 7.1 - Observability and Tracing
  */
 
 import {
-    OpenAIMessage,
-    VisionMessage,
-    VisionMessageContentPart,
-    ToolCall,
-    ToolCallMessage,
-    ToolResultMessage,
-    ToolDefinition,
-    openAIService
+  OpenAIMessage,
+  VisionMessage,
+  VisionMessageContentPart,
+  ToolCall,
+  ToolCallMessage,
+  ToolResultMessage,
+  ToolDefinition,
+  openAIService,
 } from "../openai";
 import {
-    agentTools,
-    executeToolCall,
-    formatToolResult,
-    getAgentConfigFromPrefs,
-    AgentConfig,
-    ToolResult
+  agentTools,
+  executeToolCall,
+  formatToolResult,
+  getAgentConfigFromPrefs,
+  AgentConfig,
+  ToolResult,
 } from "./tools";
 import { ChatMessage } from "./types";
 import { parseMarkdown } from "./markdown";
@@ -35,40 +35,43 @@ const HTML_NS = "http://www.w3.org/1999/xhtml";
  * Options for the agentic chat
  */
 export interface AgenticChatOptions {
-    /** Enable tool calling */
-    enableTools: boolean;
-    /** Include images in the request */
-    includeImages: boolean;
-    /** Pasted images to include */
-    pastedImages?: { id: string; image: string; mimeType: string }[];
-    /** Handler for inline permission requests */
-    permissionHandler?: (toolCallId: string, toolName: string) => Promise<boolean>;
-    /** Chat temperature */
-    temperature?: number;
-    /** Max tokens */
-    maxTokens?: number;
-    /** Library scope override */
-    libraryScope?: import("./tools").LibraryScope;
+  /** Enable tool calling */
+  enableTools: boolean;
+  /** Include images in the request */
+  includeImages: boolean;
+  /** Pasted images to include */
+  pastedImages?: { id: string; image: string; mimeType: string }[];
+  /** Handler for inline permission requests */
+  permissionHandler?: (
+    toolCallId: string,
+    toolName: string,
+  ) => Promise<boolean>;
+  /** Chat temperature */
+  temperature?: number;
+  /** Max tokens */
+  maxTokens?: number;
+  /** Library scope override */
+  libraryScope?: import("./tools").LibraryScope;
 }
 
 /**
  * Create a container for tool execution process
  */
 export function createToolProcessUI(doc: Document): {
-    container: HTMLElement;
-    setThinking: () => void;
-    setExecutingTool: (toolName: string) => void;
-    setCompleted: (count: number, toolCount?: number) => void;
-    updateProgress: (count: number, toolCount?: number) => void;
-    setFailed: (error: string) => void;
+  container: HTMLElement;
+  setThinking: () => void;
+  setExecutingTool: (toolName: string) => void;
+  setCompleted: (count: number, toolCount?: number) => void;
+  updateProgress: (count: number, toolCount?: number) => void;
+  setFailed: (error: string) => void;
 } {
-    const details = doc.createElementNS(HTML_NS, "details") as HTMLDetailsElement;
-    details.className = "tool-process-container";
+  const details = doc.createElementNS(HTML_NS, "details") as HTMLDetailsElement;
+  details.className = "tool-process-container";
 
-    // Initially hidden (collapsed)
-    details.open = false;
+  // Initially hidden (collapsed)
+  details.open = false;
 
-    details.style.cssText = `
+  details.style.cssText = `
         margin: 8px 0;
         border: 1px solid var(--border-secondary, #e0e0e0);
         border-radius: 8px;
@@ -77,8 +80,8 @@ export function createToolProcessUI(doc: Document): {
         box-shadow: 0 1px 2px rgba(0,0,0,0.05);
     `;
 
-    const summary = doc.createElementNS(HTML_NS, "summary") as HTMLElement;
-    summary.style.cssText = `
+  const summary = doc.createElementNS(HTML_NS, "summary") as HTMLElement;
+  summary.style.cssText = `
         padding: 8px 12px;
         cursor: pointer;
         display: flex;
@@ -92,27 +95,31 @@ export function createToolProcessUI(doc: Document): {
         transition: background 0.2s;
     `;
 
-    // Hover effect
-    summary.onmouseover = () => { summary.style.background = "var(--fill-quinary, rgba(0,0,0,0.02))"; };
-    summary.onmouseout = () => { summary.style.background = "transparent"; };
+  // Hover effect
+  summary.onmouseover = () => {
+    summary.style.background = "var(--fill-quinary, rgba(0,0,0,0.02))";
+  };
+  summary.onmouseout = () => {
+    summary.style.background = "transparent";
+  };
 
-    // Icon
-    const icon = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-    icon.textContent = "🧠"; // Brain icon for process
-    icon.style.filter = "grayscale(100%) opacity(0.7)";
-    summary.appendChild(icon);
+  // Icon
+  const icon = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  icon.textContent = "🧠"; // Brain icon for process
+  icon.style.filter = "grayscale(100%) opacity(0.7)";
+  summary.appendChild(icon);
 
-    // Text Label
-    const label = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-    label.textContent = "Thinking...";
-    label.style.flex = "1";
-    summary.appendChild(label);
+  // Text Label
+  const label = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  label.textContent = "Thinking...";
+  label.style.flex = "1";
+  summary.appendChild(label);
 
-    // Expand All Button
-    const expandBtn = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-    expandBtn.textContent = "⤢"; // Open symbol
-    expandBtn.title = "Expand All Steps";
-    expandBtn.style.cssText = `
+  // Expand All Button
+  const expandBtn = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  expandBtn.textContent = "⤢"; // Open symbol
+  expandBtn.title = "Expand All Steps";
+  expandBtn.style.cssText = `
         padding: 2px 6px;
         margin-right: 8px;
         border-radius: 4px;
@@ -121,42 +128,48 @@ export function createToolProcessUI(doc: Document): {
         cursor: pointer;
         opacity: 0.7;
     `;
-    expandBtn.onmouseover = () => { expandBtn.style.backgroundColor = "var(--fill-quaternary, rgba(0,0,0,0.1))"; };
-    expandBtn.onmouseout = () => { expandBtn.style.backgroundColor = "transparent"; };
+  expandBtn.onmouseover = () => {
+    expandBtn.style.backgroundColor = "var(--fill-quaternary, rgba(0,0,0,0.1))";
+  };
+  expandBtn.onmouseout = () => {
+    expandBtn.style.backgroundColor = "transparent";
+  };
 
-    expandBtn.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
+  expandBtn.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
 
-        // Open parent
-        details.open = true;
+    // Open parent
+    details.open = true;
 
-        // Open all children
-        const childDetails = details.querySelectorAll("details.tool-execution-card");
-        childDetails.forEach((cd: Element) => {
-            (cd as HTMLDetailsElement).open = true;
-        });
-    };
-    summary.appendChild(expandBtn);
-
-    // Chevron
-    const chevron = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-    chevron.innerHTML = `<svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    chevron.style.color = "var(--text-tertiary, #999)";
-    chevron.style.transition = "transform 0.2s ease";
-    chevron.style.transform = "rotate(-90deg)"; // Initial closed state
-    summary.appendChild(chevron);
-
-    details.addEventListener("toggle", () => {
-        chevron.style.transform = details.open ? "rotate(0deg)" : "rotate(-90deg)";
+    // Open all children
+    const childDetails = details.querySelectorAll(
+      "details.tool-execution-card",
+    );
+    childDetails.forEach((cd: Element) => {
+      (cd as HTMLDetailsElement).open = true;
     });
+  };
+  summary.appendChild(expandBtn);
 
-    details.appendChild(summary);
+  // Chevron
+  const chevron = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  chevron.innerHTML = `<svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  chevron.style.color = "var(--text-tertiary, #999)";
+  chevron.style.transition = "transform 0.2s ease";
+  chevron.style.transform = "rotate(-90deg)"; // Initial closed state
+  summary.appendChild(chevron);
 
-    // Container for card list
-    const listContainer = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-    listContainer.className = "tool-list-container";
-    listContainer.style.cssText = `
+  details.addEventListener("toggle", () => {
+    chevron.style.transform = details.open ? "rotate(0deg)" : "rotate(-90deg)";
+  });
+
+  details.appendChild(summary);
+
+  // Container for card list
+  const listContainer = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  listContainer.className = "tool-list-container";
+  listContainer.style.cssText = `
         display: flex;
         flex-direction: column;
         gap: 6px;
@@ -164,100 +177,107 @@ export function createToolProcessUI(doc: Document): {
         background: var(--fill-quinary, rgba(0,0,0,0.02));
         border-top: 1px solid var(--border-secondary, #e0e0e0);
     `;
-    details.appendChild(listContainer);
+  details.appendChild(listContainer);
 
-    // State helpers
-    const setThinking = () => {
-        label.textContent = "Processing task...";
-        icon.textContent = "⚡";
-        icon.style.animation = "pulse 1.5s infinite";
-        // Only close if we haven't started any tools yet
-        if (!listContainer.firstChild) {
-            details.open = false;
-        }
-        // Force open if user explicitly keeps it open should be handled by caller persistence
-    };
+  // State helpers
+  const setThinking = () => {
+    label.textContent = "Processing task...";
+    icon.textContent = "⚡";
+    icon.style.animation = "pulse 1.5s infinite";
+    // Only close if we haven't started any tools yet
+    if (!listContainer.firstChild) {
+      details.open = false;
+    }
+    // Force open if user explicitly keeps it open should be handled by caller persistence
+  };
 
-    const setExecutingTool = (toolName: string) => {
-        const displayName = toolName.replace(/_/g, " ");
-        label.textContent = `Calling ${displayName}...`;
-        icon.textContent = "🔧";
-        icon.style.filter = "none";
-        icon.style.animation = "pulse 1s infinite";
-        icon.style.animation = "pulse 1s infinite";
-        // Do NOT force open here if we want to respect user's choice, 
-        // BUT user often wants to see new tools. 
-        // Letting persistence handle this in assistant.ts is better.
-        // details.open = true; 
-    };
+  const setExecutingTool = (toolName: string) => {
+    const displayName = toolName.replace(/_/g, " ");
+    label.textContent = `Calling ${displayName}...`;
+    icon.textContent = "🔧";
+    icon.style.filter = "none";
+    icon.style.animation = "pulse 1s infinite";
+    icon.style.animation = "pulse 1s infinite";
+    // Do NOT force open here if we want to respect user's choice,
+    // BUT user often wants to see new tools.
+    // Letting persistence handle this in assistant.ts is better.
+    // details.open = true;
+  };
 
-    const setCompleted = (count: number, toolCount?: number) => {
-        if (toolCount !== undefined && toolCount !== count) {
-            label.textContent = `Completed ${toolCount} action${toolCount !== 1 ? 's' : ''} in ${count} turn${count !== 1 ? 's' : ''}`;
-        } else {
-            label.textContent = `Completed ${count} analysis turn${count !== 1 ? 's' : ''}`;
-        }
-        icon.textContent = "✓";
-        icon.style.filter = "none";
-        icon.style.color = "var(--accent-green, #34C759)";
-        icon.style.animation = "none";
-        // Keep current open state
-    };
+  const setCompleted = (count: number, toolCount?: number) => {
+    if (toolCount !== undefined && toolCount !== count) {
+      label.textContent = `Completed ${toolCount} action${toolCount !== 1 ? "s" : ""} in ${count} turn${count !== 1 ? "s" : ""}`;
+    } else {
+      label.textContent = `Completed ${count} analysis turn${count !== 1 ? "s" : ""}`;
+    }
+    icon.textContent = "✓";
+    icon.style.filter = "none";
+    icon.style.color = "var(--accent-green, #34C759)";
+    icon.style.animation = "none";
+    // Keep current open state
+  };
 
-    const updateProgress = (count: number, toolCount?: number) => {
-        if (toolCount !== undefined && toolCount !== count) {
-            label.textContent = `Processing ${toolCount} action${toolCount !== 1 ? 's' : ''} in ${count} turn${count !== 1 ? 's' : ''}`;
-        } else {
-            label.textContent = `Processing ${count} analysis turn${count !== 1 ? 's' : ''}`;
-        }
-        // Keep executing icon or completed icon? 
-        // If updating progress, it means we are running but maybe not currently executing a tool (e.g. between turns)
-        icon.textContent = "⚡";
-        icon.style.filter = "none";
-        icon.style.color = "var(--text-secondary)"; // Neutral color
-        icon.style.animation = "pulse 2s infinite";
-    };
+  const updateProgress = (count: number, toolCount?: number) => {
+    if (toolCount !== undefined && toolCount !== count) {
+      label.textContent = `Processing ${toolCount} action${toolCount !== 1 ? "s" : ""} in ${count} turn${count !== 1 ? "s" : ""}`;
+    } else {
+      label.textContent = `Processing ${count} analysis turn${count !== 1 ? "s" : ""}`;
+    }
+    // Keep executing icon or completed icon?
+    // If updating progress, it means we are running but maybe not currently executing a tool (e.g. between turns)
+    icon.textContent = "⚡";
+    icon.style.filter = "none";
+    icon.style.color = "var(--text-secondary)"; // Neutral color
+    icon.style.animation = "pulse 2s infinite";
+  };
 
-    const setFailed = (error: string) => {
-        label.textContent = `Failed: ${error}`;
-        label.style.color = "var(--accent-red, #FF3B30)";
-        icon.textContent = "✗";
-        icon.style.filter = "none";
-        icon.style.color = "var(--accent-red, #FF3B30)";
-        icon.style.animation = "none";
-        details.open = true; // Auto-expand on failure
-    };
+  const setFailed = (error: string) => {
+    label.textContent = `Failed: ${error}`;
+    label.style.color = "var(--accent-red, #FF3B30)";
+    icon.textContent = "✗";
+    icon.style.filter = "none";
+    icon.style.color = "var(--accent-red, #FF3B30)";
+    icon.style.animation = "none";
+    details.open = true; // Auto-expand on failure
+  };
 
-    return { container: details, setThinking, setExecutingTool, setCompleted, updateProgress, setFailed };
+  return {
+    container: details,
+    setThinking,
+    setExecutingTool,
+    setCompleted,
+    updateProgress,
+    setFailed,
+  };
 }
 
 /**
  * Create a tool execution UI element
  */
 export function createToolExecutionUI(
-    doc: Document,
-    toolCall: ToolCall,
-    result?: ToolResult
+  doc: Document,
+  toolCall: ToolCall,
+  result?: ToolResult,
 ): HTMLElement {
-    const details = doc.createElementNS(HTML_NS, "details") as HTMLDetailsElement;
-    details.className = "tool-execution-card";
-    details.setAttribute("data-tool-id", toolCall.id);
+  const details = doc.createElementNS(HTML_NS, "details") as HTMLDetailsElement;
+  details.className = "tool-execution-card";
+  details.setAttribute("data-tool-id", toolCall.id);
 
-    // Auto-expand if it failed
-    if (result && !result.success) {
-        details.open = true;
-    }
+  // Auto-expand if it failed
+  if (result && !result.success) {
+    details.open = true;
+  }
 
-    details.style.cssText = `
+  details.style.cssText = `
         border: 1px solid var(--border-secondary, #e0e0e0);
         border-radius: 6px;
         background: var(--background-primary, #fff);
         overflow: hidden;
     `;
 
-    // Summary (Header)
-    const summary = doc.createElementNS(HTML_NS, "summary") as HTMLElement;
-    summary.style.cssText = `
+  // Summary (Header)
+  const summary = doc.createElementNS(HTML_NS, "summary") as HTMLElement;
+  summary.style.cssText = `
         padding: 6px 10px;
         cursor: pointer;
         display: flex;
@@ -273,52 +293,56 @@ export function createToolExecutionUI(
         transition: background 0.15s;
     `;
 
-    summary.onmouseover = () => { summary.style.background = "var(--fill-quaternary, rgba(0,0,0,0.05))"; };
-    summary.onmouseout = () => { summary.style.background = "var(--fill-quinary, rgba(0,0,0,0.02))"; };
+  summary.onmouseover = () => {
+    summary.style.background = "var(--fill-quaternary, rgba(0,0,0,0.05))";
+  };
+  summary.onmouseout = () => {
+    summary.style.background = "var(--fill-quinary, rgba(0,0,0,0.02))";
+  };
 
-    // Status Icon
-    const statusSpan = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-    statusSpan.style.display = "flex";
-    statusSpan.style.alignItems = "center";
-    statusSpan.style.justifyContent = "center";
-    statusSpan.style.width = "14px";
+  // Status Icon
+  const statusSpan = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  statusSpan.style.display = "flex";
+  statusSpan.style.alignItems = "center";
+  statusSpan.style.justifyContent = "center";
+  statusSpan.style.width = "14px";
 
-    if (!result) {
-        statusSpan.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" class="spin" xmlns="http://www.w3.org/2000/svg"><path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="var(--accent-blue, #007AFF)" stroke-width="3" stroke-linecap="round" stroke-dasharray="60" stroke-dashoffset="20"></path></svg>`;
-        // Add rotation animation style is expected to be global or inline
-    } else if (result.success) {
-        statusSpan.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 6L9 17L4 12" stroke="var(--accent-green, #34C759)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    } else {
-        statusSpan.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 6L6 18M6 6L18 18" stroke="var(--accent-red, #FF3B30)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    }
-    summary.appendChild(statusSpan);
+  if (!result) {
+    statusSpan.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" class="spin" xmlns="http://www.w3.org/2000/svg"><path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="var(--accent-blue, #007AFF)" stroke-width="3" stroke-linecap="round" stroke-dasharray="60" stroke-dashoffset="20"></path></svg>`;
+    // Add rotation animation style is expected to be global or inline
+  } else if (result.success) {
+    statusSpan.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 6L9 17L4 12" stroke="var(--accent-green, #34C759)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  } else {
+    statusSpan.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 6L6 18M6 6L18 18" stroke="var(--accent-red, #FF3B30)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  }
+  summary.appendChild(statusSpan);
 
-    // Tool Name
-    const nameSpan = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-    nameSpan.textContent = toolCall.function.name.replace(/_/g, " ");
-    nameSpan.style.textTransform = "capitalize";
-    nameSpan.style.flex = "1";
-    summary.appendChild(nameSpan);
+  // Tool Name
+  const nameSpan = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  nameSpan.textContent = toolCall.function.name.replace(/_/g, " ");
+  nameSpan.style.textTransform = "capitalize";
+  nameSpan.style.flex = "1";
+  summary.appendChild(nameSpan);
 
-    // Chevron (Visual indicator for open/closed)
-    const chevron = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-    chevron.innerHTML = `<svg width="8" height="5" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-    chevron.style.opacity = "0.4";
-    chevron.style.transform = details.open ? "rotate(0deg)" : "rotate(-90deg)"; // Initial state
-    chevron.style.transition = "transform 0.2s";
-    summary.appendChild(chevron);
+  // Chevron (Visual indicator for open/closed)
+  const chevron = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  chevron.innerHTML = `<svg width="8" height="5" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  chevron.style.opacity = "0.4";
+  chevron.style.transform = details.open ? "rotate(0deg)" : "rotate(-90deg)"; // Initial state
+  chevron.style.transition = "transform 0.2s";
+  summary.appendChild(chevron);
 
-    // Update chevron on toggle
-    details.addEventListener("toggle", () => {
-        chevron.style.transform = details.open ? "rotate(0deg)" : "rotate(-90deg)";
-    });
+  // Update chevron on toggle
+  details.addEventListener("toggle", () => {
+    chevron.style.transform = details.open ? "rotate(0deg)" : "rotate(-90deg)";
+  });
 
-    details.appendChild(summary);
+  details.appendChild(summary);
 
-    // Content (Arguments & Results)
-    const content = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-    content.className = "tool-details-content";
-    content.style.cssText = `
+  // Content (Arguments & Results)
+  const content = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  content.className = "tool-details-content";
+  content.style.cssText = `
         padding: 10px;
         border-top: 1px solid var(--border-secondary, #e0e0e0);
         font-size: 11px;
@@ -329,314 +353,334 @@ export function createToolExecutionUI(
         overflow-x: auto;
     `;
 
-    // Arguments
-    try {
-        const argsLabel = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-        argsLabel.textContent = "INPUT";
-        argsLabel.style.cssText = "font-size: 10px; font-weight: 700; color: var(--text-tertiary, #8e8e93); margin-bottom: 4px; letter-spacing: 0.5px;";
-        content.appendChild(argsLabel);
+  // Arguments
+  try {
+    const argsLabel = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    argsLabel.textContent = "INPUT";
+    argsLabel.style.cssText =
+      "font-size: 10px; font-weight: 700; color: var(--text-tertiary, #8e8e93); margin-bottom: 4px; letter-spacing: 0.5px;";
+    content.appendChild(argsLabel);
 
-        const args = JSON.parse(toolCall.function.arguments);
-        const argsPre = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-        argsPre.textContent = JSON.stringify(args, null, 2);
-        argsPre.style.whiteSpace = "pre-wrap";
-        argsPre.style.color = "var(--text-primary)";
-        content.appendChild(argsPre);
-    } catch (e) {
-        content.textContent = "Error parsing arguments";
-    }
+    const args = JSON.parse(toolCall.function.arguments);
+    const argsPre = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    argsPre.textContent = JSON.stringify(args, null, 2);
+    argsPre.style.whiteSpace = "pre-wrap";
+    argsPre.style.color = "var(--text-primary)";
+    content.appendChild(argsPre);
+  } catch (e) {
+    content.textContent = "Error parsing arguments";
+  }
 
-    // Result
-    if (result) {
-        const resLabel = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-        resLabel.textContent = "OUTPUT";
-        resLabel.style.cssText = "font-size: 10px; font-weight: 700; color: var(--text-tertiary, #8e8e93); margin: 12px 0 4px 0; letter-spacing: 0.5px;";
-        content.appendChild(resLabel);
+  // Result
+  if (result) {
+    const resLabel = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    resLabel.textContent = "OUTPUT";
+    resLabel.style.cssText =
+      "font-size: 10px; font-weight: 700; color: var(--text-tertiary, #8e8e93); margin: 12px 0 4px 0; letter-spacing: 0.5px;";
+    content.appendChild(resLabel);
 
-        const resDiv = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-        resDiv.style.whiteSpace = "pre-wrap";
+    const resDiv = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    resDiv.style.whiteSpace = "pre-wrap";
 
-        if (result.success) {
-            // Check if data is complex object or simple text
-            if (result.data) {
-                resDiv.textContent = JSON.stringify(result.data, null, 2);
-                resDiv.style.color = "var(--text-primary)";
-                // Truncate if extremely long
-                if (resDiv.textContent.length > 2000) {
-                    resDiv.textContent = resDiv.textContent.slice(0, 2000) + "... (truncated)";
-                }
-            } else {
-                resDiv.textContent = result.summary || "Success";
-                resDiv.style.color = "var(--text-secondary, #666)";
-            }
-        } else {
-            resDiv.textContent = result.error || "Unknown Error";
-            resDiv.style.color = "var(--accent-red, #FF3B30)";
-            resDiv.style.background = "var(--bg-error-light, rgba(255, 59, 48, 0.1))";
-            resDiv.style.padding = "4px";
-            resDiv.style.borderRadius = "4px";
+    if (result.success) {
+      // Check if data is complex object or simple text
+      if (result.data) {
+        resDiv.textContent = JSON.stringify(result.data, null, 2);
+        resDiv.style.color = "var(--text-primary)";
+        // Truncate if extremely long
+        if (resDiv.textContent.length > 2000) {
+          resDiv.textContent =
+            resDiv.textContent.slice(0, 2000) + "... (truncated)";
         }
-        content.appendChild(resDiv);
+      } else {
+        resDiv.textContent = result.summary || "Success";
+        resDiv.style.color = "var(--text-secondary, #666)";
+      }
+    } else {
+      resDiv.textContent = result.error || "Unknown Error";
+      resDiv.style.color = "var(--accent-red, #FF3B30)";
+      resDiv.style.background = "var(--bg-error-light, rgba(255, 59, 48, 0.1))";
+      resDiv.style.padding = "4px";
+      resDiv.style.borderRadius = "4px";
     }
+    content.appendChild(resDiv);
+  }
 
-    details.appendChild(content);
+  details.appendChild(content);
 
-    return details;
+  return details;
 }
 
 /**
  * Observer for agent UI updates
  */
 export interface AgentUIObserver {
-    onToken: (token: string, fullResponse: string) => void;
-    onToolCallStarted: (toolCall: ToolCall) => void;
-    onToolCallCompleted: (toolCall: ToolCall, result: ToolResult) => void;
-    onMessageUpdate: (content: string) => void;
-    onComplete: (content: string, iterationCount?: number) => void;
-    onError: (error: Error) => void;
-    onIterationStarted?: (iteration: number) => void;
+  onToken: (token: string, fullResponse: string) => void;
+  onToolCallStarted: (toolCall: ToolCall) => void;
+  onToolCallCompleted: (toolCall: ToolCall, result: ToolResult) => void;
+  onMessageUpdate: (content: string) => void;
+  onComplete: (content: string, iterationCount?: number) => void;
+  onError: (error: Error) => void;
+  onIterationStarted?: (iteration: number) => void;
 }
 
 /**
  * Agentic chat handler with tool calling loop
  */
 export async function handleAgenticChat(
-    text: string,
-    systemPrompt: string,
-    conversationHistory: ChatMessage[],
-    options: AgenticChatOptions,
-    observer: AgentUIObserver
+  text: string,
+  systemPrompt: string,
+  conversationHistory: ChatMessage[],
+  options: AgenticChatOptions,
+  observer: AgentUIObserver,
 ): Promise<void> {
-    const agentConfig = {
-        ...getAgentConfigFromPrefs(),
-        permissionHandler: options.permissionHandler,
-        libraryScope: options.libraryScope || getAgentConfigFromPrefs().libraryScope
-    };
+  const agentConfig = {
+    ...getAgentConfigFromPrefs(),
+    permissionHandler: options.permissionHandler,
+    libraryScope:
+      options.libraryScope || getAgentConfigFromPrefs().libraryScope,
+  };
 
-    // Get tools if enabled
-    const tools: ToolDefinition[] | undefined = options.enableTools
-        ? agentTools
-        : undefined;
+  // Get tools if enabled
+  const tools: ToolDefinition[] | undefined = options.enableTools
+    ? agentTools
+    : undefined;
 
-    // Build initial messages
-    let messages: (OpenAIMessage | VisionMessage | ToolCallMessage | ToolResultMessage)[] = [
-        { role: "system", content: systemPrompt },
-        ...conversationHistory
-            .filter(m => m.role !== "system" && m.role !== "error")
-            .map(m => ({
-                role: m.role as "user" | "assistant",
-                content: m.content,
-            })),
-    ];
+  // Build initial messages
+  const messages: (
+    | OpenAIMessage
+    | VisionMessage
+    | ToolCallMessage
+    | ToolResultMessage
+  )[] = [
+    { role: "system", content: systemPrompt },
+    ...conversationHistory
+      .filter((m) => m.role !== "system" && m.role !== "error")
+      .map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+  ];
 
-    // Add current user message with images if applicable
-    if (options.pastedImages && options.pastedImages.length > 0) {
-        const imageParts: VisionMessageContentPart[] = options.pastedImages.map(img => ({
-            type: "image_url",
-            image_url: {
-                url: img.image,
-                detail: "auto" as const,
-            },
-        }));
+  // Add current user message with images if applicable
+  if (options.pastedImages && options.pastedImages.length > 0) {
+    const imageParts: VisionMessageContentPart[] = options.pastedImages.map(
+      (img) => ({
+        type: "image_url",
+        image_url: {
+          url: img.image,
+          detail: "auto" as const,
+        },
+      }),
+    );
 
-        messages.push({
-            role: "user",
-            content: [
-                { type: "text", text },
-                ...imageParts,
-            ],
-        });
-    } else {
-        messages.push({ role: "user", content: text });
-    }
+    messages.push({
+      role: "user",
+      content: [{ type: "text", text }, ...imageParts],
+    });
+  } else {
+    messages.push({ role: "user", content: text });
+  }
 
-    // Get model config
-    const activeModel = getActiveModelConfig();
-    const configOverride = activeModel ? {
+  // Get model config
+  const activeModel = getActiveModelConfig();
+  const configOverride = activeModel
+    ? {
         apiURL: activeModel.apiURL,
         apiKey: activeModel.apiKey,
         model: activeModel.model,
         temperature: options.temperature,
         max_tokens: options.maxTokens,
-    } : undefined;
+      }
+    : undefined;
 
-    let fullResponse = "";
-    let iteration = 0;
-    let isFirstToken = true;
+  let fullResponse = "";
+  let iteration = 0;
+  const isFirstToken = true;
 
-    // Start tracing session (agentic.md Section 7.1)
-    const sessionId = `agent_${Date.now()}`;
-    agentTracer.startSession(sessionId);
+  // Start tracing session (agentic.md Section 7.1)
+  const sessionId = `agent_${Date.now()}`;
+  agentTracer.startSession(sessionId);
 
-    // Agent loop
-    while (iteration < agentConfig.maxAgentIterations) {
-        // Check for abortion at the start of iteration
-        if (openAIService.isAbortedState()) {
-            Zotero.debug("[seerai] Agent loop aborted at start of iteration");
-            throw new Error("Request was cancelled");
-        }
+  // Agent loop
+  while (iteration < agentConfig.maxAgentIterations) {
+    // Check for abortion at the start of iteration
+    if (openAIService.isAbortedState()) {
+      Zotero.debug("[seerai] Agent loop aborted at start of iteration");
+      throw new Error("Request was cancelled");
+    }
 
-        iteration++;
-        Zotero.debug(`[seerai] Agent iteration ${iteration}`);
-        agentTracer.startIteration(sessionId, iteration);
+    iteration++;
+    Zotero.debug(`[seerai] Agent iteration ${iteration}`);
+    agentTracer.startIteration(sessionId, iteration);
 
-        // Notify observer that a new iteration (reasoning turn) has started
-        // This allows resetting the UI status from "Calling Tool" back to "Thinking"
-        observer.onIterationStarted?.(iteration);
+    // Notify observer that a new iteration (reasoning turn) has started
+    // This allows resetting the UI status from "Calling Tool" back to "Thinking"
+    observer.onIterationStarted?.(iteration);
 
-        // Inject a hidden internal system hint to help the model maintain context
-        // This ensures the model knows the current turn number for internal tracking
-        if (iteration > 1) {
-            messages.push({
-                role: "system",
-                content: `[System Update: Reasoning turn ${iteration}. Continue your task concisely.]`
-            });
-        }
+    // Inject a hidden internal system hint to help the model maintain context
+    // This ensures the model knows the current turn number for internal tracking
+    if (iteration > 1) {
+      messages.push({
+        role: "system",
+        content: `[System Update: Reasoning turn ${iteration}. Continue your task concisely.]`,
+      });
+    }
 
-        let toolCallsReceived: ToolCall[] = [];
-        let iterationContent = "";
+    let toolCallsReceived: ToolCall[] = [];
+    let iterationContent = "";
 
-        try {
-            await openAIService.chatCompletionStream(
-                messages,
-                {
-                    onToken: (token) => {
-                        iterationContent += token;
-                        fullResponse += token;
+    try {
+      await openAIService.chatCompletionStream(
+        messages,
+        {
+          onToken: (token) => {
+            iterationContent += token;
+            fullResponse += token;
 
-                        observer.onToken(token, fullResponse);
-                    },
-                    onToolCalls: (toolCalls) => {
-                        Zotero.debug(`[seerai] Received ${toolCalls.length} tool call(s)`);
-                        toolCallsReceived = toolCalls;
-                    },
-                    onComplete: (content) => {
-                        Zotero.debug(`[seerai] Iteration ${iteration} complete, content length: ${content.length}`);
-                    },
-                    onError: (error) => {
-                        throw error;
-                    },
-                },
-                configOverride,
-                tools
+            observer.onToken(token, fullResponse);
+          },
+          onToolCalls: (toolCalls) => {
+            Zotero.debug(`[seerai] Received ${toolCalls.length} tool call(s)`);
+            toolCallsReceived = toolCalls;
+          },
+          onComplete: (content) => {
+            Zotero.debug(
+              `[seerai] Iteration ${iteration} complete, content length: ${content.length}`,
             );
+          },
+          onError: (error) => {
+            throw error;
+          },
+        },
+        configOverride,
+        tools,
+      );
 
-            // If no tool calls, we're done
-            if (toolCallsReceived.length === 0) {
-                Zotero.debug(`[seerai] No tool calls, agent loop complete`);
-                break;
-            }
+      // If no tool calls, we're done
+      if (toolCallsReceived.length === 0) {
+        Zotero.debug(`[seerai] No tool calls, agent loop complete`);
+        break;
+      }
 
-            // Add assistant message with tool calls to history
-            const assistantToolMessage: ToolCallMessage = {
-                role: "assistant",
-                content: iterationContent || null,
-                tool_calls: toolCallsReceived,
-            };
-            messages.push(assistantToolMessage);
+      // Add assistant message with tool calls to history
+      const assistantToolMessage: ToolCallMessage = {
+        role: "assistant",
+        content: iterationContent || null,
+        tool_calls: toolCallsReceived,
+      };
+      messages.push(assistantToolMessage);
 
-            // Execute each tool call
-            // Parallel execution for speed - permission dialogs will queue naturally in Zotero
-            const toolResults: { toolCall: ToolCall; result: ToolResult }[] = [];
+      // Execute each tool call
+      // Parallel execution for speed - permission dialogs will queue naturally in Zotero
+      const toolResults: { toolCall: ToolCall; result: ToolResult }[] = [];
 
-            await Promise.all(toolCallsReceived.map(async (toolCall) => {
-                // Inform observer tool call started
-                observer.onToolCallStarted(toolCall);
+      await Promise.all(
+        toolCallsReceived.map(async (toolCall) => {
+          // Inform observer tool call started
+          observer.onToolCallStarted(toolCall);
 
-                // Start tool span for tracing
-                const parsedArgs = JSON.parse(toolCall.function.arguments || '{}');
-                agentTracer.startToolSpan(
-                    sessionId,
-                    toolCall.id,
-                    toolCall.function.name,
-                    parsedArgs
-                );
+          // Start tool span for tracing
+          const parsedArgs = JSON.parse(toolCall.function.arguments || "{}");
+          agentTracer.startToolSpan(
+            sessionId,
+            toolCall.id,
+            toolCall.function.name,
+            parsedArgs,
+          );
 
-                // Execute the tool
-                const result = await executeToolCall(toolCall, agentConfig);
+          // Execute the tool
+          const result = await executeToolCall(toolCall, agentConfig);
 
-                // End tool span with result
-                agentTracer.endToolSpan(sessionId, toolCall.id, {
-                    success: result.success,
-                    error: result.error,
-                    dataSummary: result.summary,
-                });
+          // End tool span with result
+          agentTracer.endToolSpan(sessionId, toolCall.id, {
+            success: result.success,
+            error: result.error,
+            dataSummary: result.summary,
+          });
 
-                // Inform observer tool call completed
-                observer.onToolCallCompleted(toolCall, result);
+          // Inform observer tool call completed
+          observer.onToolCallCompleted(toolCall, result);
 
-                toolResults.push({ toolCall, result });
-            }));
+          toolResults.push({ toolCall, result });
+        }),
+      );
 
-            // Check for abortion after all tool executions
-            if (openAIService.isAbortedState()) {
-                Zotero.debug("[seerai] Agent loop aborted after tool execution");
-                throw new Error("Request was cancelled");
-            }
+      // Check for abortion after all tool executions
+      if (openAIService.isAbortedState()) {
+        Zotero.debug("[seerai] Agent loop aborted after tool execution");
+        throw new Error("Request was cancelled");
+      }
 
-            // Add results to history with enhanced error feedback (Reflexion pattern - agentic.md Section 2.1)
-            for (const { toolCall, result } of toolResults) {
-                let resultContent: string;
+      // Add results to history with enhanced error feedback (Reflexion pattern - agentic.md Section 2.1)
+      for (const { toolCall, result } of toolResults) {
+        let resultContent: string;
 
-                if (!result.success && result.error) {
-                    // Enhanced error feedback for self-correction
-                    resultContent = JSON.stringify({
-                        success: false,
-                        error: result.error,
-                        guidance: `The tool "${toolCall.function.name}" failed. ` +
-                            `Please analyze the error message above and either: ` +
-                            `(1) retry with corrected arguments, ` +
-                            `(2) try a different approach, or ` +
-                            `(3) inform the user if the operation is not possible.`,
-                    });
-                    Zotero.debug(`[seerai] Tool ${toolCall.function.name} failed, providing self-correction guidance`);
-                } else {
-                    resultContent = formatToolResult(toolCall.id, result);
-                }
-
-                const toolResultMessage: ToolResultMessage = {
-                    role: "tool",
-                    tool_call_id: toolCall.id,
-                    content: resultContent,
-                };
-                messages.push(toolResultMessage);
-            }
-
-            // End iteration for tracing
-            agentTracer.endIteration(sessionId);
-
-        } catch (error) {
-            agentTracer.endSession(sessionId, false);
-            observer.onError(error as Error);
-            throw error; // Re-throw to allow caller (Assistant) to handle it
+        if (!result.success && result.error) {
+          // Enhanced error feedback for self-correction
+          resultContent = JSON.stringify({
+            success: false,
+            error: result.error,
+            guidance:
+              `The tool "${toolCall.function.name}" failed. ` +
+              `Please analyze the error message above and either: ` +
+              `(1) retry with corrected arguments, ` +
+              `(2) try a different approach, or ` +
+              `(3) inform the user if the operation is not possible.`,
+          });
+          Zotero.debug(
+            `[seerai] Tool ${toolCall.function.name} failed, providing self-correction guidance`,
+          );
+        } else {
+          resultContent = formatToolResult(toolCall.id, result);
         }
-    }
 
-    // If we reached the max iterations, inform the user
-    if (iteration >= agentConfig.maxAgentIterations) {
-        Zotero.debug(`[seerai] Agent reached max iterations (${agentConfig.maxAgentIterations})`);
-        const stopMessage = `\n\n*[Agent stopped - reached maximum tool call iterations (${agentConfig.maxAgentIterations})]*`;
-        fullResponse += stopMessage;
-        observer.onMessageUpdate(fullResponse);
-    }
+        const toolResultMessage: ToolResultMessage = {
+          role: "tool",
+          tool_call_id: toolCall.id,
+          content: resultContent,
+        };
+        messages.push(toolResultMessage);
+      }
 
-    // End tracing session
-    const trace = agentTracer.endSession(sessionId, true);
-    if (trace) {
-        Zotero.debug(`[seerai][trace] Summary: ${agentTracer.getExecutionSummary(trace)}`);
+      // End iteration for tracing
+      agentTracer.endIteration(sessionId);
+    } catch (error) {
+      agentTracer.endSession(sessionId, false);
+      observer.onError(error as Error);
+      throw error; // Re-throw to allow caller (Assistant) to handle it
     }
+  }
 
-    observer.onComplete(fullResponse, iteration);
+  // If we reached the max iterations, inform the user
+  if (iteration >= agentConfig.maxAgentIterations) {
+    Zotero.debug(
+      `[seerai] Agent reached max iterations (${agentConfig.maxAgentIterations})`,
+    );
+    const stopMessage = `\n\n*[Agent stopped - reached maximum tool call iterations (${agentConfig.maxAgentIterations})]*`;
+    fullResponse += stopMessage;
+    observer.onMessageUpdate(fullResponse);
+  }
+
+  // End tracing session
+  const trace = agentTracer.endSession(sessionId, true);
+  if (trace) {
+    Zotero.debug(
+      `[seerai][trace] Summary: ${agentTracer.getExecutionSummary(trace)}`,
+    );
+  }
+
+  observer.onComplete(fullResponse, iteration);
 }
 
 /**
  * Check if agentic mode should be enabled based on preferences
  */
 export function isAgenticModeEnabled(): boolean {
-    try {
-        const enabled = Zotero.Prefs.get("extensions.seerai.agenticMode");
-        return enabled !== false; // Default to true if not set
-    } catch (e) {
-        return true;
-    }
+  try {
+    const enabled = Zotero.Prefs.get("extensions.seerai.agenticMode");
+    return enabled !== false; // Default to true if not set
+  } catch (e) {
+    return true;
+  }
 }

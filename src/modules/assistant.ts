@@ -10,6 +10,7 @@ import { config } from "../../package.json";
 import {
   getChatStateManager,
   resetChatStateManager,
+  ChatStateManager,
 } from "./chat/stateManager";
 import {
   SelectedItem,
@@ -26,7 +27,11 @@ import {
   setActiveModelId,
   hasModelConfigs,
 } from "./chat/modelConfig";
-import { parseMarkdown, processStreamingContent, stripThinkTags } from "./chat/markdown";
+import {
+  parseMarkdown,
+  processStreamingContent,
+  stripThinkTags,
+} from "./chat/markdown";
 import { getMessageStore } from "./chat/messageStore";
 import {
   createImageContentParts,
@@ -60,9 +65,17 @@ import {
   PUBLICATION_TYPES,
 } from "./semanticScholar";
 import { firecrawlService, PdfDiscoveryResult } from "./firecrawl";
-import { getActiveProvider, isActiveProviderConfigured } from "./webSearchProvider";
+import {
+  getActiveProvider,
+  isActiveProviderConfigured,
+} from "./webSearchProvider";
 import { getTheme } from "../utils/theme";
-import { runConcurrentTasks, formatTaskStats, formatTaskSummary, TaskStats } from "../utils/concurrentRunner";
+import {
+  runConcurrentTasks,
+  formatTaskStats,
+  formatTaskSummary,
+  TaskStats,
+} from "../utils/concurrentRunner";
 // Prompt Library & Placeholder System imports
 import { PromptTemplate, loadPrompts } from "./chat/promptLibrary";
 import { showPromptPicker } from "./chat/ui/promptPicker";
@@ -77,14 +90,18 @@ import { showChatSettings } from "./chat/ui/chatSettings";
 import { ChatContextManager } from "./chat/context/contextManager";
 import { createContextChipsArea } from "./chat/context/contextUI";
 import { ContextItem, ContextItemType } from "./chat/context/contextTypes";
-import { handleAgenticChat, isAgenticModeEnabled, AgentUIObserver, createToolExecutionUI, createToolProcessUI } from "./chat/agenticChat";
+import {
+  handleAgenticChat,
+  isAgenticModeEnabled,
+  AgentUIObserver,
+  createToolExecutionUI,
+  createToolProcessUI,
+} from "./chat/agenticChat";
 import { ToolResult } from "./chat/tools/toolTypes";
 import { DetachedWindowManager } from "./ui/windowManager";
 
-
-
 // Debounce timer for autocomplete
-let autocompleteTimeout: ReturnType<typeof setTimeout> | null = null;
+const autocompleteTimeout: ReturnType<typeof setTimeout> | null = null;
 
 // Stored messages for conversation continuity (loaded from persistence)
 let conversationMessages: ChatMessage[] = [];
@@ -115,7 +132,11 @@ let currentSearchToken: string | null = null; // For pagination
 interface AgentSession {
   text: string;
   fullResponse: string;
-  toolResults: { toolCall: ToolCall; result?: ToolResult; uiElement?: HTMLElement }[];
+  toolResults: {
+    toolCall: ToolCall;
+    result?: ToolResult;
+    uiElement?: HTMLElement;
+  }[];
   isThinking: boolean;
   iterationCount: number;
   messagesArea: HTMLElement | null;
@@ -134,7 +155,7 @@ interface AgentSession {
 
 let activeAgentSession: AgentSession | null = null;
 let currentDraftText = "";
-let currentPastedImages: { id: string; image: string; mimeType: string }[] = [];
+const currentPastedImages: { id: string; image: string; mimeType: string }[] = [];
 let totalSearchResults: number = 0; // Total count from API
 let isSearching = false;
 
@@ -149,7 +170,14 @@ const zoteroFindPdfCache: Map<string, string | null> = new Map();
 
 // ==================== PDF Search State Tracker ====================
 // Tracks active and completed PDF searches for persistence across tab switches
-type PdfSearchStatus = 'queued' | 'searching' | 'retrying' | 'found' | 'notfound' | 'skipped' | 'error';
+type PdfSearchStatus =
+  | "queued"
+  | "searching"
+  | "retrying"
+  | "found"
+  | "notfound"
+  | "skipped"
+  | "error";
 interface PdfSearchState {
   paperId: number;
   status: PdfSearchStatus;
@@ -160,7 +188,13 @@ interface PdfSearchState {
 const activePdfSearches: Map<number, PdfSearchState> = new Map();
 // Overall batch search state
 let pdfSearchBatchActive = false;
-let pdfSearchBatchStats = { total: 0, completed: 0, succeeded: 0, failed: 0, skipped: 0 };
+let pdfSearchBatchStats = {
+  total: 0,
+  completed: 0,
+  succeeded: 0,
+  failed: 0,
+  skipped: 0,
+};
 
 // Search analysis column configuration (persisted)
 let searchColumnConfig: SearchColumnConfig = { ...defaultSearchColumnConfig };
@@ -168,7 +202,7 @@ let searchColumnConfigFilePath: string | null = null;
 
 // Chat History State
 let conversationHistory: ConversationMetadata[] = [];
-let isHistorySidebarVisible: boolean = true;
+const isHistorySidebarVisible: boolean = true;
 
 /**
  * Use Zotero's Find Full Text resolver to fetch PDF for a paper.
@@ -382,7 +416,10 @@ async function downloadAndAttachPdf(
 
     // Create a timeout promise
     const timeoutPromise = new Promise<null>((_, reject) => {
-      setTimeout(() => reject(new Error(`Download timed out after ${timeoutMs}ms`)), timeoutMs);
+      setTimeout(
+        () => reject(new Error(`Download timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      );
     });
 
     // Race between download and timeout
@@ -396,7 +433,9 @@ async function downloadAndAttachPdf(
     const attachment = await Promise.race([downloadPromise, timeoutPromise]);
 
     if (attachment) {
-      Zotero.debug(`[seerai] PDF attached successfully: ${(attachment as any).id}`);
+      Zotero.debug(
+        `[seerai] PDF attached successfully: ${(attachment as any).id}`,
+      );
       return true;
     } else {
       Zotero.debug(
@@ -505,8 +544,8 @@ export async function findAndAttachPdfForItem(
                 item.setField(
                   "extra",
                   currentExtra +
-                  (currentExtra ? "\n" : "") +
-                  `PMID: ${discoveredPmid}`,
+                    (currentExtra ? "\n" : "") +
+                    `PMID: ${discoveredPmid}`,
                 );
                 metadataUpdated = true;
               }
@@ -518,8 +557,8 @@ export async function findAndAttachPdfForItem(
                 item.setField(
                   "extra",
                   currentExtra +
-                  (currentExtra ? "\n" : "") +
-                  `arXiv: ${discoveredArxivId}`,
+                    (currentExtra ? "\n" : "") +
+                    `arXiv: ${discoveredArxivId}`,
                 );
                 metadataUpdated = true;
               }
@@ -614,10 +653,12 @@ export async function findAndAttachPdfForItem(
   // Step 7.5: Local Resolver
   try {
     // @ts-ignore
-    const extraResolvers = import.meta.glob('../../doc/localResolver.ts', { eager: true });
+    const extraResolvers = import.meta.glob("../../doc/localResolver.ts", {
+      eager: true,
+    });
     for (const path in extraResolvers) {
       const mod = extraResolvers[path] as any;
-      if (mod && typeof mod.findPdf === 'function' && doi) {
+      if (mod && typeof mod.findPdf === "function" && doi) {
         onProgress?.("🕵️ Checking local resolver...");
         try {
           const pdfUrl = await mod.findPdf(doi);
@@ -707,7 +748,6 @@ function getSourceLinkForPaper(
  * @param includeAllNotes - Whether to include all notes (default true)
  * @returns Combined content from notes and/or PDF, or null if not available
  */
-
 
 interface FilterPreset {
   name: string;
@@ -932,6 +972,16 @@ export class Assistant {
     autoIndex: boolean = true,
     includeAllNotes: boolean = true,
   ): Promise<string | null> {
+    const stateManager = getChatStateManager();
+    const options = stateManager.getOptions();
+
+    if (options.includeNotesOnly) {
+      Zotero.debug(
+        "[seerai] includeNotesOnly is enabled, skipping PDF extraction",
+      );
+      // Just collect notes via a simplified path or let the existing logic run but skip Step 2
+    }
+
     const parts: string[] = [];
     let hasSameTitleNote = false;
     const itemTitle = ((item.getField("title") as string) || "")
@@ -956,15 +1006,30 @@ export class Assistant {
             const noteTitle = (note.getNoteTitle() || "").toLowerCase().trim();
 
             // Check if this is a same-title note (contains extracted PDF content)
-            if (
+            const isSameTitle =
               noteTitle &&
               itemTitle &&
               noteTitle.includes(
                 itemTitle.substring(0, Math.min(30, itemTitle.length)),
-              )
-            ) {
+              );
+
+            if (isSameTitle) {
               hasSameTitleNote = true;
-              Zotero.debug(`[seerai] Found same-title note for item ${item.id}`);
+              Zotero.debug(
+                `[seerai] Found same-title note for item ${item.id}`,
+              );
+
+              // If "Use notes only" is enabled, skip the giant OCR-dump note
+              // unless "Allow duplicates" is explicitly on.
+              if (
+                options.includeNotesOnly &&
+                !options.disableSameTitleNoteSkip
+              ) {
+                Zotero.debug(
+                  `[seerai] Skipping same-title note for ${item.id} (Notes Only mode)`,
+                );
+                continue;
+              }
             }
 
             parts.push(
@@ -976,7 +1041,12 @@ export class Assistant {
     }
 
     // Step 2: Add indexed PDF text ONLY if no same-title note exists (to avoid duplication)
-    if (!hasSameTitleNote) {
+    // UNLESS disableSameTitleNoteSkip is enabled or includeNotesOnly is enabled
+    const skipPdf =
+      (hasSameTitleNote && !options.disableSameTitleNoteSkip) ||
+      options.includeNotesOnly;
+
+    if (!skipPdf) {
       const attachmentIds = item.getAttachments();
 
       for (const attId of attachmentIds) {
@@ -1061,13 +1131,21 @@ export class Assistant {
   /**
    * Throttled markdown rendering to prevent layout thrashing and crashes
    */
-  private static smartRender(mdContainer: HTMLElement, content: string, force: boolean = false) {
+  private static smartRender(
+    mdContainer: HTMLElement,
+    content: string,
+    force: boolean = false,
+  ) {
     const now = Date.now();
-    if (!force && (now - this.lastRenderTime < this.RENDER_THROTTLE_MS) && content === this.lastRenderValue) {
+    if (
+      !force &&
+      now - this.lastRenderTime < this.RENDER_THROTTLE_MS &&
+      content === this.lastRenderValue
+    ) {
       return;
     }
 
-    if (!force && (now - this.lastRenderTime < this.RENDER_THROTTLE_MS)) {
+    if (!force && now - this.lastRenderTime < this.RENDER_THROTTLE_MS) {
       return;
     }
 
@@ -1221,7 +1299,10 @@ export class Assistant {
    * Public method to render the UI to a given container
    * Used by the detached window to render the full interface
    */
-  public static async renderToContainer(container: HTMLElement, item: Zotero.Item): Promise<void> {
+  public static async renderToContainer(
+    container: HTMLElement,
+    item: Zotero.Item,
+  ): Promise<void> {
     currentContainer = container;
     currentItem = item;
     currentItemId = item.id;
@@ -1397,6 +1478,106 @@ export class Assistant {
   /**
    * Remove an item and its associated notes
    */
+  /**
+   * Fast estimation of tokens for context items without heavy PDF extraction
+   */
+  private static async estimateContextTokens(
+    items: ContextItem[],
+  ): Promise<number> {
+    const stateManager = getChatStateManager();
+    const options = stateManager.getOptions();
+    let total = 0;
+
+    // Fast heuristic to avoid DB bottleneck with 1000+ items
+    const totalSelectedItems = items.length;
+    const isLargeSelection = totalSelectedItems > 50;
+
+    for (const item of items) {
+      // 1. Base item metadata (title/id)
+      total += ChatStateManager.countTokens(item.displayName);
+
+      if (item.type === "paper") {
+        const zoteroItem = Zotero.Items.get(item.id as number);
+        if (!zoteroItem) continue;
+
+        // Metadata tokens
+        total += 50; // Average for authors/year
+
+        if (options.includeAbstracts) {
+          const abstract = zoteroItem.getField("abstractNote");
+          if (abstract) total += ChatStateManager.countTokens(abstract);
+        }
+
+        // Content tokens - use heuristic for large selections to keep UI snappy
+        if (isLargeSelection) {
+          total += options.includeNotesOnly ? 150 : 1500; // Average note/PDF size
+        } else {
+          try {
+            const content = await Assistant.getPdfTextForItem(
+              zoteroItem,
+              0,
+              false,
+              true,
+            );
+            if (content) total += ChatStateManager.countTokens(content);
+          } catch (e) {
+            /* ignore */
+          }
+        }
+      } else if (item.type === "table") {
+        const storedTables = await getTableStore().getAllTables();
+        const tableConfig = storedTables.find((t) => t.id === item.id);
+        if (tableConfig) {
+          total += 100; // Header
+          total +=
+            tableConfig.addedPaperIds.length *
+            (options.includeNotesOnly ? 200 : 1000);
+        }
+      } else if (item.type === "collection" || item.type === "tag") {
+        try {
+          const libraryIDs = item.metadata?.libraryID
+            ? [item.metadata.libraryID]
+            : Zotero.Libraries.getAll().map((lib) => lib.libraryID);
+
+          let totalItems = 0;
+          for (const libID of libraryIDs) {
+            const s = new Zotero.Search({ libraryID: libID });
+            if (item.type === "tag") {
+              s.addCondition("tag", "is", item.displayName);
+            } else {
+              const collectionId = typeof item.id === "number" ? item.id : null;
+              const collectionKey =
+                item.metadata?.key || item.metadata?.collectionKey;
+
+              if (collectionId) {
+                s.addCondition("collection", "is", collectionId);
+              } else if (collectionKey) {
+                s.addCondition("collection", "is", collectionKey);
+              } else {
+                s.addCondition("collection", "is", item.displayName);
+              }
+            }
+            s.addCondition("itemType", "isNot", "attachment");
+            s.addCondition("itemType", "isNot", "note");
+            const ids = await s.search();
+            totalItems += ids.length;
+          }
+
+          // Expand each item under the tag/collection with a heuristic
+          total += totalItems * (options.includeNotesOnly ? 250 : 1800);
+          Zotero.debug(
+            `[seerai] Expanded ${item.type} "${item.displayName}": found ${totalItems} items`,
+          );
+        } catch (e) {
+          Zotero.debug(`[seerai] Expansion failed for ${item.type}: ${e}`);
+          total += 1000; // Baseline fallback
+        }
+      }
+    }
+
+    return total;
+  }
+
   private static removeItemWithNotes(itemId: number) {
     const stateManager = getChatStateManager();
 
@@ -1433,7 +1614,10 @@ export class Assistant {
     // Save current state if any before switching
     if (conversationMessages.length > 0) {
       const stateManager = getChatStateManager();
-      await store.saveConversationState(stateManager.getStates(), stateManager.getOptions());
+      await store.saveConversationState(
+        stateManager.getStates(),
+        stateManager.getOptions(),
+      );
     }
 
     store.setConversationId(newId);
@@ -1445,7 +1629,7 @@ export class Assistant {
       id: newId,
       title: "New Chat",
       messageCount: 0,
-      preview: "Start a new conversation..."
+      preview: "Start a new conversation...",
     });
 
     await this.loadHistory();
@@ -1461,7 +1645,10 @@ export class Assistant {
     // Save current state before switching
     if (conversationMessages.length > 0) {
       const stateManager = getChatStateManager();
-      await store.saveConversationState(stateManager.getStates(), stateManager.getOptions());
+      await store.saveConversationState(
+        stateManager.getStates(),
+        stateManager.getOptions(),
+      );
     }
 
     store.setConversationId(id);
@@ -1506,7 +1693,7 @@ export class Assistant {
     const store = getMessageStore();
     const currentId = store.getConversationId();
     const history = await store.getHistory();
-    const conv = history.find(h => h.id === currentId);
+    const conv = history.find((h) => h.id === currentId);
 
     if (conv && (conv.title === "New Chat" || !conv.title)) {
       // Simple auto-titling: use first 30 chars of the message
@@ -1515,7 +1702,7 @@ export class Assistant {
 
       await store.updateConversationMetadata({
         id: currentId,
-        title: newTitle
+        title: newTitle,
       });
 
       await this.loadHistory();
@@ -1535,10 +1722,12 @@ export class Assistant {
     item: Zotero.Item,
     skipIfSame: boolean = false,
   ) {
-    if (skipIfSame &&
+    if (
+      skipIfSame &&
       this.lastRenderedItemId === item.id &&
       this.lastRenderedTab === activeTab &&
-      this.lastRenderedContainer === container) {
+      this.lastRenderedContainer === container
+    ) {
       // Optimization: avoid full re-render if the active context hasn't changed.
       // This prevents Zotero's onRender events (from tool metadata updates)
       // from clearing the DOM and closing user interaction elements like dropdowns.
@@ -1551,7 +1740,9 @@ export class Assistant {
 
     // Check if we are in a detached window or the Zotero pane
     // Using a more robust window-level check
-    const isDetachedWindow = !!(container.ownerDocument?.getElementById("seerai-detached-window"));
+    const isDetachedWindow = !!container.ownerDocument?.getElementById(
+      "seerai-detached-window",
+    );
 
     // Force height and overflow on root container
     // In Pane: allow visible overflow for Natural Scroll
@@ -1576,14 +1767,16 @@ export class Assistant {
     // Debug visual
     const debugLoading = container.ownerDocument!.createElement("div");
     debugLoading.textContent = "SeerAI: Rendering interface...";
-    debugLoading.style.cssText = "padding: 20px; color: gray; text-align: center;";
+    debugLoading.style.cssText =
+      "padding: 20px; color: gray; text-align: center;";
     debugLoading.id = "seerai-debug-loading";
     container.appendChild(debugLoading);
 
     try {
       const doc = container.ownerDocument!;
-      Zotero.debug("[seerai] renderInterface: Starting render for item " + item.id);
-
+      Zotero.debug(
+        "[seerai] renderInterface: Starting render for item " + item.id,
+      );
 
       // Ensure stylesheet is loaded
       const styleId = "seerai-stylesheet";
@@ -1610,7 +1803,10 @@ export class Assistant {
         try {
           const store = getMessageStore();
           // If history exists, load the most recent one if no ID is set
-          if (conversationHistory.length > 0 && store.getConversationId() === "default") {
+          if (
+            conversationHistory.length > 0 &&
+            store.getConversationId() === "default"
+          ) {
             store.setConversationId(conversationHistory[0].id);
           }
           conversationMessages = await store.loadMessages();
@@ -1634,7 +1830,9 @@ export class Assistant {
         try {
           const tableStore = getTableStore();
           currentTableConfig = await tableStore.loadConfig();
-          Zotero.debug(`[seerai] Loaded table config: ${currentTableConfig.id} (activeTab=${activeTab})`);
+          Zotero.debug(
+            `[seerai] Loaded table config: ${currentTableConfig.id} (activeTab=${activeTab})`,
+          );
         } catch (e) {
           Zotero.debug(`[seerai] Error loading table config: ${e}`);
         }
@@ -1662,7 +1860,7 @@ export class Assistant {
         styles: {
           display: "flex",
           flexDirection: "column",
-          height: (activeTab === "table" && !isDetachedWindow) ? "auto" : "100%",
+          height: activeTab === "table" && !isDetachedWindow ? "auto" : "100%",
           minHeight: "100%",
           fontFamily: "system-ui, -apple-system, sans-serif",
         },
@@ -1680,7 +1878,8 @@ export class Assistant {
             flex: "1",
             display: "flex",
             flexDirection: "column",
-            overflow: (activeTab === "table" && !isDetachedWindow) ? "visible" : "hidden",
+            overflow:
+              activeTab === "table" && !isDetachedWindow ? "visible" : "hidden",
           },
         });
 
@@ -1707,7 +1906,6 @@ export class Assistant {
         mainContainer.appendChild(tabContent);
         container.appendChild(mainContainer);
         Zotero.debug("[seerai] renderInterface: Render complete");
-
       } catch (error) {
         Zotero.debug(`[seerai] Error building UI components: ${error}`);
         throw error; // Re-throw to be caught by outer block
@@ -1719,8 +1917,9 @@ export class Assistant {
       container.innerHTML = "";
 
       const errorDiv = container.ownerDocument!.createElement("div");
-      errorDiv.style.cssText = "padding: 20px; color: red; overflow: auto; height: 100%;";
-      errorDiv.textContent = `Error rendering interface: ${error}\n\nStack: ${(error as Error).stack || 'N/A'}`;
+      errorDiv.style.cssText =
+        "padding: 20px; color: red; overflow: auto; height: 100%;";
+      errorDiv.textContent = `Error rendering interface: ${error}\n\nStack: ${(error as Error).stack || "N/A"}`;
       container.appendChild(errorDiv);
     }
   }
@@ -1758,7 +1957,7 @@ export class Assistant {
           innerText: `${tab.icon} ${tab.label}`,
         },
         styles: {
-          padding: "8px 16px",
+          padding: "4px 12px",
           cursor: "pointer",
           fontSize: "12px",
           fontWeight: "500",
@@ -1860,7 +2059,8 @@ export class Assistant {
 
     // Header with New Chat button
     const header = doc.createElement("div");
-    header.style.cssText = "padding: 12px; border-bottom: 1px solid var(--border-primary); display: flex; flex-direction: column; gap: 8px;";
+    header.style.cssText =
+      "padding: 12px; border-bottom: 1px solid var(--border-primary); display: flex; flex-direction: column; gap: 8px;";
 
     const newChatBtn = doc.createElement("button");
     newChatBtn.className = "new-chat-btn";
@@ -1883,11 +2083,12 @@ export class Assistant {
     // List of conversations
     const list = doc.createElement("div");
     list.className = "history-list";
-    list.style.cssText = "flex: 1; overflow-y: auto; display: flex; flex-direction: column;";
+    list.style.cssText =
+      "flex: 1; overflow-y: auto; display: flex; flex-direction: column;";
 
     const currentId = getMessageStore().getConversationId();
 
-    conversationHistory.forEach(conv => {
+    conversationHistory.forEach((conv) => {
       const item = doc.createElement("div");
       item.className = `history-item ${conv.id === currentId ? "active" : ""}`;
       item.style.cssText = `
@@ -1903,18 +2104,20 @@ export class Assistant {
       `;
 
       item.onclick = (e) => {
-        if ((e.target as HTMLElement).classList.contains('delete-btn')) return;
+        if ((e.target as HTMLElement).classList.contains("delete-btn")) return;
         this.loadChat(conv.id);
       };
 
       const title = doc.createElement("div");
       title.textContent = conv.title || "Untitled Chat";
-      title.style.cssText = "font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;";
+      title.style.cssText =
+        "font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;";
       item.appendChild(title);
 
       const preview = doc.createElement("div");
       preview.textContent = conv.preview || "No messages";
-      preview.style.cssText = "font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
+      preview.style.cssText =
+        "font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
       item.appendChild(preview);
 
       const date = doc.createElement("div");
@@ -1941,15 +2144,23 @@ export class Assistant {
       `;
       deleteBtn.onclick = (e) => {
         e.stopPropagation();
-        if (doc.defaultView?.confirm("Are you sure you want to delete this conversation?")) {
+        if (
+          doc.defaultView?.confirm(
+            "Are you sure you want to delete this conversation?",
+          )
+        ) {
           this.deleteChat(conv.id);
         }
       };
       item.appendChild(deleteBtn);
 
       // Simple hover effect for JS toggle
-      item.onmouseenter = () => { deleteBtn.style.display = "block"; };
-      item.onmouseleave = () => { deleteBtn.style.display = "none"; };
+      item.onmouseenter = () => {
+        deleteBtn.style.display = "block";
+      };
+      item.onmouseleave = () => {
+        deleteBtn.style.display = "none";
+      };
 
       list.appendChild(item);
     });
@@ -1957,7 +2168,8 @@ export class Assistant {
     if (conversationHistory.length === 0) {
       const empty = doc.createElement("div");
       empty.textContent = "No history yet";
-      empty.style.cssText = "padding: 20px; text-align: center; color: var(--text-tertiary); font-style: italic; font-size: 12px;";
+      empty.style.cssText =
+        "padding: 20px; text-align: center; color: var(--text-tertiary); font-style: italic; font-size: 12px;";
       list.appendChild(empty);
     }
 
@@ -1974,7 +2186,8 @@ export class Assistant {
     stateManager: ReturnType<typeof getChatStateManager>,
   ): Promise<HTMLElement> {
     const mainWrapper = doc.createElement("div");
-    mainWrapper.style.cssText = "display: flex; height: 100%; width: 100%; overflow: hidden; box-sizing: border-box;";
+    mainWrapper.style.cssText =
+      "display: flex; height: 100%; width: 100%; overflow: hidden; box-sizing: border-box;";
 
     // === CHAT CONTENT ===
     const chatContainer = ztoolkit.UI.createElement(doc, "div", {
@@ -1984,7 +2197,7 @@ export class Assistant {
         height: "100%",
         flex: "1",
         gap: "8px",
-        padding: "8px 8px 10px 8px",
+        padding: "4px 6px 6px 6px",
         minWidth: "0",
         position: "relative",
         boxSizing: "border-box",
@@ -2009,7 +2222,7 @@ export class Assistant {
         overflowY: "auto",
         border: "1px solid var(--border-primary)",
         borderRadius: "6px",
-        padding: "10px 10px 20px 10px",
+        padding: "10px 10px 300px 10px",
         backgroundColor: "var(--background-primary)",
         display: "flex",
         flexDirection: "column",
@@ -2042,14 +2255,20 @@ export class Assistant {
         const range = selection.getRangeAt(0);
         const fragment = range.cloneContents();
         // Use HTML namespace to ensure proper element creation
-        const tempDiv = doc.createElementNS ? doc.createElementNS("http://www.w3.org/1999/xhtml", "div") : doc.createElement("div");
+        const tempDiv = doc.createElementNS
+          ? doc.createElementNS("http://www.w3.org/1999/xhtml", "div")
+          : doc.createElement("div");
         tempDiv.appendChild(fragment);
 
-        Zotero.debug(`[seerai] Captured HTML fragment length: ${(tempDiv.innerHTML as string).length}`);
+        Zotero.debug(
+          `[seerai] Captured HTML fragment length: ${(tempDiv.innerHTML as string).length}`,
+        );
 
         // Convert HTML to markdown-like text
         const markdownText = this.htmlToMarkdown(tempDiv as HTMLElement);
-        Zotero.debug(`[seerai] Converted markdown length: ${markdownText.length}`);
+        Zotero.debug(
+          `[seerai] Converted markdown length: ${markdownText.length}`,
+        );
 
         // If markdown conversion produced different content, use it
         if (markdownText && markdownText.trim() !== selectedText.trim()) {
@@ -2059,10 +2278,15 @@ export class Assistant {
             clipboardEvent.clipboardData.setData("text/plain", markdownText);
             // Also set HTML for rich paste targets
             // Cast to string to fix TS error
-            clipboardEvent.clipboardData.setData("text/html", tempDiv.innerHTML as string);
+            clipboardEvent.clipboardData.setData(
+              "text/html",
+              tempDiv.innerHTML as string,
+            );
           }
         } else {
-          Zotero.debug("[seerai] Using default copy (markdown identical or empty)");
+          Zotero.debug(
+            "[seerai] Using default copy (markdown identical or empty)",
+          );
         }
       } catch (err) {
         Zotero.debug(`[seerai] Error in smart copy: ${err}`);
@@ -2085,7 +2309,9 @@ export class Assistant {
     // === RESTORE ACTIVE SESSION ===
     if (activeAgentSession) {
       try {
-        Zotero.debug(`[seerai] Restoring active agent session UI - isThinking: ${activeAgentSession.isThinking}, toolResults: ${activeAgentSession.toolResults.length}, fullResponse length: ${activeAgentSession.fullResponse?.length || 0}`);
+        Zotero.debug(
+          `[seerai] Restoring active agent session UI - isThinking: ${activeAgentSession.isThinking}, toolResults: ${activeAgentSession.toolResults.length}, fullResponse length: ${activeAgentSession.fullResponse?.length || 0}`,
+        );
 
         const streamingDiv = this.appendMessage(
           messagesArea,
@@ -2094,7 +2320,7 @@ export class Assistant {
           "",
           false,
           activeAgentSession.toolResults,
-          activeAgentSession.iterationCount
+          activeAgentSession.iterationCount,
         );
         const contentDiv = streamingDiv.querySelector(
           "[data-content]",
@@ -2105,7 +2331,11 @@ export class Assistant {
         activeAgentSession.contentDiv = contentDiv;
 
         // If it's thinking and has NO text yet AND no tools yet, ensure indicator is visible
-        if (activeAgentSession.isThinking && !activeAgentSession.fullResponse && activeAgentSession.toolResults.length === 0) {
+        if (
+          activeAgentSession.isThinking &&
+          !activeAgentSession.fullResponse &&
+          activeAgentSession.toolResults.length === 0
+        ) {
           if (!contentDiv.querySelector(".typing-indicator")) {
             contentDiv.innerHTML = `
               <div class="typing-indicator" style="display: flex; align-items: center; gap: 4px; color: var(--text-secondary); font-style: italic;">
@@ -2120,11 +2350,19 @@ export class Assistant {
 
         // Re-extract the toolProcessState helpers for the restored UI
         // We find the existing container created by appendMessage
-        const toolProcessContainer = streamingDiv.querySelector('.tool-process-container') as HTMLElement;
+        const toolProcessContainer = streamingDiv.querySelector(
+          ".tool-process-container",
+        ) as HTMLElement;
         if (toolProcessContainer) {
-          const label = toolProcessContainer.querySelector('.process-label') as HTMLElement;
-          const icon = toolProcessContainer.querySelector('.process-icon') as HTMLElement;
-          const listContainer = toolProcessContainer.querySelector('.tool-list-container') as HTMLElement;
+          const label = toolProcessContainer.querySelector(
+            ".process-label",
+          ) as HTMLElement;
+          const icon = toolProcessContainer.querySelector(
+            ".process-icon",
+          ) as HTMLElement;
+          const listContainer = toolProcessContainer.querySelector(
+            ".tool-list-container",
+          ) as HTMLElement;
 
           const setThinking = () => {
             if (label) label.textContent = "Processing task...";
@@ -2144,9 +2382,11 @@ export class Assistant {
           };
           const setCompleted = (count: number, toolCount?: number) => {
             if (toolCount !== undefined && toolCount !== count) {
-              if (label) label.textContent = `Completed ${toolCount} action${toolCount !== 1 ? 's' : ''} in ${count} turn${count !== 1 ? 's' : ''}`;
+              if (label)
+                label.textContent = `Completed ${toolCount} action${toolCount !== 1 ? "s" : ""} in ${count} turn${count !== 1 ? "s" : ""}`;
             } else {
-              if (label) label.textContent = `Completed ${count} analysis turn${count !== 1 ? 's' : ''}`;
+              if (label)
+                label.textContent = `Completed ${count} analysis turn${count !== 1 ? "s" : ""}`;
             }
             if (icon) {
               icon.textContent = "✓";
@@ -2169,9 +2409,9 @@ export class Assistant {
           const updateProgress = (count: number, toolCount?: number) => {
             if (label) {
               if (toolCount !== undefined && toolCount !== count) {
-                label.textContent = `Processing ${toolCount} action${toolCount !== 1 ? 's' : ''} in ${count} turn${count !== 1 ? 's' : ''}`;
+                label.textContent = `Processing ${toolCount} action${toolCount !== 1 ? "s" : ""} in ${count} turn${count !== 1 ? "s" : ""}`;
               } else {
-                label.textContent = `Processing ${count} analysis turn${count !== 1 ? 's' : ''}`;
+                label.textContent = `Processing ${count} analysis turn${count !== 1 ? "s" : ""}`;
               }
             }
             if (icon) {
@@ -2182,7 +2422,14 @@ export class Assistant {
             }
           };
 
-          activeAgentSession.toolProcessState = { container: toolProcessContainer, setThinking, setExecutingTool, setCompleted, updateProgress, setFailed };
+          activeAgentSession.toolProcessState = {
+            container: toolProcessContainer,
+            setThinking,
+            setExecutingTool,
+            setCompleted,
+            updateProgress,
+            setFailed,
+          };
           activeAgentSession.toolContainer = listContainer;
 
           // Restore persisted open state
@@ -2193,34 +2440,45 @@ export class Assistant {
           // Add listener to track state changes
           toolProcessContainer.addEventListener("toggle", (e: Event) => {
             if (activeAgentSession) {
-              activeAgentSession.isToolDetailsOpen = (e.target as HTMLDetailsElement).open;
+              activeAgentSession.isToolDetailsOpen = (
+                e.target as HTMLDetailsElement
+              ).open;
             }
           });
 
           // Set appropriate state indicator
-          if (activeAgentSession.isThinking || activeAgentSession.toolResults.some(tr => !tr.result)) {
+          if (
+            activeAgentSession.isThinking ||
+            activeAgentSession.toolResults.some((tr) => !tr.result)
+          ) {
             // Still thinking or mid-tool
             const finalCount = activeAgentSession.iterationCount || 1;
             const toolCount = activeAgentSession.toolResults.length;
             updateProgress(finalCount, toolCount);
-          } else if (activeAgentSession.iterationCount > 0 || activeAgentSession.toolResults.length > 0) {
+          } else if (
+            activeAgentSession.iterationCount > 0 ||
+            activeAgentSession.toolResults.length > 0
+          ) {
             setThinking();
-          } else if (activeAgentSession.iterationCount > 0 || activeAgentSession.toolResults.length > 0) {
+          } else if (
+            activeAgentSession.iterationCount > 0 ||
+            activeAgentSession.toolResults.length > 0
+          ) {
             const finalCount = activeAgentSession.iterationCount || 0;
             const toolCount = activeAgentSession.toolResults.length;
             setCompleted(finalCount, toolCount);
           }
 
           // CRITICAL: Update the uiElement references in toolResults so observer updates THIS element
-          const toolCards = listContainer.querySelectorAll('.tool-execution-card');
+          const toolCards = listContainer.querySelectorAll(
+            ".tool-execution-card",
+          );
           activeAgentSession.toolResults.forEach((tr, idx) => {
             if (toolCards[idx]) {
               tr.uiElement = toolCards[idx] as HTMLElement;
             }
           });
         }
-
-
 
         // Show stop button if streaming
         const stopBtn = doc.getElementById("stop-btn") as HTMLElement | null;
@@ -2252,9 +2510,55 @@ export class Assistant {
       inputArea.style.color = "red";
     }
 
+    // Function to update token counts
+    let updateDebounce: ReturnType<typeof setTimeout> | null = null;
+    const updateTokenDisplay = async () => {
+      if (updateDebounce) clearTimeout(updateDebounce);
+      updateDebounce = setTimeout(async () => {
+        try {
+          const items = ChatContextManager.getInstance().getItems();
+          const contextTokens = await Assistant.estimateContextTokens(items);
+          const cumulativeTokens =
+            stateManager.getSessionCumulativeTokens(conversationMessages);
+
+          const contextTokenLabel = doc.getElementById(
+            "context-tokens-display",
+          ) as HTMLElement | null;
+          const cumulativeTokenLabel = doc.getElementById(
+            "cumulative-tokens-display",
+          ) as HTMLElement | null;
+
+          if (contextTokenLabel) {
+            contextTokenLabel.innerText = `Context: ${contextTokens.toLocaleString()}`;
+          }
+          if (cumulativeTokenLabel) {
+            cumulativeTokenLabel.innerText = `Total: ${cumulativeTokens.toLocaleString()}`;
+          }
+
+          Zotero.debug(
+            `[seerai] Token display updated: context=${contextTokens}, total=${cumulativeTokens}`,
+          );
+        } catch (e) {
+          Zotero.debug(`[seerai] Error updating token display: ${e}`);
+        }
+      }, 500); // Debounce to prevent UI lag on rapid updates
+    };
+
+    // Update initially after a delay to ensure context is ready
+    setTimeout(updateTokenDisplay, 500);
+
+    // Subscribe to context changes for dynamic updates
+    ChatContextManager.getInstance().addListener(() => {
+      updateTokenDisplay();
+    });
+
+    // Also subscribe to settings changes (e.g. Include Notes Only)
+    stateManager.subscribe(() => {
+      updateTokenDisplay();
+    });
+
     // Assemble
     chatContainer.appendChild(selectionArea);
-
     chatContainer.appendChild(messagesArea);
     chatContainer.appendChild(inputArea);
 
@@ -2532,7 +2836,9 @@ export class Assistant {
             successCount++;
           } catch (err) {
             errorCount++;
-            Zotero.debug(`[seerai] Error generating tags for ${row.paperId}: ${err}`);
+            Zotero.debug(
+              `[seerai] Error generating tags for ${row.paperId}: ${err}`,
+            );
           }
         }
 
@@ -4175,7 +4481,8 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
         gap: "6px",
       },
     });
-    insightsHeader.innerHTML = "<span>💡</span><span>AI Insights Configuration</span>";
+    insightsHeader.innerHTML =
+      "<span>💡</span><span>AI Insights Configuration</span>";
     advancedFiltersContainer.appendChild(insightsHeader);
 
     const insightsSection = ztoolkit.UI.createElement(doc, "div", {
@@ -4212,7 +4519,9 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
       properties: {
         value:
           currentSearchState.searchAiInsightsPrompt ||
-          (Zotero.Prefs.get("extensions.seerai.searchAiInsightsPrompt") as string),
+          (Zotero.Prefs.get(
+            "extensions.seerai.searchAiInsightsPrompt",
+          ) as string),
         rows: 4,
       },
       styles: {
@@ -4226,7 +4535,10 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     }) as HTMLTextAreaElement;
     promptArea.addEventListener("change", () => {
       currentSearchState.searchAiInsightsPrompt = promptArea.value;
-      Zotero.Prefs.set("extensions.seerai.searchAiInsightsPrompt", promptArea.value);
+      Zotero.Prefs.set(
+        "extensions.seerai.searchAiInsightsPrompt",
+        promptArea.value,
+      );
     });
     promptContainer.appendChild(promptLabel);
     promptContainer.appendChild(promptArea);
@@ -4234,18 +4546,31 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
     // Length configuration with slider
     const lengthGroup = ztoolkit.UI.createElement(doc, "div", {
-      styles: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" },
+      styles: {
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        flexWrap: "wrap",
+      },
     });
     const lengthLabel = ztoolkit.UI.createElement(doc, "label", {
       properties: { innerText: "Response length:" },
       styles: { ...labelStyle, marginBottom: "0" },
     });
-    const currentLength = currentSearchState.searchAiInsightsResponseLength ||
-      (Zotero.Prefs.get("extensions.seerai.searchAiInsightsResponseLength") as number) || 500;
+    const currentLength =
+      currentSearchState.searchAiInsightsResponseLength ||
+      (Zotero.Prefs.get(
+        "extensions.seerai.searchAiInsightsResponseLength",
+      ) as number) ||
+      500;
 
     const lengthValue = ztoolkit.UI.createElement(doc, "span", {
       properties: { innerText: `${currentLength} chars` },
-      styles: { fontSize: "11px", color: "var(--text-secondary)", minWidth: "70px" },
+      styles: {
+        fontSize: "11px",
+        color: "var(--text-secondary)",
+        minWidth: "70px",
+      },
     });
     const lengthSlider = ztoolkit.UI.createElement(doc, "input", {
       attributes: {
@@ -4274,7 +4599,12 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
     // Citation Style configuration
     const styleGroup = ztoolkit.UI.createElement(doc, "div", {
-      styles: { display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" },
+      styles: {
+        display: "flex",
+        alignItems: "center",
+        gap: "8px",
+        marginTop: "4px",
+      },
     });
     const styleLabel = ztoolkit.UI.createElement(doc, "label", {
       properties: { innerText: "Citation Style:" },
@@ -4300,7 +4630,10 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
       { value: "ieee", label: "IEEE ([1])" },
     ];
 
-    const currentStyle = Zotero.Prefs.get("extensions.seerai.searchAiInsightsCitationStyle") as string || "numbered";
+    const currentStyle =
+      (Zotero.Prefs.get(
+        "extensions.seerai.searchAiInsightsCitationStyle",
+      ) as string) || "numbered";
 
     citationStyles.forEach((s) => {
       const opt = doc.createElement("option");
@@ -4311,7 +4644,10 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     });
 
     styleSelect.addEventListener("change", () => {
-      Zotero.Prefs.set("extensions.seerai.searchAiInsightsCitationStyle", styleSelect.value);
+      Zotero.Prefs.set(
+        "extensions.seerai.searchAiInsightsCitationStyle",
+        styleSelect.value,
+      );
       Assistant.refreshAllCitations(doc);
     });
 
@@ -4437,11 +4773,15 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
         venue: currentSearchState.venue,
       });
 
-      Zotero.debug(`[seerai] Search response - total: ${result.total}, data length: ${result.data?.length ?? 'undefined'}`);
+      Zotero.debug(
+        `[seerai] Search response - total: ${result.total}, data length: ${result.data?.length ?? "undefined"}`,
+      );
 
       // Defensive check: ensure result.data exists and is an array
       if (!result.data || !Array.isArray(result.data)) {
-        Zotero.debug(`[seerai] Invalid search response - data is ${typeof result.data}`);
+        Zotero.debug(
+          `[seerai] Invalid search response - data is ${typeof result.data}`,
+        );
         throw new Error("Invalid search response from API - no results data");
       }
 
@@ -4457,7 +4797,9 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
         papers = await this.filterLibraryDuplicates(papers);
         const filtered = papersBeforeFilter - papers.length;
         if (filtered > 0) {
-          Zotero.debug(`[seerai] Duplicate filter: ${papersBeforeFilter} → ${papers.length} (removed ${filtered} already in library)`);
+          Zotero.debug(
+            `[seerai] Duplicate filter: ${papersBeforeFilter} → ${papers.length} (removed ${filtered} already in library)`,
+          );
         }
       }
 
@@ -4665,14 +5007,15 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     });
 
     const countText = ztoolkit.UI.createElement(doc, "span", {});
-    const filterNote = currentSearchState.hideLibraryDuplicates ? " (hiding library duplicates)" : "";
+    const filterNote = currentSearchState.hideLibraryDuplicates
+      ? " (hiding library duplicates)"
+      : "";
     countText.innerHTML = `📊 Found <strong>${totalSearchResults.toLocaleString()}</strong> papers • Showing ${currentSearchResults.length}${filterNote}`;
     countHeader.appendChild(countText);
 
     const headerButtons = ztoolkit.UI.createElement(doc, "div", {
       styles: { display: "flex", gap: "8px" },
     });
-
 
     // Export BibTeX button (Keep only this button in header)
     const exportBtn = ztoolkit.UI.createElement(doc, "button", {
@@ -4742,7 +5085,9 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     container.appendChild(wrapper);
 
     // Auto-generate AI insights if enabled in settings
-    const autoInsights = Zotero.Prefs.get("extensions.seerai.searchAutoAiInsights") as boolean;
+    const autoInsights = Zotero.Prefs.get(
+      "extensions.seerai.searchAutoAiInsights",
+    ) as boolean;
 
     // Check for cached insights first
     if (currentSearchState.cachedAiInsights) {
@@ -4795,7 +5140,9 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
       const systemPrompt =
         currentSearchState.searchAiInsightsPrompt ||
-        (Zotero.Prefs.get("extensions.seerai.searchAiInsightsPrompt") as string) ||
+        (Zotero.Prefs.get(
+          "extensions.seerai.searchAiInsightsPrompt",
+        ) as string) ||
         `You are an expert research analyst specializing in academic literature synthesis. Your role is to provide rigorous, insightful analysis of research papers.
 
 For the given search results:
@@ -4808,7 +5155,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
       const responseLength =
         currentSearchState.searchAiInsightsResponseLength ||
-        (Zotero.Prefs.get("extensions.seerai.searchAiInsightsResponseLength") as number) ||
+        (Zotero.Prefs.get(
+          "extensions.seerai.searchAiInsightsResponseLength",
+        ) as number) ||
         500;
 
       const messages = [
@@ -4914,13 +5263,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           onError: (error) => {
             Zotero.debug(`[seerai] Search insights error: ${error}`);
             summaryContainer.innerHTML = `<div style="color: var(--error-color, #d32f2f); padding: 10px;">⚠️ AI Error: ${error.message}</div>`;
-          }
+          },
         },
         {
           apiURL: activeModel.apiURL,
           apiKey: activeModel.apiKey,
-          model: activeModel.model
-        }
+          model: activeModel.model,
+        },
       );
     } catch (e) {
       Zotero.debug(`[seerai] Failed to generate insights: ${e}`);
@@ -4931,7 +5280,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   /**
    * Display cached AI insights without regenerating
    */
-  private static displayCachedInsights(doc: Document, cachedContent: string): void {
+  private static displayCachedInsights(
+    doc: Document,
+    cachedContent: string,
+  ): void {
     const summaryContainer = doc.getElementById(
       "search-ai-summary-container",
     ) as HTMLElement;
@@ -4970,24 +5322,16 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     });
 
     // Click listeners
-    doc
-      .getElementById("copy-summary-btn")
-      ?.addEventListener("click", () => {
-        new ztoolkit.Clipboard()
-          .addText(cachedContent, "text/unicode")
-          .copy();
-        const btn = doc.getElementById(
-          "copy-summary-btn",
-        ) as HTMLButtonElement;
-        btn.innerText = "✓ Copied!";
-        setTimeout(() => (btn.innerText = "📋 Copy"), 2000);
-      });
+    doc.getElementById("copy-summary-btn")?.addEventListener("click", () => {
+      new ztoolkit.Clipboard().addText(cachedContent, "text/unicode").copy();
+      const btn = doc.getElementById("copy-summary-btn") as HTMLButtonElement;
+      btn.innerText = "✓ Copied!";
+      setTimeout(() => (btn.innerText = "📋 Copy"), 2000);
+    });
 
-    doc
-      .getElementById("close-summary-btn")
-      ?.addEventListener("click", () => {
-        summaryContainer.style.display = "none";
-      });
+    doc.getElementById("close-summary-btn")?.addEventListener("click", () => {
+      summaryContainer.style.display = "none";
+    });
 
     doc
       .getElementById("settings-summary-btn")
@@ -5085,7 +5429,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   private static async handleFollowUpQuestion(
     doc: Document,
     container: HTMLElement,
-    question: string
+    question: string,
   ): Promise<void> {
     // create response area
     const responseArea = ztoolkit.UI.createElement(doc, "div", {
@@ -5120,7 +5464,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       // For now, take up to 25 papers
       const contextPapers = currentSearchResults.slice(0, 25);
       const context = contextPapers
-        .map((p, i) => `[${i + 1}] Title: ${p.title}\nAbstract: ${p.abstract || "N/A"}`)
+        .map(
+          (p, i) =>
+            `[${i + 1}] Title: ${p.title}\nAbstract: ${p.abstract || "N/A"}`,
+        )
         .join("\n\n");
 
       const systemPrompt = `You are a helpful research assistant. Answer the user's question based ONLY on the provided research papers.
@@ -5154,15 +5501,14 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           },
           onError: (error) => {
             answerDiv.innerHTML += `<div style="color: var(--error-color);">Error: ${error.message}</div>`;
-          }
+          },
         },
         {
           apiURL: activeModel.apiURL,
           apiKey: activeModel.apiKey,
           model: activeModel.model,
-        }
+        },
       );
-
     } catch (e) {
       Zotero.debug(`[seerai] Follow-up error: ${e}`);
       responseArea.innerHTML += `<div style="color: var(--error-color);">Failed to generate answer.</div>`;
@@ -5199,7 +5545,11 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   /**
    * Get formatted citation string based on style
    */
-  private static getFormattedCitation(paper: SemanticScholarPaper, index: number, style: string): string {
+  private static getFormattedCitation(
+    paper: SemanticScholarPaper,
+    index: number,
+    style: string,
+  ): string {
     if (!paper) return `[${index}]`;
     const authors = paper.authors || [];
     const firstAuthor = authors[0]?.name || "Unknown";
@@ -5210,7 +5560,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       case "apa":
         // (Author, Year) or (Author et al., Year)
         if (authors.length > 2) return `(${firstAuthor} et al., ${year})`;
-        if (authors.length === 2) return `(${firstAuthor} & ${authors[1].name}, ${year})`;
+        if (authors.length === 2)
+          return `(${firstAuthor} & ${authors[1].name}, ${year})`;
         return `(${firstAuthor}, ${year})`;
       case "mla":
         // (Author Page) - Page is usually unknown here, so just Author
@@ -5233,7 +5584,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
    * Apply the user's selected citation style to the insight container
    */
   private static applyCitationStyle(container: HTMLElement): void {
-    const style = Zotero.Prefs.get("extensions.seerai.searchAiInsightsCitationStyle") as string || "numbered";
+    const style =
+      (Zotero.Prefs.get(
+        "extensions.seerai.searchAiInsightsCitationStyle",
+      ) as string) || "numbered";
 
     const links = container.querySelectorAll(".citation-link");
     links.forEach((link: Element) => {
@@ -5241,7 +5595,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       const indicesStr = htmlLink.dataset.citationIndices;
       if (!indicesStr) return;
 
-      const indices = indicesStr.split(',').map(s => parseInt(s.trim(), 10));
+      const indices = indicesStr.split(",").map((s) => parseInt(s.trim(), 10));
       if (indices.length === 0) return;
 
       // For multiple citations, strictly speaking styles differ:
@@ -5251,13 +5605,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       // Simplified approach: Map each index to its formatted string and join
       // If style is numbered/ieee, we want to keep [1, 2] look if possible, or [1][2]
       if (style === "numbered" || style === "ieee") {
-        // The markdown parser already produced [1,2] or [1]. 
+        // The markdown parser already produced [1,2] or [1].
         // We can trust the innerText OR rebuild it to be safe.
         // Let's rebuild to be consistent with index logic
         htmlLink.innerText = `[${indices.join(", ")}]`;
       } else {
         // Text based citation
-        const citationTexts = indices.map(idx => {
+        const citationTexts = indices.map((idx) => {
           const paper = currentSearchResults[idx - 1];
           return this.getFormattedCitation(paper, idx, style);
         });
@@ -5273,11 +5627,14 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   public static refreshAllCitations(doc: Document): void {
     // Search tab summary
     const summaryContainer = doc.getElementById("search-ai-summary-container");
-    if (summaryContainer) this.applyCitationStyle(summaryContainer as HTMLElement);
+    if (summaryContainer)
+      this.applyCitationStyle(summaryContainer as HTMLElement);
 
     // Follow-up answer areas
     const followUpAnswers = doc.querySelectorAll(".ai-answer");
-    followUpAnswers.forEach((ans: Element) => this.applyCitationStyle(ans as HTMLElement));
+    followUpAnswers.forEach((ans: Element) =>
+      this.applyCitationStyle(ans as HTMLElement),
+    );
   }
 
   /**
@@ -5297,7 +5654,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
       const el = node as HTMLElement;
       const tagName = el.tagName.toLowerCase();
-      const children = Array.from(el.childNodes).filter((n): n is Node => n !== null).map(processNode).join("");
+      const children = Array.from(el.childNodes)
+        .filter((n): n is Node => n !== null)
+        .map(processNode)
+        .join("");
 
       switch (tagName) {
         case "strong":
@@ -5344,7 +5704,12 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           }
           return `- ${children}\n`;
         case "blockquote":
-          return children.split("\n").map(line => `> ${line}`).join("\n") + "\n";
+          return (
+            children
+              .split("\n")
+              .map((line) => `> ${line}`)
+              .join("\n") + "\n"
+          );
         case "table":
           return this.tableToMarkdown(el);
         case "div":
@@ -5372,7 +5737,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       const cells = row.querySelectorAll("th, td");
       const cellContents: string[] = [];
       cells.forEach((cell: Element) => {
-        cellContents.push((cell.textContent || "").trim().replace(/\|/g, "\\|"));
+        cellContents.push(
+          (cell.textContent || "").trim().replace(/\|/g, "\\|"),
+        );
       });
 
       result.push(`| ${cellContents.join(" | ")} |`);
@@ -5391,7 +5758,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   /**
    * Handle smart copy - append references if citations are copied
    */
-  private static handleSmartCopy(e: ClipboardEvent, container: HTMLElement): void {
+  private static handleSmartCopy(
+    e: ClipboardEvent,
+    container: HTMLElement,
+  ): void {
     const doc = container.ownerDocument;
     if (!doc) return;
     const selection = doc.getSelection();
@@ -5415,7 +5785,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     links.forEach((link: Element) => {
       const idxStr = (link as HTMLElement).dataset.citationIndices;
       if (idxStr) {
-        idxStr.split(',').forEach(s => indicesSet.add(parseInt(s.trim(), 10)));
+        idxStr
+          .split(",")
+          .forEach((s) => indicesSet.add(parseInt(s.trim(), 10)));
       }
     });
 
@@ -5423,13 +5795,16 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Format references
     const indices = Array.from(indicesSet).sort((a, b) => a - b);
-    const references = indices.map(idx => {
-      const paper = currentSearchResults[idx - 1];
-      if (!paper) return null;
-      // Simple reference format: [N] Title. Author. Year.
-      const authors = paper.authors?.map(a => a.name).join(", ") || "Unknown Author";
-      return `[${idx}] ${paper.title}. ${authors}. ${paper.year || ""}.`;
-    }).filter(Boolean);
+    const references = indices
+      .map((idx) => {
+        const paper = currentSearchResults[idx - 1];
+        if (!paper) return null;
+        // Simple reference format: [N] Title. Author. Year.
+        const authors =
+          paper.authors?.map((a) => a.name).join(", ") || "Unknown Author";
+        return `[${idx}] ${paper.title}. ${authors}. ${paper.year || ""}.`;
+      })
+      .filter(Boolean);
 
     if (references.length > 0) {
       e.preventDefault();
@@ -5437,7 +5812,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       const finalPayload = selectedText + refText;
       if (e.clipboardData) {
         e.clipboardData.setData("text/plain", finalPayload);
-        // Also try to set generic HTML if we want to preserve rich text? 
+        // Also try to set generic HTML if we want to preserve rich text?
         // For now text/plain is safer for reference appending.
       }
     }
@@ -5446,13 +5821,18 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   /**
    * Attach click and hover handlers to citation links in AI insights container
    */
-  private static attachCitationClickHandlers(doc: Document, container: HTMLElement): void {
+  private static attachCitationClickHandlers(
+    doc: Document,
+    container: HTMLElement,
+  ): void {
     // Apply styling first
     this.applyCitationStyle(container);
 
     // Smart copy listener (only attach once)
     if (!container.dataset.hasCopyListener) {
-      container.addEventListener("copy", (e) => this.handleSmartCopy(e as ClipboardEvent, container));
+      container.addEventListener("copy", (e) =>
+        this.handleSmartCopy(e as ClipboardEvent, container),
+      );
       container.dataset.hasCopyListener = "true";
     }
 
@@ -5462,19 +5842,23 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       const indicesStr = htmlLink.dataset.citationIndices;
       if (!indicesStr) return;
 
-      const indices = indicesStr.split(',').map(s => parseInt(s.trim(), 10));
+      const indices = indicesStr.split(",").map((s) => parseInt(s.trim(), 10));
 
       // 1. Hover effect: Show titles
-      const titles = indices.map(idx => {
-        const paper = currentSearchResults[idx - 1];
-        return paper ? `[${idx}] ${paper.title}` : `[${idx}] Paper not found`;
-      }).join('\n');
+      const titles = indices
+        .map((idx) => {
+          const paper = currentSearchResults[idx - 1];
+          return paper ? `[${idx}] ${paper.title}` : `[${idx}] Paper not found`;
+        })
+        .join("\n");
       htmlLink.title = titles;
 
       // 2. Click handler
       link.addEventListener("click", (e: Event) => {
         e.stopPropagation();
-        Zotero.debug(`[seerai] Citation clicked: ${indicesStr} (found ${indices.length} indices)`);
+        Zotero.debug(
+          `[seerai] Citation clicked: ${indicesStr} (found ${indices.length} indices)`,
+        );
         if (indices.length === 1) {
           Assistant.scrollToSearchResult(doc, indices[0] - 1);
         } else {
@@ -5488,7 +5872,11 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
    * Show a "drop up" menu for multi-citations
    * Uses a backdrop pattern for better compatibility with Zotero/XUL
    */
-  private static showCitationMenu(doc: Document, anchor: HTMLElement, indices: number[]): void {
+  private static showCitationMenu(
+    doc: Document,
+    anchor: HTMLElement,
+    indices: number[],
+  ): void {
     // Remove any existing menus
     const existingMenu = doc.getElementById("citation-menu-popover");
     if (existingMenu) existingMenu.remove();
@@ -5552,7 +5940,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     header.innerText = "Select paper to view:";
     menu.appendChild(header);
 
-    indices.forEach(idx => {
+    indices.forEach((idx) => {
       const paper = currentSearchResults[idx - 1];
       if (!paper) return;
 
@@ -5628,7 +6016,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   private static showAiInsightSettingsPopover(
     doc: Document,
     anchor: HTMLElement,
-    container: HTMLElement
+    container: HTMLElement,
   ): void {
     Zotero.debug("[seerai] showAiInsightSettingsPopover called");
     const existing = doc.getElementById("search-settings-popover");
@@ -5701,14 +6089,20 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     });
 
     // Get current value
-    const rawLen = Zotero.Prefs.get("extensions.seerai.searchAiInsightsResponseLength") as number;
+    const rawLen = Zotero.Prefs.get(
+      "extensions.seerai.searchAiInsightsResponseLength",
+    ) as number;
     // Treat 0 as Limitless (mapped to 2000 for slider), otherwise fallback to 500
     const currentLen = rawLen === 0 ? 2000 : (rawLen ?? 500);
     const lenText = currentLen >= 2000 ? "Limitless" : `${currentLen} words`;
 
     const lenLabel = ztoolkit.UI.createElement(doc, "div", {
       properties: { innerText: `Max Response Length: ${lenText}` },
-      styles: { fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" },
+      styles: {
+        fontSize: "12px",
+        fontWeight: "600",
+        color: "var(--text-primary)",
+      },
     });
     lengthSection.appendChild(lenLabel);
 
@@ -5756,13 +6150,17 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         gap: "8px",
         marginTop: "8px",
         paddingTop: "8px",
-        borderTop: "1px solid var(--border-primary)"
+        borderTop: "1px solid var(--border-primary)",
       },
     });
 
     const styleLabel = ztoolkit.UI.createElement(doc, "div", {
       properties: { innerText: "Citation Style" },
-      styles: { fontSize: "12px", fontWeight: "600", color: "var(--text-primary)" },
+      styles: {
+        fontSize: "12px",
+        fontWeight: "600",
+        color: "var(--text-primary)",
+      },
     });
     advancedSection.appendChild(styleLabel);
 
@@ -5774,8 +6172,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         border: "1px solid var(--border-primary)",
         backgroundColor: "var(--background-secondary)",
         fontSize: "12px",
-        color: "var(--text-primary)"
-      }
+        color: "var(--text-primary)",
+      },
     }) as HTMLSelectElement;
 
     // Options
@@ -5785,12 +6183,15 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       { value: "mla", label: "MLA (Author Page)" },
       { value: "chicago", label: "Chicago (Author Year)" },
       { value: "harvard", label: "Harvard (Author Year)" },
-      { value: "ieee", label: "IEEE ([1])" }
+      { value: "ieee", label: "IEEE ([1])" },
     ];
 
-    const currentStyle = Zotero.Prefs.get("extensions.seerai.searchAiInsightsCitationStyle") as string || "numbered";
+    const currentStyle =
+      (Zotero.Prefs.get(
+        "extensions.seerai.searchAiInsightsCitationStyle",
+      ) as string) || "numbered";
 
-    styles.forEach(s => {
+    styles.forEach((s) => {
       const opt = doc.createElement("option");
       opt.value = s.value;
       opt.innerText = s.label;
@@ -5799,7 +6200,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     });
 
     styleSelect.addEventListener("change", () => {
-      Zotero.Prefs.set("extensions.seerai.searchAiInsightsCitationStyle", styleSelect.value);
+      Zotero.Prefs.set(
+        "extensions.seerai.searchAiInsightsCitationStyle",
+        styleSelect.value,
+      );
       Assistant.refreshAllCitations(doc);
     });
 
@@ -6639,7 +7043,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         | "page"
         | "source" = "initial";
       let pdfUrl: string | null = null;
-      let pageUrl: string | null = null;
+      const pageUrl: string | null = null;
       let sourceUrl: string | null = null;
 
       const pdfDiscoveryBtn = ztoolkit.UI.createElement(doc, "button", {
@@ -7563,7 +7967,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             Zotero.debug(
               `[seerai] Triggering background OCR for imported paper ${newItem.id}`,
             );
-            // We don't await this if it's already in a background task, 
+            // We don't await this if it's already in a background task,
             // but if we are waiting for PDF, we might want to wait for OCR too?
             // User said "until all series of import paper completed", which might include OCR.
             // For now, let's await it so the agent knows when it's FULLY done if waitForPdf is true.
@@ -8090,7 +8494,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     const searchHelp = ztoolkit.UI.createElement(doc, "span", {
       properties: { innerText: "❗" },
       attributes: {
-        title: "Search Logic Supported:\n• AND, OR, NOT\n• ( ) Grouping\n• \"Exact Phrase\"\nExample: \"Climate Change\" AND (Policy OR Mitigation)",
+        title:
+          'Search Logic Supported:\n• AND, OR, NOT\n• ( ) Grouping\n• "Exact Phrase"\nExample: "Climate Change" AND (Policy OR Mitigation)',
       },
       styles: {
         fontSize: "14px",
@@ -8413,7 +8818,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Page Indicator
     const pageIndicator = ztoolkit.UI.createElement(doc, "span", {
-      properties: { id: "table-page-indicator", innerText: `${currentPage} / ${totalPages}` },
+      properties: {
+        id: "table-page-indicator",
+        innerText: `${currentPage} / ${totalPages}`,
+      },
       styles: {
         fontSize: "11px",
         fontWeight: "600",
@@ -8839,7 +9247,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                   added++;
                 }
               } catch (err) {
-                Zotero.debug(`[seerai] Error adding item ${itemId} to collection: ${err}`);
+                Zotero.debug(
+                  `[seerai] Error adding item ${itemId} to collection: ${err}`,
+                );
               }
             }
 
@@ -9669,7 +10079,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           content = await this.generateColumnContent(
             task.item,
             task.col,
-            noteIds
+            noteIds,
           );
         } else {
           content = await this.generateFromPDF(task.item, task.col);
@@ -9686,7 +10096,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
           // Update Data
           const row = currentTableData?.rows.find(
-            (r) => r.paperId === task.paperId
+            (r) => r.paperId === task.paperId,
           );
           if (row) {
             row.data[task.col.id] = content;
@@ -9723,7 +10133,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           updateProgress();
         }
         Zotero.debug(
-          `[seerai] Error generating for ${task.paperId}/${task.col.id}: ${error}${willRetry ? " (will retry)" : ""}`
+          `[seerai] Error generating for ${task.paperId}/${task.col.id}: ${error}${willRetry ? " (will retry)" : ""}`,
         );
       },
     });
@@ -9874,7 +10284,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           content = await this.generateColumnContent(
             task.item,
             task.col,
-            noteIds
+            noteIds,
           );
         } else {
           content = await this.generateFromPDF(task.item, task.col);
@@ -9889,7 +10299,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           task.td.style.backgroundColor = "";
 
           const row = currentTableData?.rows.find(
-            (r) => r.paperId === task.paperId
+            (r) => r.paperId === task.paperId,
           );
           if (row) {
             row.data[task.col.id] = content;
@@ -9920,7 +10330,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           task.td.title = String(error);
         }
         Zotero.debug(
-          `[seerai] Error regenerating for ${task.paperId}/${task.col.id}: ${error}${willRetry ? " (will retry)" : ""}`
+          `[seerai] Error regenerating for ${task.paperId}/${task.col.id}: ${error}${willRetry ? " (will retry)" : ""}`,
         );
       },
     });
@@ -9997,7 +10407,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           if (col.type === "computed" && col.visible) {
             const cellVal =
               currentTableData?.rows.find((r) => r.paperId === paperId)?.data[
-              col.id
+                col.id
               ] || "";
             if (!cellVal.trim()) {
               // This cell is empty, so it might show the "OCR" prompt
@@ -10171,29 +10581,39 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       return;
     }
 
-    Zotero.debug(`[seerai] ${tasks.length} items to search for PDFs (concurrent mode)`);
+    Zotero.debug(
+      `[seerai] ${tasks.length} items to search for PDFs (concurrent mode)`,
+    );
 
     const originalBtnText = btn.innerText;
     (btn as HTMLButtonElement).disabled = true;
     btn.style.cursor = "wait";
 
     // Get settings for timeout (default 60s) and concurrency (default 5)
-    const timeoutMs = (Zotero.Prefs.get(
-      `${addon.data.config.prefsPrefix}.pdfSearchTimeout`,
-    ) as number) || 60000;
-    const concurrency = (Zotero.Prefs.get(
-      `${addon.data.config.prefsPrefix}.pdfSearchConcurrency`,
-    ) as number) || 5;
+    const timeoutMs =
+      (Zotero.Prefs.get(
+        `${addon.data.config.prefsPrefix}.pdfSearchTimeout`,
+      ) as number) || 60000;
+    const concurrency =
+      (Zotero.Prefs.get(
+        `${addon.data.config.prefsPrefix}.pdfSearchConcurrency`,
+      ) as number) || 5;
 
     // Initialize batch tracking state
     pdfSearchBatchActive = true;
-    pdfSearchBatchStats = { total: tasks.length, completed: 0, succeeded: 0, failed: 0, skipped: 0 };
+    pdfSearchBatchStats = {
+      total: tasks.length,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      skipped: 0,
+    };
 
     // Initialize individual paper states
     for (const task of tasks) {
       activePdfSearches.set(task.paperId, {
         paperId: task.paperId,
-        status: 'queued',
+        status: "queued",
         startedAt: Date.now(),
       });
     }
@@ -10201,8 +10621,14 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // Helper to update both tracking state AND cell UI
     const updateCellStatus = (
       paperId: number,
-      status: 'searching' | 'found' | 'notfound' | 'skipped' | 'error' | 'retrying',
-      message?: string
+      status:
+        | "searching"
+        | "found"
+        | "notfound"
+        | "skipped"
+        | "error"
+        | "retrying",
+      message?: string,
     ) => {
       // Update tracking state
       const existing = activePdfSearches.get(paperId);
@@ -10227,24 +10653,24 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         ) {
           const cell = td as HTMLElement;
           switch (status) {
-            case 'searching':
+            case "searching":
               cell.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">🔍 Searching...</span>`;
               break;
-            case 'retrying':
+            case "retrying":
               cell.innerHTML = `<span style="color: #f57c00; font-size: 11px;">↻ Retrying...</span>`;
               break;
-            case 'found':
+            case "found":
               cell.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">📄 Process PDF</span>`;
               break;
-            case 'skipped':
-              cell.innerHTML = `<span style="color: #f57c00; font-size: 11px;">⏭ ${message || 'Skipped'}</span>`;
+            case "skipped":
+              cell.innerHTML = `<span style="color: #f57c00; font-size: 11px;">⏭ ${message || "Skipped"}</span>`;
               break;
-            case 'error':
-              cell.innerHTML = `<span style="color: #c62828; font-size: 11px;">✗ ${message || 'Error'}</span>`;
-              cell.title = message || '';
+            case "error":
+              cell.innerHTML = `<span style="color: #c62828; font-size: 11px;">✗ ${message || "Error"}</span>`;
+              cell.title = message || "";
               break;
-            case 'notfound': {
-              const taskItem = tasks.find(t => t.paperId === paperId);
+            case "notfound": {
+              const taskItem = tasks.find((t) => t.paperId === paperId);
               if (!taskItem) {
                 cell.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">❌ Not found</span>`;
                 break;
@@ -10255,7 +10681,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               const arxiv = extractArxivFromItem(taskItem.item);
               const pmid = extractPmidFromItem(taskItem.item);
               const itemUrl = taskItem.item.getField("url") as string;
-              const sourceLink = getSourceLinkForPaper(doi, arxiv, pmid, undefined, itemUrl);
+              const sourceLink = getSourceLinkForPaper(
+                doi,
+                arxiv,
+                pmid,
+                undefined,
+                itemUrl,
+              );
 
               if (sourceLink) {
                 // Clicking this will trigger the expanded menu (Attach, Retry, Note) via the TD click listener
@@ -10285,13 +10717,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           completed: stats.completed,
           succeeded: stats.succeeded,
           failed: stats.failed,
-          skipped: stats.skipped
+          skipped: stats.skipped,
         };
         btn.innerText = `🔍 ${formatTaskStats(stats)}`;
       },
 
       onTaskStart: (task) => {
-        updateCellStatus(task.paperId, 'searching');
+        updateCellStatus(task.paperId, "searching");
       },
 
       executor: async (task) => {
@@ -10302,20 +10734,21 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       onTaskComplete: async (task, success) => {
         if (success) {
           Zotero.debug(`[seerai] Found PDF for item ${task.paperId}`);
-          updateCellStatus(task.paperId, 'found');
+          updateCellStatus(task.paperId, "found");
 
           // Persist the success state
           if (currentTableConfig) {
-            if (!currentTableConfig.pdfDiscoveryData) currentTableConfig.pdfDiscoveryData = {};
+            if (!currentTableConfig.pdfDiscoveryData)
+              currentTableConfig.pdfDiscoveryData = {};
             currentTableConfig.pdfDiscoveryData[task.paperId] = {
-              status: 'found',
+              status: "found",
               discoveredAt: new Date().toISOString(),
             };
             const tableStore = getTableStore();
             await tableStore.saveConfig(currentTableConfig);
           }
         } else {
-          updateCellStatus(task.paperId, 'notfound');
+          updateCellStatus(task.paperId, "notfound");
 
           // Persist the failure/source-link state
           if (currentTableConfig) {
@@ -10323,11 +10756,18 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             const arxiv = extractArxivFromItem(task.item);
             const pmid = extractPmidFromItem(task.item);
             const itemUrl = task.item.getField("url") as string;
-            const sourceLink = getSourceLinkForPaper(doi, arxiv, pmid, undefined, itemUrl);
+            const sourceLink = getSourceLinkForPaper(
+              doi,
+              arxiv,
+              pmid,
+              undefined,
+              itemUrl,
+            );
 
-            if (!currentTableConfig.pdfDiscoveryData) currentTableConfig.pdfDiscoveryData = {};
+            if (!currentTableConfig.pdfDiscoveryData)
+              currentTableConfig.pdfDiscoveryData = {};
             currentTableConfig.pdfDiscoveryData[task.paperId] = {
-              status: sourceLink ? 'source_link' : 'not_found',
+              status: sourceLink ? "source_link" : "not_found",
               sourceUrl: sourceLink || undefined,
               discoveredAt: new Date().toISOString(),
             };
@@ -10339,23 +10779,30 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
       onTaskError: (task, error, _index, willRetry) => {
         if (willRetry) {
-          Zotero.debug(`[seerai] Retrying PDF search for ${task.paperId}: ${error.message}`);
-          updateCellStatus(task.paperId, 'retrying');
+          Zotero.debug(
+            `[seerai] Retrying PDF search for ${task.paperId}: ${error.message}`,
+          );
+          updateCellStatus(task.paperId, "retrying");
         } else {
-          Zotero.debug(`[seerai] PDF search failed for ${task.paperId}: ${error.message}`);
-          updateCellStatus(task.paperId, 'error', error.message);
+          Zotero.debug(
+            `[seerai] PDF search failed for ${task.paperId}: ${error.message}`,
+          );
+          updateCellStatus(task.paperId, "error", error.message);
         }
       },
 
       onTaskSkip: async (task, reason) => {
-        Zotero.debug(`[seerai] Skipped PDF search for ${task.paperId}: ${reason}`);
-        updateCellStatus(task.paperId, 'skipped', reason);
+        Zotero.debug(
+          `[seerai] Skipped PDF search for ${task.paperId}: ${reason}`,
+        );
+        updateCellStatus(task.paperId, "skipped", reason);
 
         // Persist skip state
         if (currentTableConfig) {
-          if (!currentTableConfig.pdfDiscoveryData) currentTableConfig.pdfDiscoveryData = {};
+          if (!currentTableConfig.pdfDiscoveryData)
+            currentTableConfig.pdfDiscoveryData = {};
           currentTableConfig.pdfDiscoveryData[task.paperId] = {
-            status: 'error',
+            status: "error",
             discoveredAt: new Date().toISOString(),
           };
           const tableStore = getTableStore();
@@ -10365,15 +10812,27 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     });
 
     // Calculate final stats
-    const succeeded = results.filter(r => r.status === 'success' && r.result === true).length;
-    const failed = results.filter(r => r.status === 'failed').length;
-    const skipped = results.filter(r => r.status === 'skipped').length;
-    const notFound = results.filter(r => r.status === 'success' && r.result === false).length;
+    const succeeded = results.filter(
+      (r) => r.status === "success" && r.result === true,
+    ).length;
+    const failed = results.filter((r) => r.status === "failed").length;
+    const skipped = results.filter((r) => r.status === "skipped").length;
+    const notFound = results.filter(
+      (r) => r.status === "success" && r.result === false,
+    ).length;
 
-    Zotero.debug(`[seerai] PDF search complete: ${succeeded} found, ${notFound} not found, ${failed} failed, ${skipped} skipped`);
+    Zotero.debug(
+      `[seerai] PDF search complete: ${succeeded} found, ${notFound} not found, ${failed} failed, ${skipped} skipped`,
+    );
 
     // Update batch stats
-    pdfSearchBatchStats = { total: tasks.length, completed: tasks.length, succeeded, failed, skipped };
+    pdfSearchBatchStats = {
+      total: tasks.length,
+      completed: tasks.length,
+      succeeded,
+      failed,
+      skipped,
+    };
 
     // Clear batch active state (but keep individual states for a bit for UI restoration)
     pdfSearchBatchActive = false;
@@ -10386,14 +10845,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     }, 30000); // Keep states for 30 seconds
 
     // Restore button with summary
-    btn.innerText = `✓ ${succeeded}📄 ${failed + skipped > 0 ? `${failed}✗ ${skipped}⏭` : ''}`;
+    btn.innerText = `✓ ${succeeded}📄 ${failed + skipped > 0 ? `${failed}✗ ${skipped}⏭` : ""}`;
     (btn as HTMLButtonElement).disabled = false;
     btn.style.cursor = "pointer";
     setTimeout(() => {
       btn.innerText = originalBtnText;
     }, 4000);
   }
-
 
   /**
    * Helper: Search Semantic Scholar for a table item (fallback interaction)
@@ -10448,8 +10906,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           item.setField(
             "extra",
             currentExtra +
-            (currentExtra ? "\n" : "") +
-            `PMID: ${discoveredPmid}`,
+              (currentExtra ? "\n" : "") +
+              `PMID: ${discoveredPmid}`,
           );
           metadataUpdated = true;
           Zotero.debug(`[seerai] Updated item PMID: ${discoveredPmid}`);
@@ -10495,12 +10953,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         }
 
         // Step 2: Update table cell metadata and feedback
-        // We no longer trigger the full findAndAttachPdfForItem automatically here 
+        // We no longer trigger the full findAndAttachPdfForItem automatically here
         // because it's redundant if the batch search just finished and failed.
         if (!pdfAttached) {
           if (metadataUpdated) {
             btn.innerText = "✓ Metadata Updated";
-            btn.title = "Found new identifiers (DOI/PMID). Re-rendering row for better direct links...";
+            btn.title =
+              "Found new identifiers (DOI/PMID). Re-rendering row for better direct links...";
 
             // Re-render interface after a short delay to show updated buttons (Source-Link will now be better)
             setTimeout(() => {
@@ -10510,7 +10969,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             }, 1500);
           } else {
             btn.innerText = "🔍 No PDF";
-            btn.title = "Search finished: Metadata already correct, no OA PDF found on Semantic Scholar.";
+            btn.title =
+              "Search finished: Metadata already correct, no OA PDF found on Semantic Scholar.";
           }
         }
 
@@ -10737,11 +11197,11 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   public static async generateDataForTable(
     tableId: string,
     itemIds?: number[],
-    columnIds?: string[]
+    columnIds?: string[],
   ): Promise<{ generatedCount: number; errors: string[] }> {
     const tableStore = getTableStore();
     const allTables = await tableStore.getAllTables();
-    const table = allTables.find(t => t.id === tableId);
+    const table = allTables.find((t) => t.id === tableId);
 
     if (!table) {
       throw new Error(`Table ${tableId} not found`);
@@ -10756,14 +11216,16 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // Determine which columns to generate (AI columns only)
     const columnsToGenerate = columnIds
       ? table.columns.filter((c: TableColumn) => columnIds.includes(c.id))
-      : table.columns.filter((c: TableColumn) => c.type === 'computed' || c.aiPrompt);
+      : table.columns.filter(
+          (c: TableColumn) => c.type === "computed" || c.aiPrompt,
+        );
 
     if (columnsToGenerate.length === 0 || items.length === 0) {
       return { generatedCount: 0, errors: [] };
     }
 
     Zotero.debug(
-      `[seerai] generateDataForTable: ${items.length} items × ${columnsToGenerate.length} columns`
+      `[seerai] generateDataForTable: ${items.length} items × ${columnsToGenerate.length} columns`,
     );
 
     // Initialize generatedData if needed
@@ -10774,18 +11236,22 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // Get max concurrent from active model settings
     const activeConfig = getActiveModelConfig();
     let maxConcurrent = 5;
-    if (activeConfig?.rateLimit?.type === 'concurrency') {
+    if (activeConfig?.rateLimit?.type === "concurrency") {
       maxConcurrent = activeConfig.rateLimit.value;
-    } else if (activeConfig?.rateLimit?.type === 'rpm') {
+    } else if (activeConfig?.rateLimit?.type === "rpm") {
       maxConcurrent = Math.max(1, Math.min(10, activeConfig.rateLimit.value));
-    } else if (activeConfig?.rateLimit?.type === 'tpm') {
+    } else if (activeConfig?.rateLimit?.type === "tpm") {
       maxConcurrent = 10;
     }
-    const timeoutMs = (activeConfig?.rateLimit?.type === 'rpm' || activeConfig?.rateLimit?.type === 'tpm')
-      ? 300000 // 5 minutes if rate limited
-      : 60000;
+    const timeoutMs =
+      activeConfig?.rateLimit?.type === "rpm" ||
+      activeConfig?.rateLimit?.type === "tpm"
+        ? 300000 // 5 minutes if rate limited
+        : 60000;
 
-    Zotero.debug(`[seerai] Table generation max concurrent: ${maxConcurrent}, timeout: ${timeoutMs}ms`);
+    Zotero.debug(
+      `[seerai] Table generation max concurrent: ${maxConcurrent}, timeout: ${timeoutMs}ms`,
+    );
 
     // Build task list
     interface GenerationTask {
@@ -10827,10 +11293,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           if (att && att.attachmentContentType === "application/pdf") {
             try {
               if ((Zotero.Fulltext as any).getItemContent) {
-                const content = await (Zotero.Fulltext as any).getItemContent(att.id);
+                const content = await (Zotero.Fulltext as any).getItemContent(
+                  att.id,
+                );
                 noteContent = content?.content || "";
               } else if ((Zotero.Fulltext as any).getTextForItem) {
-                noteContent = await (Zotero.Fulltext as any).getTextForItem(att.id) || "";
+                noteContent =
+                  (await (Zotero.Fulltext as any).getTextForItem(att.id)) || "";
               }
               if (noteContent) break;
             } catch (e) {
@@ -10855,8 +11324,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           visible: true,
           sortable: false,
           resizable: true,
-          type: col.type || 'computed',
-          aiPrompt: col.aiPrompt
+          type: col.type || "computed",
+          aiPrompt: col.aiPrompt,
         };
         tasks.push({ paperId, col: tableCol, item, noteContent });
       }
@@ -10871,7 +11340,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         return await this.generateColumnContentFromText(
           task.item,
           task.col,
-          task.noteContent
+          task.noteContent,
         );
       },
       onTaskComplete: (task, content) => {
@@ -10879,7 +11348,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           table.generatedData![task.paperId]![task.col.id] = content;
           generatedCount++;
           Zotero.debug(
-            `[seerai] Generated: item=${task.paperId} col=${task.col.name} length=${content.length}`
+            `[seerai] Generated: item=${task.paperId} col=${task.col.name} length=${content.length}`,
           );
         }
       },
@@ -10888,9 +11357,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         if (!willRetry) {
           errors.push(errorMsg);
         }
-        Zotero.debug(
-          `[seerai] ${errorMsg}${willRetry ? " (will retry)" : ""}`
-        );
+        Zotero.debug(`[seerai] ${errorMsg}${willRetry ? " (will retry)" : ""}`);
       },
     });
 
@@ -10942,11 +11409,14 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     sourceText: string,
   ): Promise<string> {
     const paperTitle = (item.getField("title") as string) || "Untitled";
-    const effectiveMaxTokens = col.maxTokens ?? currentTableConfig?.responseLength;
+    const effectiveMaxTokens =
+      col.maxTokens ?? currentTableConfig?.responseLength;
 
     // Build a targeted prompt using column title and description
     const lengthInstruction =
-      (effectiveMaxTokens === 0 || effectiveMaxTokens === undefined) ? "" : `Be concise (max ${effectiveMaxTokens} words).`;
+      effectiveMaxTokens === 0 || effectiveMaxTokens === undefined
+        ? ""
+        : `Be concise (max ${effectiveMaxTokens} words).`;
 
     let columnPrompt = "";
     if (col.aiPrompt) {
@@ -10984,7 +11454,8 @@ Task: ${columnPrompt}`;
       apiURL: activeModel.apiURL,
       apiKey: activeModel.apiKey,
       model: activeModel.model,
-      temperature: col.temperature ?? currentTableConfig?.temperature ?? undefined,
+      temperature:
+        col.temperature ?? currentTableConfig?.temperature ?? undefined,
       max_tokens: effectiveMaxTokens,
     };
 
@@ -11003,7 +11474,7 @@ Task: ${columnPrompt}`;
           onToken: (token) => {
             fullResponse += token;
           },
-          onComplete: () => { },
+          onComplete: () => {},
           onError: (err) => {
             throw err;
           },
@@ -11098,7 +11569,8 @@ Task: ${columnPrompt}`;
         type: "function",
         function: {
           name: "generate_tags",
-          description: "Generate structured tags for an academic paper based on its content",
+          description:
+            "Generate structured tags for an academic paper based on its content",
           parameters: {
             type: "object",
             properties: {
@@ -11109,22 +11581,29 @@ Task: ${columnPrompt}`;
                   properties: {
                     name: {
                       type: "string",
-                      description: "A concise tag (1-3 words). Must be a topic, methodology, domain, or concept. Never use author names, locations, or partial sentences."
+                      description:
+                        "A concise tag (1-3 words). Must be a topic, methodology, domain, or concept. Never use author names, locations, or partial sentences.",
                     },
                     category: {
                       type: "string",
-                      enum: ["topic", "methodology", "domain", "concept", "application"],
-                      description: "The category of this tag"
-                    }
+                      enum: [
+                        "topic",
+                        "methodology",
+                        "domain",
+                        "concept",
+                        "application",
+                      ],
+                      description: "The category of this tag",
+                    },
                   },
-                  required: ["name", "category"]
+                  required: ["name", "category"],
                 },
-                description: "Array of 3-7 tags for the paper"
-              }
+                description: "Array of 3-7 tags for the paper",
+              },
             },
-            required: ["tags"]
-          }
-        }
+            required: ["tags"],
+          },
+        },
       };
 
       // Build prompts
@@ -11175,8 +11654,8 @@ Call the generate_tags function with an array of 3-7 high-quality tags.`;
       await openAIService.chatCompletionStream(
         messages,
         {
-          onToken: () => { },
-          onComplete: () => { },
+          onToken: () => {},
+          onComplete: () => {},
           onError: (err) => {
             throw err;
           },
@@ -11189,10 +11668,14 @@ Call the generate_tags function with an array of 3-7 high-quality tags.`;
                   if (args.tags && Array.isArray(args.tags)) {
                     generatedTags = args.tags
                       .map((t: { name: string }) => t.name?.trim())
-                      .filter((t: string) => t && t.length > 0 && t.length < 40);
+                      .filter(
+                        (t: string) => t && t.length > 0 && t.length < 40,
+                      );
                   }
                 } catch (e) {
-                  Zotero.debug(`[seerai] Error parsing tag function arguments: ${e}`);
+                  Zotero.debug(
+                    `[seerai] Error parsing tag function arguments: ${e}`,
+                  );
                 }
               }
             }
@@ -11203,7 +11686,9 @@ Call the generate_tags function with an array of 3-7 high-quality tags.`;
       );
 
       if (!functionCalled || generatedTags.length === 0) {
-        throw new Error("No valid tags generated - model did not call the function");
+        throw new Error(
+          "No valid tags generated - model did not call the function",
+        );
       }
 
       // Apply tags to item
@@ -11223,7 +11708,9 @@ Call the generate_tags function with an array of 3-7 high-quality tags.`;
         btn.title = "Generate AI tags for this paper";
       }, 3000);
 
-      Zotero.debug(`[seerai] Generated tags for item ${row.paperId}: ${generatedTags.join(", ")}`);
+      Zotero.debug(
+        `[seerai] Generated tags for item ${row.paperId}: ${generatedTags.join(", ")}`,
+      );
     } catch (err) {
       Zotero.debug(`[seerai] Error generating tags: ${err}`);
       btn.innerText = "❌";
@@ -11309,15 +11796,24 @@ Call the generate_tags function with an array of 3-7 high-quality tags.`;
                 type: "object",
                 properties: {
                   name: { type: "string" },
-                  category: { type: "string", enum: ["topic", "methodology", "domain", "concept", "application"] }
+                  category: {
+                    type: "string",
+                    enum: [
+                      "topic",
+                      "methodology",
+                      "domain",
+                      "concept",
+                      "application",
+                    ],
+                  },
                 },
-                required: ["name", "category"]
-              }
-            }
+                required: ["name", "category"],
+              },
+            },
           },
-          required: ["tags"]
-        }
-      }
+          required: ["tags"],
+        },
+      },
     };
 
     const systemPrompt = `You are a research librarian tagging academic papers. Generate 3-7 precise tags.
@@ -11340,9 +11836,11 @@ You MUST call the generate_tags function.`;
     await openAIService.chatCompletionStream(
       messages,
       {
-        onToken: () => { },
-        onComplete: () => { },
-        onError: (err) => { throw err; },
+        onToken: () => {},
+        onComplete: () => {},
+        onError: (err) => {
+          throw err;
+        },
         onToolCalls: (toolCalls) => {
           for (const tc of toolCalls) {
             if (tc.function.name === "generate_tags") {
@@ -11361,7 +11859,11 @@ You MUST call the generate_tags function.`;
           }
         },
       },
-      { apiURL: activeModel.apiURL, apiKey: activeModel.apiKey, model: activeModel.model },
+      {
+        apiURL: activeModel.apiURL,
+        apiKey: activeModel.apiKey,
+        model: activeModel.model,
+      },
       [tagGenerationTool],
     );
 
@@ -11375,7 +11877,9 @@ You MUST call the generate_tags function.`;
     item.addTag("Seerai-Tagged");
     await item.saveTx();
 
-    Zotero.debug(`[seerai] Generated tags for ${row.paperId}: ${generatedTags.join(", ")}`);
+    Zotero.debug(
+      `[seerai] Generated tags for ${row.paperId}: ${generatedTags.join(", ")}`,
+    );
   }
 
   /**
@@ -13385,7 +13889,7 @@ You MUST call the generate_tags function.`;
             type: "click",
             listener: (e: MouseEvent) => {
               const id = row.paperId;
-              let newSelection = new Set(tableData.selectedRowIds);
+              const newSelection = new Set(tableData.selectedRowIds);
 
               if (e.shiftKey && lastInteractedRowId) {
                 // Range selection
@@ -13481,7 +13985,7 @@ You MUST call the generate_tags function.`;
         e.stopPropagation();
 
         const id = row.paperId;
-        let newSelection = new Set(tableData.selectedRowIds);
+        const newSelection = new Set(tableData.selectedRowIds);
 
         if (e.shiftKey && lastInteractedRowId) {
           // Range selection
@@ -13653,23 +14157,29 @@ You MUST call the generate_tags function.`;
               const activeSearch = activePdfSearches.get(row.paperId);
               if (activeSearch) {
                 switch (activeSearch.status) {
-                  case 'queued':
-                  case 'searching':
+                  case "queued":
+                  case "searching":
                     td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">🔍 Searching...</span>`;
                     break;
-                  case 'retrying':
+                  case "retrying":
                     td.innerHTML = `<span style="color: #f57c00; font-size: 11px;">↻ Retrying...</span>`;
                     break;
-                  case 'found':
+                  case "found":
                     td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">📄 Process PDF</span>`;
                     break;
-                  case 'notfound': {
+                  case "notfound": {
                     // Show source link if we can resolve one
                     const doi = itemForIndicator?.getField("DOI") as string;
                     const arxiv = extractArxivFromItem(itemForIndicator);
                     const pmid = extractPmidFromItem(itemForIndicator);
                     const itemUrl = itemForIndicator?.getField("url") as string;
-                    const sourceLink = getSourceLinkForPaper(doi, arxiv, pmid, undefined, itemUrl);
+                    const sourceLink = getSourceLinkForPaper(
+                      doi,
+                      arxiv,
+                      pmid,
+                      undefined,
+                      itemUrl,
+                    );
                     if (sourceLink) {
                       td.innerHTML = `<span class="source-link-btn" data-url="${sourceLink}" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔗 Source Link</span>`;
                     } else {
@@ -13677,22 +14187,26 @@ You MUST call the generate_tags function.`;
                     }
                     break;
                   }
-                  case 'skipped':
-                    td.innerHTML = `<span style="color: #f57c00; font-size: 11px;">⏭ ${activeSearch.message || 'Skipped'}</span>`;
+                  case "skipped":
+                    td.innerHTML = `<span style="color: #f57c00; font-size: 11px;">⏭ ${activeSearch.message || "Skipped"}</span>`;
                     break;
-                  case 'error':
-                    td.innerHTML = `<span style="color: #c62828; font-size: 11px;">✗ ${activeSearch.message || 'Error'}</span>`;
+                  case "error":
+                    td.innerHTML = `<span style="color: #c62828; font-size: 11px;">✗ ${activeSearch.message || "Error"}</span>`;
                     break;
                 }
               } else {
                 // Check for persisted PDF discovery result
-                const persistedDiscovery = currentTableConfig?.pdfDiscoveryData?.[row.paperId];
+                const persistedDiscovery =
+                  currentTableConfig?.pdfDiscoveryData?.[row.paperId];
                 if (persistedDiscovery) {
-                  if (persistedDiscovery.status === 'found') {
+                  if (persistedDiscovery.status === "found") {
                     td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">📄 Process PDF</span>`;
-                  } else if (persistedDiscovery.status === 'source_link' && persistedDiscovery.sourceUrl) {
+                  } else if (
+                    persistedDiscovery.status === "source_link" &&
+                    persistedDiscovery.sourceUrl
+                  ) {
                     td.innerHTML = `<span class="source-link-btn" data-url="${persistedDiscovery.sourceUrl}" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔗 Source-Link</span>`;
-                  } else if (persistedDiscovery.status === 'not_found') {
+                  } else if (persistedDiscovery.status === "not_found") {
                     td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">❌ Not found</span>`;
                   } else {
                     td.innerHTML = `<span class="search-pdf-btn" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔍 Search PDF</span>`;
@@ -13887,9 +14401,10 @@ You MUST call the generate_tags function.`;
                   td.style.cursor = "pointer";
                   // Persist the discovery result
                   if (currentTableConfig) {
-                    if (!currentTableConfig.pdfDiscoveryData) currentTableConfig.pdfDiscoveryData = {};
+                    if (!currentTableConfig.pdfDiscoveryData)
+                      currentTableConfig.pdfDiscoveryData = {};
                     currentTableConfig.pdfDiscoveryData[row.paperId] = {
-                      status: 'found',
+                      status: "found",
                       discoveredAt: new Date().toISOString(),
                     };
                     const tableStore = getTableStore();
@@ -13914,9 +14429,10 @@ You MUST call the generate_tags function.`;
                     td.style.cursor = "pointer";
                     // Persist the source link discovery result
                     if (currentTableConfig) {
-                      if (!currentTableConfig.pdfDiscoveryData) currentTableConfig.pdfDiscoveryData = {};
+                      if (!currentTableConfig.pdfDiscoveryData)
+                        currentTableConfig.pdfDiscoveryData = {};
                       currentTableConfig.pdfDiscoveryData[row.paperId] = {
-                        status: 'source_link',
+                        status: "source_link",
                         sourceUrl: sourceLink,
                         discoveredAt: new Date().toISOString(),
                       };
@@ -13928,9 +14444,10 @@ You MUST call the generate_tags function.`;
                     td.style.cursor = "pointer";
                     // Persist the not-found result
                     if (currentTableConfig) {
-                      if (!currentTableConfig.pdfDiscoveryData) currentTableConfig.pdfDiscoveryData = {};
+                      if (!currentTableConfig.pdfDiscoveryData)
+                        currentTableConfig.pdfDiscoveryData = {};
                       currentTableConfig.pdfDiscoveryData[row.paperId] = {
-                        status: 'not_found',
+                        status: "not_found",
                         discoveredAt: new Date().toISOString(),
                       };
                       const tableStore = getTableStore();
@@ -13943,9 +14460,10 @@ You MUST call the generate_tags function.`;
                 td.style.cursor = "pointer";
                 // Persist the error result
                 if (currentTableConfig) {
-                  if (!currentTableConfig.pdfDiscoveryData) currentTableConfig.pdfDiscoveryData = {};
+                  if (!currentTableConfig.pdfDiscoveryData)
+                    currentTableConfig.pdfDiscoveryData = {};
                   currentTableConfig.pdfDiscoveryData[row.paperId] = {
-                    status: 'error',
+                    status: "error",
                     discoveredAt: new Date().toISOString(),
                   };
                   const tableStore = getTableStore();
@@ -13980,7 +14498,8 @@ You MUST call the generate_tags function.`;
                 td.style.cursor = "wait";
 
                 // Create a new note with the paper title as the note title
-                const paperTitle = (item.getField("title") as string) || "Untitled";
+                const paperTitle =
+                  (item.getField("title") as string) || "Untitled";
                 const note = new Zotero.Item("note");
                 note.libraryID = item.libraryID;
                 note.parentID = item.id;
@@ -14186,7 +14705,9 @@ You MUST call the generate_tags function.`;
             type: "click",
             listener: async (e: Event) => {
               e.stopPropagation();
-              const btn = (e.target as HTMLElement).closest("button") as HTMLElement;
+              const btn = (e.target as HTMLElement).closest(
+                "button",
+              ) as HTMLElement;
               if (!btn) return;
 
               if (btn.dataset.confirmBomb !== "true") {
@@ -14263,7 +14784,9 @@ You MUST call the generate_tags function.`;
             type: "click",
             listener: async (e: Event) => {
               e.stopPropagation();
-              const btn = (e.target as HTMLElement).closest("button") as HTMLElement;
+              const btn = (e.target as HTMLElement).closest(
+                "button",
+              ) as HTMLElement;
               if (!btn) return;
 
               // Confirm removal with visual feedback
@@ -14378,7 +14901,6 @@ You MUST call the generate_tags function.`;
     await this.forceRefreshTable();
   }
 
-
   /**
    * Force an immediate table refresh with proper container validation.
    * Use this for user-initiated actions that need immediate feedback.
@@ -14398,10 +14920,14 @@ You MUST call the generate_tags function.`;
 
     // Strategy 1: Look in currentContainer
     if (currentContainer && currentContainer.isConnected) {
-      tableWrapper = currentContainer.querySelector(".table-wrapper") as HTMLElement;
+      tableWrapper = currentContainer.querySelector(
+        ".table-wrapper",
+      ) as HTMLElement;
       if (tableWrapper) {
         doc = currentContainer.ownerDocument;
-        Zotero.debug("[seerai] forceRefreshTable: Found table wrapper in currentContainer");
+        Zotero.debug(
+          "[seerai] forceRefreshTable: Found table wrapper in currentContainer",
+        );
       }
     }
 
@@ -14409,10 +14935,14 @@ You MUST call the generate_tags function.`;
     if (!tableWrapper) {
       const windows = Zotero.getMainWindows();
       for (const win of windows) {
-        tableWrapper = win.document.querySelector(".table-wrapper") as HTMLElement;
+        tableWrapper = win.document.querySelector(
+          ".table-wrapper",
+        ) as HTMLElement;
         if (tableWrapper && tableWrapper.isConnected) {
           doc = win.document;
-          Zotero.debug("[seerai] forceRefreshTable: Found table wrapper in main window");
+          Zotero.debug(
+            "[seerai] forceRefreshTable: Found table wrapper in main window",
+          );
           break;
         }
       }
@@ -14420,19 +14950,24 @@ You MUST call the generate_tags function.`;
 
     // Strategy 3: Use document.querySelectorAll to find any table wrapper
     if (!tableWrapper && currentContainer?.ownerDocument) {
-      const allWrappers = currentContainer.ownerDocument.querySelectorAll(".table-wrapper");
+      const allWrappers =
+        currentContainer.ownerDocument.querySelectorAll(".table-wrapper");
       for (const wrapper of allWrappers) {
         if ((wrapper as HTMLElement).isConnected) {
           tableWrapper = wrapper as HTMLElement;
           doc = currentContainer.ownerDocument;
-          Zotero.debug("[seerai] forceRefreshTable: Found table wrapper via querySelectorAll");
+          Zotero.debug(
+            "[seerai] forceRefreshTable: Found table wrapper via querySelectorAll",
+          );
           break;
         }
       }
     }
 
     if (!tableWrapper || !tableWrapper.isConnected || !doc) {
-      Zotero.debug("[seerai] forceRefreshTable: No table wrapper found, falling back to full refresh");
+      Zotero.debug(
+        "[seerai] forceRefreshTable: No table wrapper found, falling back to full refresh",
+      );
       // Fallback to full refresh
       if (currentContainer && currentContainer.isConnected) {
         this.lastRenderedTab = "";
@@ -14446,11 +14981,15 @@ You MUST call the generate_tags function.`;
     // Save scroll position
     const scrollTop = tableWrapper.scrollTop;
     const scrollLeft = tableWrapper.scrollLeft;
-    Zotero.debug(`[seerai] forceRefreshTable: Preserving scroll (${scrollTop}, ${scrollLeft})`);
+    Zotero.debug(
+      `[seerai] forceRefreshTable: Preserving scroll (${scrollTop}, ${scrollLeft})`,
+    );
 
     // Reload table data and rebuild just the table
     const tableData = await this.loadTableData();
-    Zotero.debug(`[seerai] forceRefreshTable: Loaded ${tableData.rows.length} rows, page ${tableData.currentPage}/${tableData.totalPages}`);
+    Zotero.debug(
+      `[seerai] forceRefreshTable: Loaded ${tableData.rows.length} rows, page ${tableData.currentPage}/${tableData.totalPages}`,
+    );
 
     tableWrapper.innerHTML = "";
 
@@ -14475,13 +15014,18 @@ You MUST call the generate_tags function.`;
    */
   private static updatePaginationUI(doc: Document, tableData: TableData): void {
     // Try to find elements within currentContainer first for better reliability
-    const root: ParentNode = (currentContainer && currentContainer.isConnected) ? currentContainer : doc;
+    const root: ParentNode =
+      currentContainer && currentContainer.isConnected ? currentContainer : doc;
 
     // Update page indicator using ID
-    const pageIndicator = root.querySelector("#table-page-indicator") as HTMLElement;
+    const pageIndicator = root.querySelector(
+      "#table-page-indicator",
+    ) as HTMLElement;
     if (pageIndicator) {
       pageIndicator.innerText = `${tableData.currentPage} / ${tableData.totalPages}`;
-      Zotero.debug(`[seerai] updatePaginationUI: Updated to ${tableData.currentPage}/${tableData.totalPages}`);
+      Zotero.debug(
+        `[seerai] updatePaginationUI: Updated to ${tableData.currentPage}/${tableData.totalPages}`,
+      );
     } else {
       Zotero.debug("[seerai] updatePaginationUI: Page indicator not found");
     }
@@ -14490,7 +15034,7 @@ You MUST call the generate_tags function.`;
     const paginationContainer = root.querySelector(".pagination-container");
     if (paginationContainer) {
       const buttons = paginationContainer.querySelectorAll("button");
-      // First button is prev, last button is next  
+      // First button is prev, last button is next
       const prevBtn = buttons[0] as HTMLButtonElement;
       const nextBtn = buttons[buttons.length - 1] as HTMLButtonElement;
 
@@ -14500,7 +15044,8 @@ You MUST call the generate_tags function.`;
       }
       if (nextBtn) {
         nextBtn.disabled = tableData.currentPage >= tableData.totalPages;
-        nextBtn.style.opacity = tableData.currentPage >= tableData.totalPages ? "0.5" : "1";
+        nextBtn.style.opacity =
+          tableData.currentPage >= tableData.totalPages ? "0.5" : "1";
       }
     }
   }
@@ -14537,8 +15082,8 @@ You MUST call the generate_tags function.`;
       const filterQuery = rawFilterQuery
         .toLowerCase()
         .trim()
-        .replace(/^["']+|["']+$/g, '')  // Remove leading/trailing quotes
-        .replace(/[""'']/g, '');         // Remove any curly/smart quotes
+        .replace(/^["']+|["']+$/g, "") // Remove leading/trailing quotes
+        .replace(/[""'']/g, ""); // Remove any curly/smart quotes
 
       // STEP 1: Build ALL rows first (without filtering)
       const allRows: TableRow[] = [];
@@ -14563,7 +15108,9 @@ You MUST call the generate_tags function.`;
         // (JSON serialization converts number keys to strings)
         const persistedData =
           generatedDataMap[item.id] ||
-          (generatedDataMap as Record<string, { [columnId: string]: string }>)[String(item.id)] ||
+          (generatedDataMap as Record<string, { [columnId: string]: string }>)[
+            String(item.id)
+          ] ||
           {};
 
         // Get note count for sources column
@@ -14591,17 +15138,20 @@ You MUST call the generate_tags function.`;
       let filteredRows: TableRow[];
 
       if (filterQuery) {
-        Zotero.debug(`[seerai:search] Starting search for: "${filterQuery}" across ${allRows.length} rows`);
+        Zotero.debug(
+          `[seerai:search] Starting search for: "${filterQuery}" across ${allRows.length} rows`,
+        );
 
         filteredRows = allRows.filter((row) => {
           // Identify all search targets (column values)
-          const rawSearchTargets = Object.values(row.data).map(v => String(v || ""));
+          const rawSearchTargets = Object.values(row.data).map((v) =>
+            String(v || ""),
+          );
 
           // Strip markdown from targets to allow clean phrase matching
           // e.g. "**Verdict:** no" -> "Verdict: no"
-          const stripMarkdown = (t: string) => t
-            .replace(/[*_~`]/g, '')
-            .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+          const stripMarkdown = (t: string) =>
+            t.replace(/[*_~`]/g, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
 
           const cleanSearchTargets = rawSearchTargets.map(stripMarkdown);
 
@@ -14609,7 +15159,10 @@ You MUST call the generate_tags function.`;
           // We search against the CLEAN (stripped) text to match user intent
           // We also search against RAW text to support searching for markdown symbols if needed
           // But prioritizing clean text ensures "Verdict: no" matches "**Verdict:** no" correctly
-          const { matches } = advancedSearch(filterQuery, [...cleanSearchTargets, ...rawSearchTargets]);
+          const { matches } = advancedSearch(filterQuery, [
+            ...cleanSearchTargets,
+            ...rawSearchTargets,
+          ]);
           if (matches) return true;
 
           // Fallback: Try markdown-stripped match for phrase search if advancedSearch didn't match
@@ -14625,7 +15178,9 @@ You MUST call the generate_tags function.`;
           return stripMarkdown(rawBlob).includes(stripMarkdown(target));
         });
 
-        Zotero.debug(`[seerai:search] Result: ${filteredRows.length}/${allRows.length} rows match "${filterQuery}"`);
+        Zotero.debug(
+          `[seerai:search] Result: ${filteredRows.length}/${allRows.length} rows match "${filterQuery}"`,
+        );
       } else {
         filteredRows = allRows;
       }
@@ -15141,42 +15696,89 @@ You MUST call the generate_tags function.`;
         backgroundColor: "var(--background-secondary)",
         border: "1px solid var(--border-secondary)",
         borderRadius: "6px",
-        marginTop: "4px"
-      }
+        marginTop: "4px",
+      },
     });
 
     const managerAiParamsTitle = ztoolkit.UI.createElement(doc, "div", {
       properties: { innerText: "AI Parameters" },
-      styles: { fontSize: "10px", fontWeight: "700", color: "var(--highlight-primary)", marginBottom: "-2px", textTransform: "uppercase" }
+      styles: {
+        fontSize: "10px",
+        fontWeight: "700",
+        color: "var(--highlight-primary)",
+        marginBottom: "-2px",
+        textTransform: "uppercase",
+      },
     });
     managerAiParams.appendChild(managerAiParamsTitle);
 
     // Temp
     const managerTempHeader = ztoolkit.UI.createElement(doc, "div", {
-      styles: { display: "flex", justifyContent: "space-between", fontSize: "10px", fontWeight: "600", color: "var(--text-secondary)" }
+      styles: {
+        display: "flex",
+        justifyContent: "space-between",
+        fontSize: "10px",
+        fontWeight: "600",
+        color: "var(--text-secondary)",
+      },
     });
-    const managerTempLabelText = (val: number) => `Temp: Default (${val.toFixed(1)})`;
-    const managerTempLabel = ztoolkit.UI.createElement(doc, "span", { properties: { innerText: managerTempLabelText(getEffectiveTableTemp()) } });
+    const managerTempLabelText = (val: number) =>
+      `Temp: Default (${val.toFixed(1)})`;
+    const managerTempLabel = ztoolkit.UI.createElement(doc, "span", {
+      properties: { innerText: managerTempLabelText(getEffectiveTableTemp()) },
+    });
     managerTempHeader.appendChild(managerTempLabel);
     managerAiParams.appendChild(managerTempHeader);
 
     const managerTempSlider = ztoolkit.UI.createElement(doc, "input", {
-      attributes: { type: "range", min: "0", max: "2", step: "0.1", value: String(getEffectiveTableTemp()) },
-      styles: { width: "100%", cursor: "pointer", height: "14px" }
+      attributes: {
+        type: "range",
+        min: "0",
+        max: "2",
+        step: "0.1",
+        value: String(getEffectiveTableTemp()),
+      },
+      styles: { width: "100%", cursor: "pointer", height: "14px" },
     }) as HTMLInputElement;
     managerTempSlider.addEventListener("input", () => {
-      managerTempLabel.innerText = managerTempLabelText(parseFloat(managerTempSlider.value));
+      managerTempLabel.innerText = managerTempLabelText(
+        parseFloat(managerTempSlider.value),
+      );
     });
     managerAiParams.appendChild(managerTempSlider);
 
     // Max Len
     const managerMaxLenRow = ztoolkit.UI.createElement(doc, "div", {
-      styles: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "10px", fontWeight: "600", color: "var(--text-secondary)", marginTop: "2px" }
+      styles: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        fontSize: "10px",
+        fontWeight: "600",
+        color: "var(--text-secondary)",
+        marginTop: "2px",
+      },
     });
-    managerMaxLenRow.appendChild(ztoolkit.UI.createElement(doc, "span", { properties: { innerText: "Max Resp. Length:" } }));
+    managerMaxLenRow.appendChild(
+      ztoolkit.UI.createElement(doc, "span", {
+        properties: { innerText: "Max Resp. Length:" },
+      }),
+    );
     const managerMaxLenInput = ztoolkit.UI.createElement(doc, "input", {
-      attributes: { type: "number", min: "1", placeholder: getMaxLenPlaceholder() },
-      styles: { width: "60px", padding: "2px 4px", fontSize: "10px", border: "1px solid var(--border-primary)", borderRadius: "4px", backgroundColor: "var(--background-primary)", color: "var(--text-primary)" }
+      attributes: {
+        type: "number",
+        min: "1",
+        placeholder: getMaxLenPlaceholder(),
+      },
+      styles: {
+        width: "60px",
+        padding: "2px 4px",
+        fontSize: "10px",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "4px",
+        backgroundColor: "var(--background-primary)",
+        color: "var(--text-primary)",
+      },
     }) as HTMLInputElement;
     managerMaxLenRow.appendChild(managerMaxLenInput);
     managerAiParams.appendChild(managerMaxLenRow);
@@ -15218,8 +15820,13 @@ You MUST call the generate_tags function.`;
                 aiPrompt:
                   aiPrompt ||
                   `Extract information related to "${name}" from this paper.`,
-                temperature: customTemp !== getEffectiveTableTemp() ? customTemp : undefined,
-                maxTokens: !isNaN(customMaxTokens) ? customMaxTokens : undefined,
+                temperature:
+                  customTemp !== getEffectiveTableTemp()
+                    ? customTemp
+                    : undefined,
+                maxTokens: !isNaN(customMaxTokens)
+                  ? customMaxTokens
+                  : undefined,
               };
               currentTableConfig.columns.push(newColumn);
               const tableStore = getTableStore();
@@ -15422,28 +16029,50 @@ You MUST call the generate_tags function.`;
         backgroundColor: "rgba(0,0,0,0.03)",
         border: "1px solid var(--border-secondary)",
         borderRadius: "6px",
-        marginTop: "6px"
-      }
+        marginTop: "6px",
+      },
     });
 
     const aiParamsTitle = ztoolkit.UI.createElement(doc, "div", {
       properties: { innerText: "AI Parameters" },
-      styles: { fontSize: "10px", fontWeight: "800", color: "var(--highlight-primary)", marginBottom: "2px", textTransform: "uppercase", borderBottom: "1px solid rgba(128,128,128,0.1)", paddingBottom: "2px" }
+      styles: {
+        fontSize: "10px",
+        fontWeight: "800",
+        color: "var(--highlight-primary)",
+        marginBottom: "2px",
+        textTransform: "uppercase",
+        borderBottom: "1px solid rgba(128,128,128,0.1)",
+        paddingBottom: "2px",
+      },
     });
     aiParamsContainer.appendChild(aiParamsTitle);
 
     // Temperature Slider
     const tempHeader = ztoolkit.UI.createElement(doc, "div", {
-      styles: { display: "flex", justifyContent: "space-between", fontSize: "10px", fontWeight: "600", color: "var(--text-secondary)" }
+      styles: {
+        display: "flex",
+        justifyContent: "space-between",
+        fontSize: "10px",
+        fontWeight: "600",
+        color: "var(--text-secondary)",
+      },
     });
     const tempLabelText = (val: number) => `Temp: Default (${val.toFixed(1)})`;
-    const tempLabel = ztoolkit.UI.createElement(doc, "span", { properties: { innerText: tempLabelText(getEffectiveTableTemp()) } });
+    const tempLabel = ztoolkit.UI.createElement(doc, "span", {
+      properties: { innerText: tempLabelText(getEffectiveTableTemp()) },
+    });
     tempHeader.appendChild(tempLabel);
     aiParamsContainer.appendChild(tempHeader);
 
     const tempSlider = ztoolkit.UI.createElement(doc, "input", {
-      attributes: { type: "range", min: "0", max: "2", step: "0.1", value: String(getEffectiveTableTemp()) },
-      styles: { width: "100%", cursor: "pointer", height: "14px" }
+      attributes: {
+        type: "range",
+        min: "0",
+        max: "2",
+        step: "0.1",
+        value: String(getEffectiveTableTemp()),
+      },
+      styles: { width: "100%", cursor: "pointer", height: "14px" },
     }) as HTMLInputElement;
     tempSlider.addEventListener("input", () => {
       tempLabel.innerText = tempLabelText(parseFloat(tempSlider.value));
@@ -15452,12 +16081,36 @@ You MUST call the generate_tags function.`;
 
     // Max Length Input
     const maxLenRow = ztoolkit.UI.createElement(doc, "div", {
-      styles: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "10px", fontWeight: "600", color: "var(--text-secondary)", marginTop: "4px" }
+      styles: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        fontSize: "10px",
+        fontWeight: "600",
+        color: "var(--text-secondary)",
+        marginTop: "4px",
+      },
     });
-    maxLenRow.appendChild(ztoolkit.UI.createElement(doc, "span", { properties: { innerText: "Max Response Length:" } }));
+    maxLenRow.appendChild(
+      ztoolkit.UI.createElement(doc, "span", {
+        properties: { innerText: "Max Response Length:" },
+      }),
+    );
     const maxLenInput = ztoolkit.UI.createElement(doc, "input", {
-      attributes: { type: "number", min: "1", placeholder: getMaxLenPlaceholder() },
-      styles: { width: "60px", padding: "2px 4px", fontSize: "10px", border: "1px solid var(--border-primary)", borderRadius: "4px", backgroundColor: "var(--background-primary)", color: "var(--text-primary)" }
+      attributes: {
+        type: "number",
+        min: "1",
+        placeholder: getMaxLenPlaceholder(),
+      },
+      styles: {
+        width: "60px",
+        padding: "2px 4px",
+        fontSize: "10px",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "4px",
+        backgroundColor: "var(--background-primary)",
+        color: "var(--text-primary)",
+      },
     }) as HTMLInputElement;
     maxLenRow.appendChild(maxLenInput);
     aiParamsContainer.appendChild(maxLenRow);
@@ -15477,7 +16130,7 @@ You MUST call the generate_tags function.`;
         fontWeight: "600",
         fontSize: "12px",
         width: "100%",
-        marginTop: "4px"
+        marginTop: "4px",
       },
       listeners: [
         {
@@ -15506,8 +16159,13 @@ You MUST call the generate_tags function.`;
                 aiPrompt:
                   aiPrompt ||
                   `Extract information related to "${name}" from this paper.`,
-                temperature: customTemp !== getEffectiveTableTemp() ? customTemp : undefined,
-                maxTokens: !isNaN(customMaxTokens) ? customMaxTokens : undefined,
+                temperature:
+                  customTemp !== getEffectiveTableTemp()
+                    ? customTemp
+                    : undefined,
+                maxTokens: !isNaN(customMaxTokens)
+                  ? customMaxTokens
+                  : undefined,
               };
               currentTableConfig.columns.push(newColumn);
               const tableStore = getTableStore();
@@ -15787,7 +16445,7 @@ You MUST call the generate_tags function.`;
         border: "1px solid var(--border-secondary)",
         borderRadius: "8px",
         marginTop: "10px",
-      }
+      },
     });
 
     const paramTitle = ztoolkit.UI.createElement(doc, "div", {
@@ -15800,18 +16458,24 @@ You MUST call the generate_tags function.`;
         textTransform: "uppercase",
         letterSpacing: "0.8px",
         borderBottom: "1px solid rgba(128,128,128,0.2)",
-        paddingBottom: "4px"
-      }
+        paddingBottom: "4px",
+      },
     });
     paramContainer.appendChild(paramTitle);
 
     // Temperature
     const tempRow = ztoolkit.UI.createElement(doc, "div", {
-      styles: { display: "flex", flexDirection: "column", gap: "4px" }
+      styles: { display: "flex", flexDirection: "column", gap: "4px" },
     });
 
     const tempHeader = ztoolkit.UI.createElement(doc, "div", {
-      styles: { display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "600", color: "var(--text-secondary)" }
+      styles: {
+        display: "flex",
+        justifyContent: "space-between",
+        fontSize: "11px",
+        fontWeight: "600",
+        color: "var(--text-secondary)",
+      },
     });
     const getEffectiveTableTemp = () => currentTableConfig?.temperature ?? 0.7;
     const getTempDisplayText = (val?: number) => {
@@ -15821,18 +16485,32 @@ You MUST call the generate_tags function.`;
       return "Default (0.7)";
     };
 
-    const tempLabel = ztoolkit.UI.createElement(doc, "span", { properties: { innerText: `Temperature: ${getTempDisplayText(column.temperature)}` } });
+    const tempLabel = ztoolkit.UI.createElement(doc, "span", {
+      properties: {
+        innerText: `Temperature: ${getTempDisplayText(column.temperature)}`,
+      },
+    });
     const tempResetBtn = ztoolkit.UI.createElement(doc, "span", {
       properties: { innerText: "↺", title: "Reset to Default" },
-      styles: { cursor: "pointer", display: column.temperature === undefined ? "none" : "inline-block", marginLeft: "6px" }
+      styles: {
+        cursor: "pointer",
+        display: column.temperature === undefined ? "none" : "inline-block",
+        marginLeft: "6px",
+      },
     });
     tempHeader.appendChild(tempLabel);
     tempHeader.appendChild(tempResetBtn);
     tempRow.appendChild(tempHeader);
 
     const tempSlider = ztoolkit.UI.createElement(doc, "input", {
-      attributes: { type: "range", min: "0", max: "2", step: "0.1", value: String(column.temperature ?? getEffectiveTableTemp()) },
-      styles: { width: "100%", cursor: "pointer" }
+      attributes: {
+        type: "range",
+        min: "0",
+        max: "2",
+        step: "0.1",
+        value: String(column.temperature ?? getEffectiveTableTemp()),
+      },
+      styles: { width: "100%", cursor: "pointer" },
     }) as HTMLInputElement;
     tempRow.appendChild(tempSlider);
     paramContainer.appendChild(tempRow);
@@ -15855,7 +16533,7 @@ You MUST call the generate_tags function.`;
 
     // Max Response Length Slider
     const maxLengthRow = ztoolkit.UI.createElement(doc, "div", {
-      styles: { display: "flex", flexDirection: "column", gap: "4px" }
+      styles: { display: "flex", flexDirection: "column", gap: "4px" },
     });
 
     const getMaxLenDisplayText = (val?: number) => {
@@ -15870,12 +16548,26 @@ You MUST call the generate_tags function.`;
     };
 
     const maxLenHeader = ztoolkit.UI.createElement(doc, "div", {
-      styles: { display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "600", color: "var(--text-secondary)" }
+      styles: {
+        display: "flex",
+        justifyContent: "space-between",
+        fontSize: "11px",
+        fontWeight: "600",
+        color: "var(--text-secondary)",
+      },
     });
-    const maxLenLabel = ztoolkit.UI.createElement(doc, "span", { properties: { innerText: `Max Length: ${getMaxLenDisplayText(column.maxTokens)}` } });
+    const maxLenLabel = ztoolkit.UI.createElement(doc, "span", {
+      properties: {
+        innerText: `Max Length: ${getMaxLenDisplayText(column.maxTokens)}`,
+      },
+    });
     const maxLenResetBtn = ztoolkit.UI.createElement(doc, "span", {
       properties: { innerText: "↺", title: "Reset to Default" },
-      styles: { cursor: "pointer", display: column.maxTokens === undefined ? "none" : "inline-block", marginLeft: "6px" }
+      styles: {
+        cursor: "pointer",
+        display: column.maxTokens === undefined ? "none" : "inline-block",
+        marginLeft: "6px",
+      },
     });
     maxLenHeader.appendChild(maxLenLabel);
     maxLenHeader.appendChild(maxLenResetBtn);
@@ -15884,8 +16576,14 @@ You MUST call the generate_tags function.`;
     const getEffectiveMaxLen = () => currentTableConfig?.responseLength ?? 100;
 
     const maxLenSlider = ztoolkit.UI.createElement(doc, "input", {
-      attributes: { type: "range", min: "0", max: "2000", step: "10", value: String(column.maxTokens ?? getEffectiveMaxLen()) },
-      styles: { width: "100%", cursor: "pointer" }
+      attributes: {
+        type: "range",
+        min: "0",
+        max: "2000",
+        step: "10",
+        value: String(column.maxTokens ?? getEffectiveMaxLen()),
+      },
+      styles: { width: "100%", cursor: "pointer" },
     }) as HTMLInputElement;
     maxLengthRow.appendChild(maxLenSlider);
     paramContainer.appendChild(maxLengthRow);
@@ -17208,7 +17906,7 @@ You MUST call the generate_tags function.`;
         try {
           const raw = Zotero.Prefs.get("extensions.seer-ai.search.presets");
           if (raw) savedPresets = JSON.parse(raw as string);
-        } catch (e) { }
+        } catch (e) {}
 
         savedPresets[name.trim()] = searchColumnConfig.columns;
         Zotero.Prefs.set(
@@ -17409,12 +18107,18 @@ You MUST call the generate_tags function.`;
     };
 
     const lenLabel = ztoolkit.UI.createElement(doc, "div", {
-      properties: { innerText: `Max Response Length: ${getLenText(currentLen)}` },
+      properties: {
+        innerText: `Max Response Length: ${getLenText(currentLen)}`,
+      },
       styles: { fontSize: "12px", fontWeight: "600" },
     });
 
     const lenHeader = ztoolkit.UI.createElement(doc, "div", {
-      styles: { display: "flex", justifyContent: "space-between", alignItems: "center" }
+      styles: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+      },
     });
     lenHeader.appendChild(lenLabel);
 
@@ -17424,8 +18128,8 @@ You MUST call the generate_tags function.`;
         fontSize: "14px",
         cursor: "pointer",
         color: "var(--text-tertiary, #999)",
-        display: currentLen === undefined ? "none" : "inline-block"
-      }
+        display: currentLen === undefined ? "none" : "inline-block",
+      },
     });
     lenHeader.appendChild(lenResetBtn);
     lengthSection.appendChild(lenHeader);
@@ -17434,7 +18138,8 @@ You MUST call the generate_tags function.`;
       styles: { display: "flex", alignItems: "center", gap: "10px" },
     });
 
-    const sliderValue = (currentLen === undefined || currentLen === 0) ? 4200 : currentLen;
+    const sliderValue =
+      currentLen === undefined || currentLen === 0 ? 4200 : currentLen;
     const lengthSlider = ztoolkit.UI.createElement(doc, "input", {
       attributes: {
         type: "range",
@@ -17473,11 +18178,17 @@ You MUST call the generate_tags function.`;
 
     // === Temperature ===
     const tempSection = ztoolkit.UI.createElement(doc, "div", {
-      styles: { display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" },
+      styles: {
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+        marginTop: "4px",
+      },
     });
 
     const currentTemp = currentTableConfig?.temperature;
-    const getTempText = (t?: number) => t === undefined ? "Default" : t.toFixed(1);
+    const getTempText = (t?: number) =>
+      t === undefined ? "Default" : t.toFixed(1);
 
     const tempLabel = ztoolkit.UI.createElement(doc, "div", {
       properties: { innerText: `Temperature: ${getTempText(currentTemp)}` },
@@ -17485,7 +18196,11 @@ You MUST call the generate_tags function.`;
     });
 
     const tempHeader = ztoolkit.UI.createElement(doc, "div", {
-      styles: { display: "flex", justifyContent: "space-between", alignItems: "center" }
+      styles: {
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+      },
     });
     tempHeader.appendChild(tempLabel);
 
@@ -17495,8 +18210,8 @@ You MUST call the generate_tags function.`;
         fontSize: "14px",
         cursor: "pointer",
         color: "var(--text-tertiary, #999)",
-        display: currentTemp === undefined ? "none" : "inline-block"
-      }
+        display: currentTemp === undefined ? "none" : "inline-block",
+      },
     });
     tempHeader.appendChild(tempResetBtn);
     tempSection.appendChild(tempHeader);
@@ -18165,7 +18880,7 @@ ${lengthConstraint}`;
         onToken: (token) => {
           fullResponse += token;
         },
-        onComplete: () => { },
+        onComplete: () => {},
         onError: (err) => {
           throw err;
         },
@@ -19877,11 +20592,15 @@ ${tableRows}  </tbody>
 
       const collection = zp.getSelectedCollection();
       if (collection) {
-        return { type: "collection", collectionId: collection.id, libraryID: collection.libraryID } as any;
+        return {
+          type: "collection",
+          collectionId: collection.id,
+          libraryID: collection.libraryID,
+        } as any;
       }
 
       const libraryID = zp.getSelectedLibraryID();
-      if (typeof libraryID === 'number') {
+      if (typeof libraryID === "number") {
         const groupID = Zotero.Groups.getGroupIDFromLibraryID(libraryID);
         if (groupID) {
           return { type: "group", groupId: groupID };
@@ -19899,7 +20618,10 @@ ${tableRows}  </tbody>
    */
   private static getScopePref(): string {
     try {
-      return (Zotero.Prefs.get("extensions.seerai.libraryScope") as string) || "selection";
+      return (
+        (Zotero.Prefs.get("extensions.seerai.libraryScope") as string) ||
+        "selection"
+      );
     } catch (e) {
       return "selection";
     }
@@ -19916,7 +20638,9 @@ ${tableRows}  </tbody>
     }
 
     if (config.libraryScope.type === "group") {
-      const groupLibId = Zotero.Groups.getLibraryIDFromGroupID(config.libraryScope.groupId);
+      const groupLibId = Zotero.Groups.getLibraryIDFromGroupID(
+        config.libraryScope.groupId,
+      );
       return item.libraryID === groupLibId;
     }
 
@@ -19932,7 +20656,8 @@ ${tableRows}  </tbody>
         let currentId: number | null = colId;
         while (currentId) {
           if (currentId === scopedId) return true;
-          const col: Zotero.Collection | undefined = Zotero.Collections.get(currentId);
+          const col: Zotero.Collection | undefined =
+            Zotero.Collections.get(currentId);
           currentId = col ? col.parentID : null;
         }
       }
@@ -19989,7 +20714,7 @@ ${tableRows}  </tbody>
   private static showScopeDropdown(
     doc: Document,
     anchorEl: HTMLElement,
-    onSelect: (scope: string) => void
+    onSelect: (scope: string) => void,
   ): void {
     // Remove any existing dropdown
     const existing = doc.getElementById("agentic-scope-dropdown");
@@ -20019,13 +20744,18 @@ ${tableRows}  </tbody>
 
     const currentScope = Assistant.getScopePref();
 
-    const addOption = (label: string, value: string, icon: string = "📁", level: number = 0) => {
+    const addOption = (
+      label: string,
+      value: string,
+      icon: string = "📁",
+      level: number = 0,
+    ) => {
       const opt = doc.createElement("div");
       const isSelected = currentScope === value;
 
       opt.style.cssText = `
         padding: 8px 12px;
-        padding-left: ${12 + (level * 16)}px;
+        padding-left: ${12 + level * 16}px;
         cursor: pointer;
         display: flex;
         align-items: center;
@@ -20039,7 +20769,8 @@ ${tableRows}  </tbody>
       opt.innerHTML = `<span>${icon}</span><span style="flex-grow: 1">${label}</span>`;
 
       opt.addEventListener("mouseenter", () => {
-        if (!isSelected) opt.style.backgroundColor = "var(--fill-quinary, #f5f5f5)";
+        if (!isSelected)
+          opt.style.backgroundColor = "var(--fill-quinary, #f5f5f5)";
       });
       opt.addEventListener("mouseleave", () => {
         if (!isSelected) opt.style.backgroundColor = "transparent";
@@ -20051,18 +20782,27 @@ ${tableRows}  </tbody>
       dropdown.appendChild(opt);
 
       if (isSelected) {
-        setTimeout(() => opt.scrollIntoView({ block: 'nearest' }), 50);
+        setTimeout(() => opt.scrollIntoView({ block: "nearest" }), 50);
       }
     };
 
-    const addCollectionTree = (libraryID: number, parentID: number | null, level: number) => {
+    const addCollectionTree = (
+      libraryID: number,
+      parentID: number | null,
+      level: number,
+    ) => {
       try {
         const collections = parentID
           ? Zotero.Collections.getByParent(parentID)
           : Zotero.Collections.getByLibrary(libraryID);
 
         for (const col of collections) {
-          addOption(col.name, `collection:${col.libraryID}:${col.id}`, "📂", level);
+          addOption(
+            col.name,
+            `collection:${col.libraryID}:${col.id}`,
+            "📂",
+            level,
+          );
           addCollectionTree(libraryID, col.id, level + 1);
         }
       } catch (e) {
@@ -20075,7 +20815,8 @@ ${tableRows}  </tbody>
 
     // Separator
     const sep1 = doc.createElement("div");
-    sep1.style.cssText = "height: 1px; background: var(--border-primary, #ccc); margin: 4px 0;";
+    sep1.style.cssText =
+      "height: 1px; background: var(--border-primary, #ccc); margin: 4px 0;";
     dropdown.appendChild(sep1);
 
     // 2. Personal Library
@@ -20088,7 +20829,8 @@ ${tableRows}  </tbody>
       for (const group of groups) {
         // Separator for groups if not the first one
         const groupSep = doc.createElement("div");
-        groupSep.style.cssText = "height: 1px; background: var(--border-primary, #ccc); margin: 4px 12px; opacity: 0.5;";
+        groupSep.style.cssText =
+          "height: 1px; background: var(--border-primary, #ccc); margin: 4px 12px; opacity: 0.5;";
         dropdown.appendChild(groupSep);
 
         addOption(group.name, `group:${group.groupID}`, "👥");
@@ -20107,7 +20849,10 @@ ${tableRows}  </tbody>
 
     // Close on mousedown outside
     const closeHandler = (e: MouseEvent) => {
-      if (!dropdown.contains(e.target as Node) && !anchorEl.contains(e.target as Node)) {
+      if (
+        !dropdown.contains(e.target as Node) &&
+        !anchorEl.contains(e.target as Node)
+      ) {
         dropdown.remove();
         doc.removeEventListener("mousedown", closeHandler);
       }
@@ -20116,7 +20861,6 @@ ${tableRows}  </tbody>
   }
 
   // Position dropdown
-
 
   /**
    * Create the input area with send button and image paste support
@@ -20488,9 +21232,13 @@ ${tableRows}  </tbody>
             input.focus();
 
             // Append "Generation stopped" message immediately if possible
-            const streamingMsg = messagesArea.querySelector(".message-bubble.assistant:last-child");
+            const streamingMsg = messagesArea.querySelector(
+              ".message-bubble.assistant:last-child",
+            );
             if (streamingMsg) {
-              const contentDiv = streamingMsg.querySelector("[data-content]") as HTMLElement;
+              const contentDiv = streamingMsg.querySelector(
+                "[data-content]",
+              ) as HTMLElement;
               if (contentDiv) {
                 const indicator = contentDiv.querySelector(".typing-indicator");
                 if (indicator) {
@@ -20673,20 +21421,31 @@ ${tableRows}  </tbody>
 
     const updateAgenticBtnStyle = (btn: HTMLElement, enabled: boolean) => {
       btn.innerText = enabled ? "🤖" : "💬";
-      btn.title = enabled ? `Agentic Mode: ON - Scope: ${this.getScopeLabel(this.getScopePref())}` : "Agentic Mode: OFF (click to enable)";
-      btn.style.backgroundColor = enabled ? "var(--accent-blue, #007AFF)" : "var(--background-secondary)";
+      btn.title = enabled
+        ? `Agentic Mode: ON - Scope: ${this.getScopeLabel(this.getScopePref())}`
+        : "Agentic Mode: OFF (click to enable)";
+      btn.style.backgroundColor = enabled
+        ? "var(--accent-blue, #007AFF)"
+        : "var(--background-secondary)";
       btn.style.color = enabled ? "#fff" : "var(--text-secondary)";
-      btn.style.borderColor = enabled ? "var(--accent-blue, #007AFF)" : "var(--border-primary)";
+      btn.style.borderColor = enabled
+        ? "var(--accent-blue, #007AFF)"
+        : "var(--border-primary)";
     };
 
     const agenticBtn = ztoolkit.UI.createElement(doc, "button", {
-      properties: { innerText: agenticEnabled ? "🤖" : "💬", title: "Toggle Agentic Mode (tool calling)" },
+      properties: {
+        innerText: agenticEnabled ? "🤖" : "💬",
+        title: "Toggle Agentic Mode (tool calling)",
+      },
       styles: {
         width: "32px",
         height: "32px",
         border: "1px solid var(--border-primary)",
         borderRadius: "6px 0 0 6px",
-        backgroundColor: agenticEnabled ? "var(--accent-blue, #007AFF)" : "var(--background-secondary)",
+        backgroundColor: agenticEnabled
+          ? "var(--accent-blue, #007AFF)"
+          : "var(--background-secondary)",
         color: agenticEnabled ? "#fff" : "var(--text-secondary)",
         cursor: "pointer",
         display: "flex",
@@ -20707,7 +21466,9 @@ ${tableRows}  </tbody>
             }
             updateAgenticBtnStyle(agenticBtn as HTMLElement, agenticEnabled);
             // Update scope button visibility
-            (scopeBtn as HTMLElement).style.display = agenticEnabled ? "flex" : "none";
+            (scopeBtn as HTMLElement).style.display = agenticEnabled
+              ? "flex"
+              : "none";
             Zotero.debug(`[seerai] Agentic mode toggled: ${agenticEnabled}`);
           },
         },
@@ -20716,7 +21477,10 @@ ${tableRows}  </tbody>
 
     // Scope selector button (dropdown trigger)
     const scopeBtn = ztoolkit.UI.createElement(doc, "button", {
-      properties: { innerText: "▼", title: `Scope: ${this.getScopeLabel(this.getScopePref())}` },
+      properties: {
+        innerText: "▼",
+        title: `Scope: ${this.getScopeLabel(this.getScopePref())}`,
+      },
       styles: {
         width: "20px",
         height: "32px",
@@ -20737,27 +21501,34 @@ ${tableRows}  </tbody>
           type: "click",
           listener: (e: Event) => {
             e.stopPropagation();
-            this.showScopeDropdown(doc, scopeBtn as HTMLElement, (newScope: string) => {
-              try {
-                Zotero.Prefs.set("extensions.seerai.libraryScope", newScope);
-                (scopeBtn as HTMLElement).title = `Scope: ${this.getScopeLabel(newScope)}`;
-                updateAgenticBtnStyle(agenticBtn as HTMLElement, agenticEnabled);
-                Zotero.debug(`[seerai] Agent scope changed to: ${newScope}`);
-              } catch (err) {
-                Zotero.debug(`[seerai] Error saving scope: ${err}`);
-              }
-            });
+            this.showScopeDropdown(
+              doc,
+              scopeBtn as HTMLElement,
+              (newScope: string) => {
+                try {
+                  Zotero.Prefs.set("extensions.seerai.libraryScope", newScope);
+                  (scopeBtn as HTMLElement).title =
+                    `Scope: ${this.getScopeLabel(newScope)}`;
+                  updateAgenticBtnStyle(
+                    agenticBtn as HTMLElement,
+                    agenticEnabled,
+                  );
+                  Zotero.debug(`[seerai] Agent scope changed to: ${newScope}`);
+                } catch (err) {
+                  Zotero.debug(`[seerai] Error saving scope: ${err}`);
+                }
+              },
+            );
           },
         },
-
       ],
     });
 
     const agenticContainer = doc.createElement("div");
-    agenticContainer.style.cssText = "position: relative; display: flex; margin-right: 4px;";
+    agenticContainer.style.cssText =
+      "position: relative; display: flex; margin-right: 4px;";
     agenticContainer.appendChild(agenticBtn);
     agenticContainer.appendChild(scopeBtn);
-
 
     // Prompt Library button
     const promptsBtn = ztoolkit.UI.createElement(doc, "button", {
@@ -20833,7 +21604,7 @@ ${tableRows}  </tbody>
     initPlaceholderAutocomplete(
       doc,
       input,
-      (value, itemType, itemId, trigger) => {
+      (value, itemType, itemId, trigger, data) => {
         // Add to centralized context manager
         const type = itemType as ContextItemType;
         contextManager.addItem(
@@ -20841,7 +21612,7 @@ ${tableRows}  </tbody>
           type,
           value,
           "command",
-          { itemKey: String(itemId) }, // Store metadata if available
+          data || { itemKey: String(itemId) }, // Store full metadata if available
         );
 
         // Clear the trigger text from input
@@ -20892,7 +21663,6 @@ ${tableRows}  </tbody>
     });
     inputArea.appendChild(historyBtn);
 
-
     if (contextChipsArea) {
       inputContainer.appendChild(contextChipsArea);
     }
@@ -20904,7 +21674,10 @@ ${tableRows}  </tbody>
   /**
    * Show history popover with past conversations
    */
-  private static async showHistoryPopover(doc: Document, anchorBtn: HTMLElement) {
+  private static async showHistoryPopover(
+    doc: Document,
+    anchorBtn: HTMLElement,
+  ) {
     const dropdown = doc.createElement("div");
     dropdown.className = "history-popover";
     dropdown.style.cssText = `
@@ -20925,7 +21698,8 @@ ${tableRows}  </tbody>
     `;
 
     const header = doc.createElement("div");
-    header.style.cssText = "padding: 8px 12px; border-bottom: 1px solid var(--border-primary); display: flex; justify-content: space-between; align-items: center; background: var(--background-secondary);";
+    header.style.cssText =
+      "padding: 8px 12px; border-bottom: 1px solid var(--border-primary); display: flex; justify-content: space-between; align-items: center; background: var(--background-secondary);";
 
     const title = doc.createElement("span");
     title.textContent = "Chat History";
@@ -20935,7 +21709,8 @@ ${tableRows}  </tbody>
 
     const newChatBtn = doc.createElement("button");
     newChatBtn.textContent = "+ New Chat";
-    newChatBtn.style.cssText = "padding: 4px 8px; font-size: 11px; background: var(--highlight-primary); color: white; border: none; border-radius: 4px; cursor: pointer;";
+    newChatBtn.style.cssText =
+      "padding: 4px 8px; font-size: 11px; background: var(--highlight-primary); color: white; border: none; border-radius: 4px; cursor: pointer;";
     newChatBtn.onclick = () => {
       this.createNewChat();
       dropdown.remove();
@@ -20945,33 +21720,43 @@ ${tableRows}  </tbody>
 
     const listContainer = doc.createElement("div");
     listContainer.className = "history-list";
-    listContainer.style.cssText = "overflow-y: auto; flex: 1; max-height: 350px;";
+    listContainer.style.cssText =
+      "overflow-y: auto; flex: 1; max-height: 350px;";
 
     if (conversationHistory.length === 0) {
       const emptyMsg = doc.createElement("div");
       emptyMsg.textContent = "No history yet";
-      emptyMsg.style.cssText = "padding: 20px; text-align: center; color: var(--text-tertiary); font-style: italic;";
+      emptyMsg.style.cssText =
+        "padding: 20px; text-align: center; color: var(--text-tertiary); font-style: italic;";
       listContainer.appendChild(emptyMsg);
     } else {
-      conversationHistory.forEach(conv => {
+      conversationHistory.forEach((conv) => {
         const item = doc.createElement("div");
-        item.className = "history-item" + (getMessageStore().getConversationId() === conv.id ? " active" : "");
-        item.style.cssText = "padding: 10px 12px; border-bottom: 1px solid var(--border-quaternary); cursor: pointer; position: relative; transition: background 0.2s;";
+        item.className =
+          "history-item" +
+          (getMessageStore().getConversationId() === conv.id ? " active" : "");
+        item.style.cssText =
+          "padding: 10px 12px; border-bottom: 1px solid var(--border-quaternary); cursor: pointer; position: relative; transition: background 0.2s;";
 
         const itemTitle = doc.createElement("div");
         itemTitle.textContent = conv.title || "Untitled Chat";
-        itemTitle.style.cssText = "font-weight: 500; font-size: 13px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 25px;";
+        itemTitle.style.cssText =
+          "font-weight: 500; font-size: 13px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 25px;";
         item.appendChild(itemTitle);
 
         const itemMeta = doc.createElement("div");
-        itemMeta.textContent = this.formatRelativeTime(new Date(conv.updatedAt));
-        itemMeta.style.cssText = "font-size: 11px; color: var(--text-tertiary); margin-top: 2px;";
+        itemMeta.textContent = this.formatRelativeTime(
+          new Date(conv.updatedAt),
+        );
+        itemMeta.style.cssText =
+          "font-size: 11px; color: var(--text-tertiary); margin-top: 2px;";
         item.appendChild(itemMeta);
 
         const deleteBtn = doc.createElement("span");
         deleteBtn.innerHTML = "🗑️";
         deleteBtn.className = "delete-btn";
-        deleteBtn.style.cssText = "position: absolute; right: 8px; top: 10px; opacity: 0; transition: opacity 0.2s; font-size: 12px;";
+        deleteBtn.style.cssText =
+          "position: absolute; right: 8px; top: 10px; opacity: 0; transition: opacity 0.2s; font-size: 12px;";
         deleteBtn.onclick = (e) => {
           e.stopPropagation();
           if (doc.defaultView?.confirm("Delete this conversation?")) {
@@ -20981,8 +21766,12 @@ ${tableRows}  </tbody>
         };
         item.appendChild(deleteBtn);
 
-        item.onmouseenter = () => { deleteBtn.style.opacity = "0.7"; };
-        item.onmouseleave = () => { deleteBtn.style.opacity = "0"; };
+        item.onmouseenter = () => {
+          deleteBtn.style.opacity = "0.7";
+        };
+        item.onmouseleave = () => {
+          deleteBtn.style.opacity = "0";
+        };
 
         item.onclick = () => {
           this.loadChat(conv.id);
@@ -21005,13 +21794,17 @@ ${tableRows}  </tbody>
     setTimeout(() => doc.addEventListener("click", outsideClick), 0);
   }
 
-
   /**
    * Handle an inline permission request from the agent engine.
    * Finds the UI element for the tool call and appends Allow/Deny buttons.
    */
-  private static async handleInlinePermissionRequest(toolCallId: string, toolName: string): Promise<boolean> {
-    Zotero.debug(`[seerai] handleInlinePermissionRequest started for ${toolName} (${toolCallId})`);
+  private static async handleInlinePermissionRequest(
+    toolCallId: string,
+    toolName: string,
+  ): Promise<boolean> {
+    Zotero.debug(
+      `[seerai] handleInlinePermissionRequest started for ${toolName} (${toolCallId})`,
+    );
 
     if (!activeAgentSession) {
       Zotero.debug("[seerai] Permission Error: No activeAgentSession found");
@@ -21019,27 +21812,41 @@ ${tableRows}  </tbody>
     }
 
     if (!activeAgentSession.contentDiv) {
-      Zotero.debug("[seerai] Permission Error: activeAgentSession.contentDiv is null");
+      Zotero.debug(
+        "[seerai] Permission Error: activeAgentSession.contentDiv is null",
+      );
       return false;
     }
 
-    Zotero.debug(`[seerai] session.toolResults count: ${activeAgentSession.toolResults.length}`);
-    activeAgentSession.toolResults.forEach(r => Zotero.debug(`[seerai] candidate tool id: ${r.toolCall.id}`));
+    Zotero.debug(
+      `[seerai] session.toolResults count: ${activeAgentSession.toolResults.length}`,
+    );
+    activeAgentSession.toolResults.forEach((r) =>
+      Zotero.debug(`[seerai] candidate tool id: ${r.toolCall.id}`),
+    );
 
-    const tr = activeAgentSession.toolResults.find(t => t.toolCall.id === toolCallId);
+    const tr = activeAgentSession.toolResults.find(
+      (t) => t.toolCall.id === toolCallId,
+    );
     const toolElement = tr?.uiElement;
 
     if (!toolElement) {
-      Zotero.debug(`[seerai] Permission Error: Could not find UI element for tool call ${toolCallId} in session results`);
+      Zotero.debug(
+        `[seerai] Permission Error: Could not find UI element for tool call ${toolCallId} in session results`,
+      );
       return false;
     }
 
-    Zotero.debug("[seerai] Found toolElement, looking for .tool-details-content");
+    Zotero.debug(
+      "[seerai] Found toolElement, looking for .tool-details-content",
+    );
 
     // Find the details content area to inject buttons
     const detailsContent = toolElement.querySelector(".tool-details-content");
     if (!detailsContent) {
-      Zotero.debug("[seerai] Permission Error: Could not find .tool-details-content in toolElement");
+      Zotero.debug(
+        "[seerai] Permission Error: Could not find .tool-details-content in toolElement",
+      );
       return false;
     }
 
@@ -21049,7 +21856,10 @@ ${tableRows}  </tbody>
     if (activeAgentSession.toolProcessState?.container) {
       (activeAgentSession.toolProcessState.container as any).open = true;
     }
-    if (toolElement.tagName === "DETAILS" || (toolElement as any).open !== undefined) {
+    if (
+      toolElement.tagName === "DETAILS" ||
+      (toolElement as any).open !== undefined
+    ) {
       (toolElement as any).open = true;
     }
 
@@ -21068,15 +21878,18 @@ ${tableRows}  </tbody>
       `;
 
     const promptText = doc.createElement("div");
-    promptText.style.cssText = "margin-bottom: 8px; font-weight: 500; font-size: 0.9em;";
+    promptText.style.cssText =
+      "margin-bottom: 8px; font-weight: 500; font-size: 0.9em;";
     promptText.textContent = "⚠️ Permission Required";
 
     const subText = doc.createElement("div");
-    subText.style.cssText = "margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);";
+    subText.style.cssText =
+      "margin-bottom: 8px; font-size: 0.85em; color: var(--text-secondary);";
     subText.textContent = "The agent wants to execute this tool. Allow?";
 
     const btnContainer = doc.createElement("div");
-    btnContainer.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
+    btnContainer.style.cssText =
+      "display: flex; gap: 8px; justify-content: flex-end;";
 
     const denyBtn = doc.createElement("button");
     denyBtn.textContent = "Deny";
@@ -21227,7 +22040,9 @@ ${tableRows}  </tbody>
     const smartScrollToBottom = () => {
       if (!messagesArea) return;
       const threshold = 100; // pixels from bottom
-      const isNearBottom = messagesArea.scrollHeight - messagesArea.scrollTop <= messagesArea.clientHeight + threshold;
+      const isNearBottom =
+        messagesArea.scrollHeight - messagesArea.scrollTop <=
+        messagesArea.clientHeight + threshold;
       if (isNearBottom) {
         messagesArea.scrollTop = messagesArea.scrollHeight;
       }
@@ -21239,7 +22054,8 @@ ${tableRows}  </tbody>
         session.fullResponse = fullResponse;
         if (session.contentDiv) {
           // Process streaming content to handle think tags
-          const { displayContent, isThinking: stillThinking } = processStreamingContent(fullResponse);
+          const { displayContent, isThinking: stillThinking } =
+            processStreamingContent(fullResponse);
 
           // If we're still in a think block with no visible content, keep the thinking indicator
           if (stillThinking && session.isThinking) {
@@ -21254,12 +22070,18 @@ ${tableRows}  </tbody>
           }
 
           // Ensure markdown container exists
-          let mdContainer = session.contentDiv.querySelector(".markdown-content") as HTMLElement;
+          let mdContainer = session.contentDiv.querySelector(
+            ".markdown-content",
+          ) as HTMLElement;
           if (!mdContainer) {
-            mdContainer = session.contentDiv.ownerDocument!.createElement("div");
+            mdContainer =
+              session.contentDiv.ownerDocument!.createElement("div");
             mdContainer.className = "markdown-content";
             if (session.contentDiv.firstChild) {
-              session.contentDiv.insertBefore(mdContainer, session.contentDiv.firstChild);
+              session.contentDiv.insertBefore(
+                mdContainer,
+                session.contentDiv.firstChild,
+              );
             } else {
               session.contentDiv.appendChild(mdContainer);
             }
@@ -21309,13 +22131,17 @@ ${tableRows}  </tbody>
             // Track toggles
             processUI.container.addEventListener("toggle", (e: Event) => {
               if (session) {
-                session.isToolDetailsOpen = (e.target as HTMLDetailsElement).open;
+                session.isToolDetailsOpen = (
+                  e.target as HTMLDetailsElement
+                ).open;
               }
             });
 
             // Store the list container for appending tool cards
             // The list container is the div inside the details
-            session.toolContainer = processUI.container.querySelector(".tool-list-container") as HTMLElement;
+            session.toolContainer = processUI.container.querySelector(
+              ".tool-list-container",
+            ) as HTMLElement;
           }
 
           // Update label to show which tool is being executed
@@ -21338,7 +22164,9 @@ ${tableRows}  </tbody>
       },
       onToolCallCompleted: (toolCall: ToolCall, result: ToolResult) => {
         if (!Assistant.isStreaming) return;
-        const tr = session.toolResults.find(t => t.toolCall.id === toolCall.id);
+        const tr = session.toolResults.find(
+          (t) => t.toolCall.id === toolCall.id,
+        );
         if (tr) tr.result = result;
 
         if (session.messagesArea && session.toolContainer && tr?.uiElement) {
@@ -21351,7 +22179,10 @@ ${tableRows}  </tbody>
 
         // CRITICAL: Update the counter label in real-time
         if (session.toolProcessState) {
-          session.toolProcessState.updateProgress(session.iterationCount, session.toolResults.length);
+          session.toolProcessState.updateProgress(
+            session.iterationCount,
+            session.toolResults.length,
+          );
         }
       },
       onMessageUpdate: (content: string) => {
@@ -21365,12 +22196,17 @@ ${tableRows}  </tbody>
             session.contentDiv.querySelector(".typing-indicator")?.remove();
           }
 
-          let mdContainer = session.contentDiv.querySelector(".markdown-content");
+          let mdContainer =
+            session.contentDiv.querySelector(".markdown-content");
           if (!mdContainer) {
-            mdContainer = session.contentDiv.ownerDocument!.createElement("div");
+            mdContainer =
+              session.contentDiv.ownerDocument!.createElement("div");
             mdContainer.className = "markdown-content";
             if (session.contentDiv.firstChild) {
-              session.contentDiv.insertBefore(mdContainer, session.contentDiv.firstChild);
+              session.contentDiv.insertBefore(
+                mdContainer,
+                session.contentDiv.firstChild,
+              );
             } else {
               session.contentDiv.appendChild(mdContainer);
             }
@@ -21389,19 +22225,25 @@ ${tableRows}  </tbody>
 
         // Remove the thinking indicator if it still exists
         if (session.contentDiv) {
-          const typingIndicator = session.contentDiv.querySelector('.typing-indicator');
+          const typingIndicator =
+            session.contentDiv.querySelector(".typing-indicator");
           if (typingIndicator) {
             typingIndicator.remove();
           }
 
           // CRITICAL: Ensure final content is rendered to DOM
           // This fixes the hidden text bug after many tool calls
-          let mdContainer = session.contentDiv.querySelector(".markdown-content");
+          let mdContainer =
+            session.contentDiv.querySelector(".markdown-content");
           if (!mdContainer) {
-            mdContainer = session.contentDiv.ownerDocument!.createElement("div");
+            mdContainer =
+              session.contentDiv.ownerDocument!.createElement("div");
             mdContainer.className = "markdown-content";
             if (session.contentDiv.firstChild) {
-              session.contentDiv.insertBefore(mdContainer, session.contentDiv.firstChild);
+              session.contentDiv.insertBefore(
+                mdContainer,
+                session.contentDiv.firstChild,
+              );
             } else {
               session.contentDiv.appendChild(mdContainer);
             }
@@ -21416,7 +22258,10 @@ ${tableRows}  </tbody>
           // Use the authoritative iteration count from handleAgenticChat
           // This fixes race condition where onIterationStarted increments count
           // for iterations that don't complete with tool calls
-          const finalCount = iterationCount !== undefined ? iterationCount : session.iterationCount;
+          const finalCount =
+            iterationCount !== undefined
+              ? iterationCount
+              : session.iterationCount;
           session.iterationCount = finalCount; // Sync session state to authoritative value
           const toolCount = session.toolResults.length;
           session.toolProcessState.setCompleted(finalCount, toolCount);
@@ -21428,7 +22273,8 @@ ${tableRows}  </tbody>
           content: cleanedContent,
           timestamp: new Date(),
           iterationCount: session.iterationCount,
-          toolResults: session.toolResults.length > 0 ? session.toolResults : undefined,
+          toolResults:
+            session.toolResults.length > 0 ? session.toolResults : undefined,
         };
         conversationMessages.push(assistantMsg);
 
@@ -21467,7 +22313,7 @@ ${tableRows}  </tbody>
         this.isStreaming = false;
         input.disabled = false;
         if (stopBtn) stopBtn.style.display = "none";
-      }
+      },
     };
 
     let isFirstToken = true;
@@ -21564,9 +22410,9 @@ ${tableRows}  </tbody>
                 const authorStr =
                   creators.length > 0
                     ? creators
-                      .map((c: any) => c.lastName || c.name)
-                      .slice(0, 3)
-                      .join(", ") + (creators.length > 3 ? " et al." : "")
+                        .map((c: any) => c.lastName || c.name)
+                        .slice(0, 3)
+                        .join(", ") + (creators.length > 3 ? " et al." : "")
                     : "";
                 const year =
                   zoteroItem.getField("year") ||
@@ -21861,8 +22707,6 @@ Research & Paper Discovery:
 
 ${webContext ? " When using web search results, cite the source URL." : ""}`;
 
-
-
       // Merge pasted images with Zotero item images
       const manuallyPastedParts: VisionMessageContentPart[] = pastedImages.map(
         (img) => ({
@@ -21952,12 +22796,12 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
       const chatOptions = getChatStateManager().getOptions();
       const configOverride = activeModel
         ? {
-          apiURL: activeModel.apiURL,
-          apiKey: activeModel.apiKey,
-          model: activeModel.model,
-          temperature: chatOptions.temperature,
-          max_tokens: chatOptions.maxTokens
-        }
+            apiURL: activeModel.apiURL,
+            apiKey: activeModel.apiKey,
+            model: activeModel.model,
+            temperature: chatOptions.temperature,
+            max_tokens: chatOptions.maxTokens,
+          }
         : undefined;
 
       // Check if agentic mode is enabled
@@ -21972,14 +22816,18 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
           conversationMessages.slice(0, -1), // Exclude current user message (already in text)
           {
             enableTools: true,
-            includeImages: options.includeImages || manuallyPastedParts.length > 0,
+            includeImages:
+              options.includeImages || manuallyPastedParts.length > 0,
             pastedImages: pastedImages,
             permissionHandler: Assistant.handleInlinePermissionRequest,
             temperature: chatOptions.temperature,
             maxTokens: chatOptions.maxTokens,
-            libraryScope: scopePref === "selection" ? this.resolveSelectionScope() : undefined,
+            libraryScope:
+              scopePref === "selection"
+                ? this.resolveSelectionScope()
+                : undefined,
           },
-          observer
+          observer,
         );
       } else {
         // Standard chat without tools
@@ -21991,7 +22839,8 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
               fullResponse += token;
               if (contentDiv) {
                 // Process streaming content to handle think tags
-                const { displayContent, isThinking: stillThinking } = processStreamingContent(fullResponse);
+                const { displayContent, isThinking: stillThinking } =
+                  processStreamingContent(fullResponse);
 
                 // If still in think block with no content, keep loading indicator
                 if (stillThinking && !displayContent) {
@@ -22006,9 +22855,12 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
 
                 if (displayContent) {
                   // Ensure markdown container exists
-                  let mdContainer = contentDiv.querySelector(".markdown-content") as HTMLElement;
+                  let mdContainer = contentDiv.querySelector(
+                    ".markdown-content",
+                  ) as HTMLElement;
                   if (!mdContainer) {
-                    mdContainer = contentDiv.ownerDocument!.createElement("div");
+                    mdContainer =
+                      contentDiv.ownerDocument!.createElement("div");
                     mdContainer.className = "markdown-content";
                     contentDiv.appendChild(mdContainer);
                   }
@@ -22058,7 +22910,6 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
           configOverride,
         );
       }
-
     } catch (error) {
       const errMsg =
         error instanceof Error && error.message === "Request was cancelled"
@@ -22113,7 +22964,9 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
         flexShrink: "0", // Prevent bubble from shrinking in flex container
         boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
         position: "relative",
-        backgroundColor: isUser ? "var(--accent-blue, #1976d2)" : "var(--background-secondary, #f5f5f5)",
+        backgroundColor: isUser
+          ? "var(--accent-blue, #1976d2)"
+          : "var(--background-secondary, #f5f5f5)",
         color: isUser ? "#ffffff" : "var(--text-primary, #212121)",
         border: isUser ? "none" : "1px solid var(--border-primary, #e0e0e0)",
         userSelect: "text",
@@ -22150,41 +23003,49 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
 
     // We create the button first, then assign the logic to use the variable reference
     // Use a temp handler that delegators to the logic defined below
-    const copyBtn = this.createActionButton(doc, "📋", "Click: Copy Text\nDouble-Click: Copy + Logs", () => {
-      // Get the current text from data-raw attribute (for streaming messages)
-      // or from the markdown container's data-raw, or fallback to initial text
-      const msgBubble = (copyBtn as HTMLElement).closest('.message-bubble');
-      const contentEl = msgBubble?.querySelector('[data-content]');
-      const mdContainer = contentEl?.querySelector('.markdown-content');
-      const currentText = mdContainer?.getAttribute('data-raw')
-        || contentEl?.getAttribute('data-raw')
-        || text;
+    const copyBtn = this.createActionButton(
+      doc,
+      "📋",
+      "Click: Copy Text\nDouble-Click: Copy + Logs",
+      () => {
+        // Get the current text from data-raw attribute (for streaming messages)
+        // or from the markdown container's data-raw, or fallback to initial text
+        const msgBubble = (copyBtn as HTMLElement).closest(".message-bubble");
+        const contentEl = msgBubble?.querySelector("[data-content]");
+        const mdContainer = contentEl?.querySelector(".markdown-content");
+        const currentText =
+          mdContainer?.getAttribute("data-raw") ||
+          contentEl?.getAttribute("data-raw") ||
+          text;
 
-      if (clickTimeout) {
-        // Double click: Clear timer and copy all
-        clearTimeout(clickTimeout);
-        clickTimeout = null;
-
-        let copyText = currentText;
-        if (toolResults && toolResults.length > 0) {
-          const toolLogs = toolResults.map(tr => {
-            const args = tr.toolCall.function.arguments;
-            const result = tr.result ? JSON.stringify(tr.result, null, 2) : "No result";
-            return `[Tool: ${tr.toolCall.function.name}]\nInput: ${args}\nOutput: ${result}`;
-          }).join("\n\n");
-          copyText = `${currentText}\n\n--- Tool Executions ---\n${toolLogs}`;
-        }
-        this.copyToClipboard(copyText, copyBtn as HTMLElement);
-      } else {
-        // First click: Set timer
-        clickTimeout = setTimeout(() => {
-          this.copyToClipboard(currentText, copyBtn as HTMLElement);
+        if (clickTimeout) {
+          // Double click: Clear timer and copy all
+          clearTimeout(clickTimeout);
           clickTimeout = null;
-        }, 250);
-      }
-    });
 
-
+          let copyText = currentText;
+          if (toolResults && toolResults.length > 0) {
+            const toolLogs = toolResults
+              .map((tr) => {
+                const args = tr.toolCall.function.arguments;
+                const result = tr.result
+                  ? JSON.stringify(tr.result, null, 2)
+                  : "No result";
+                return `[Tool: ${tr.toolCall.function.name}]\nInput: ${args}\nOutput: ${result}`;
+              })
+              .join("\n\n");
+            copyText = `${currentText}\n\n--- Tool Executions ---\n${toolLogs}`;
+          }
+          this.copyToClipboard(copyText, copyBtn as HTMLElement);
+        } else {
+          // First click: Set timer
+          clickTimeout = setTimeout(() => {
+            this.copyToClipboard(currentText, copyBtn as HTMLElement);
+            clickTimeout = null;
+          }, 250);
+        }
+      },
+    );
 
     actionsDiv.appendChild(copyBtn);
 
@@ -22235,7 +23096,7 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
       const listContainer = container.querySelector(".tool-list-container");
       const targetContainer = listContainer || container;
 
-      toolResults.forEach(tr => {
+      toolResults.forEach((tr) => {
         const toolUI = createToolExecutionUI(doc, tr.toolCall, tr.result);
         targetContainer.appendChild(toolUI);
       });
@@ -22595,10 +23456,10 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
       const activeModel = getActiveModelConfig();
       const configOverride = activeModel
         ? {
-          apiURL: activeModel.apiURL,
-          apiKey: activeModel.apiKey,
-          model: activeModel.model,
-        }
+            apiURL: activeModel.apiURL,
+            apiKey: activeModel.apiKey,
+            model: activeModel.model,
+          }
         : undefined;
 
       await openAIService.chatCompletionStream(
@@ -22675,7 +23536,15 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
       : msg.role === "error"
         ? "Error"
         : "Assistant";
-    this.appendMessage(container, sender, msg.content, msg.id, isLastUserMsg, msg.toolResults, msg.iterationCount);
+    this.appendMessage(
+      container,
+      sender,
+      msg.content,
+      msg.id,
+      isLastUserMsg,
+      msg.toolResults,
+      msg.iterationCount,
+    );
   }
 
   /**
