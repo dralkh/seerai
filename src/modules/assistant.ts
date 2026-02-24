@@ -21131,16 +21131,35 @@ ${tableRows}  </tbody>
       },
     });
 
-    // Toolbar row (buttons that wrap at narrow widths)
+    // Toolbar row (buttons split: left group + right group)
     const toolbarRow = ztoolkit.UI.createElement(doc, "div", {
       styles: {
         display: "flex",
         flexWrap: "wrap",
         gap: "4px",
         alignItems: "center",
+        justifyContent: "space-between",
         minWidth: "0",
         maxWidth: "100%",
         boxSizing: "border-box",
+      },
+    });
+
+    const toolbarLeft = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "4px",
+        alignItems: "center",
+      },
+    });
+
+    const toolbarRight = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "4px",
+        alignItems: "center",
       },
     });
 
@@ -21799,14 +21818,12 @@ ${tableRows}  </tbody>
       },
     );
 
-    // Toolbar row: all buttons except textarea and send
-    toolbarRow.appendChild(agenticContainer);
-    toolbarRow.appendChild(settingsContainer);
-    toolbarRow.appendChild(promptsContainer);
-    toolbarRow.appendChild(placeholderBtn);
-    toolbarRow.appendChild(stopBtn);
-    toolbarRow.appendChild(clearBtn);
-    toolbarRow.appendChild(saveBtn);
+    // Toolbar row: left group (first 4) and right group (last 4)
+    toolbarLeft.appendChild(agenticContainer);
+    toolbarLeft.appendChild(settingsContainer);
+    toolbarLeft.appendChild(promptsContainer);
+    toolbarLeft.appendChild(placeholderBtn);
+    toolbarRow.appendChild(toolbarLeft);
 
     // History Button
     const historyBtn = ztoolkit.UI.createElement(doc, "button", {
@@ -21833,7 +21850,11 @@ ${tableRows}  </tbody>
         },
       ],
     });
-    toolbarRow.appendChild(historyBtn);
+    toolbarRight.appendChild(stopBtn);
+    toolbarRight.appendChild(clearBtn);
+    toolbarRight.appendChild(saveBtn);
+    toolbarRight.appendChild(historyBtn);
+    toolbarRow.appendChild(toolbarRight);
 
     // Text input row: textarea + send button
     textInputRow.appendChild(input);
