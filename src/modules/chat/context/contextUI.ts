@@ -16,7 +16,6 @@ export function createContextChipsArea(doc: Document): HTMLElement {
 
   const container = doc.createElement("div");
   container.id = "unified-context-chips";
-  container.id = "unified-context-chips";
   container.style.display = "none";
   container.style.flexWrap = "wrap";
   container.style.gap = "6px";
@@ -25,6 +24,9 @@ export function createContextChipsArea(doc: Document): HTMLElement {
   container.style.borderRadius = "6px";
   container.style.border = "1px solid var(--border-primary, #ddd)";
   container.style.marginBottom = "6px";
+  container.style.minWidth = "0";
+  container.style.maxWidth = "100%";
+  container.style.boxSizing = "border-box";
 
   // Label Container (Header)
   const header = doc.createElement("div");

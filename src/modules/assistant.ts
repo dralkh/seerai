@@ -155,7 +155,8 @@ interface AgentSession {
 
 let activeAgentSession: AgentSession | null = null;
 let currentDraftText = "";
-const currentPastedImages: { id: string; image: string; mimeType: string }[] = [];
+const currentPastedImages: { id: string; image: string; mimeType: string }[] =
+  [];
 let totalSearchResults: number = 0; // Total count from API
 let isSearching = false;
 
@@ -1745,15 +1746,13 @@ export class Assistant {
     );
 
     // Force height and overflow on root container
-    // In Pane: allow visible overflow for Natural Scroll
+    // In Pane: use 100vh for ALL tabs for consistent sidebar height and width containment
     // In Detached: force 100% height and hidden overflow to maintain window bounds
-    if (activeTab === "table" && !isDetachedWindow) {
-      container.style.height = "auto";
-      container.style.minHeight = "100%";
-      container.style.overflow = "visible";
-    } else if (!isDetachedWindow) {
-      // Sidepanel (Chat/Search): Force viewport height to ensure internal scrolling works
-      // using 100vh instead of 100% because sidebar parent container often grows with content relative to the parent provided by Zotero
+    if (!isDetachedWindow) {
+      // Sidepanel (all tabs): Force viewport height to ensure internal scrolling works
+      // and width is properly constrained by the parent.
+      // Using 100vh instead of 100% because sidebar parent container often grows with content relative to the parent provided by Zotero.
+      // Table tab previously used height:auto which broke width containment.
       container.style.height = "100vh";
       container.style.overflow = "hidden";
     } else {
@@ -1761,6 +1760,12 @@ export class Assistant {
       container.style.height = "100%";
       container.style.overflow = "hidden";
     }
+
+    // Ensure root container constrains width properly
+    container.style.width = "100%";
+    container.style.maxWidth = "100%";
+    container.style.boxSizing = "border-box";
+    container.style.minWidth = "0";
 
     container.innerHTML = "";
 
@@ -1860,8 +1865,12 @@ export class Assistant {
         styles: {
           display: "flex",
           flexDirection: "column",
-          height: activeTab === "table" && !isDetachedWindow ? "auto" : "100%",
-          minHeight: "100%",
+          height: "100%",
+          width: "100%",
+          minWidth: "0",
+          maxWidth: "100%",
+          overflow: "hidden",
+          boxSizing: "border-box",
           fontFamily: "system-ui, -apple-system, sans-serif",
         },
       });
@@ -1878,8 +1887,12 @@ export class Assistant {
             flex: "1",
             display: "flex",
             flexDirection: "column",
-            overflow:
-              activeTab === "table" && !isDetachedWindow ? "visible" : "hidden",
+            width: "100%",
+            minWidth: "0",
+            maxWidth: "100%",
+            minHeight: "0",
+            boxSizing: "border-box",
+            overflow: "hidden",
           },
         });
 
@@ -1946,7 +1959,7 @@ export class Assistant {
 
     const tabs: { id: AssistantTab; label: string; icon: string }[] = [
       { id: "chat", label: "Chat", icon: "💬" },
-      { id: "table", label: "Papers Table", icon: "📊" },
+      { id: "table", label: "Table", icon: "📊" },
       { id: "search", label: "Search", icon: "🔍" },
     ];
 
@@ -2046,8 +2059,9 @@ export class Assistant {
     const sidebar = doc.createElement("div");
     sidebar.className = "history-sidebar";
     sidebar.style.cssText = `
-      width: ${isHistorySidebarVisible ? "250px" : "0px"};
-      min-width: ${isHistorySidebarVisible ? "200px" : "0px"};
+      width: ${isHistorySidebarVisible ? "clamp(120px, 40%, 250px)" : "0px"};
+      min-width: ${isHistorySidebarVisible ? "0" : "0px"};
+      flex-shrink: ${isHistorySidebarVisible ? "1" : "0"};
       display: flex;
       flex-direction: column;
       border-right: 1px solid var(--border-primary);
@@ -2055,6 +2069,7 @@ export class Assistant {
       transition: width 0.3s ease, min-width 0.3s ease;
       overflow: hidden;
       height: 100%;
+      box-sizing: border-box;
     `;
 
     // Header with New Chat button
@@ -2187,7 +2202,7 @@ export class Assistant {
   ): Promise<HTMLElement> {
     const mainWrapper = doc.createElement("div");
     mainWrapper.style.cssText =
-      "display: flex; height: 100%; width: 100%; overflow: hidden; box-sizing: border-box;";
+      "display: flex; height: 100%; width: 100%; min-width: 0; max-width: 100%; overflow: hidden; box-sizing: border-box;";
 
     // === CHAT CONTENT ===
     const chatContainer = ztoolkit.UI.createElement(doc, "div", {
@@ -2199,8 +2214,10 @@ export class Assistant {
         gap: "8px",
         padding: "4px 6px 6px 6px",
         minWidth: "0",
+        maxWidth: "100%",
         position: "relative",
         boxSizing: "border-box",
+        overflow: "hidden",
       },
     });
 
@@ -2228,7 +2245,10 @@ export class Assistant {
         flexDirection: "column",
         gap: "10px",
         minHeight: "200px",
+        minWidth: "0",
+        maxWidth: "100%",
         overflow: "auto",
+        boxSizing: "border-box",
         userSelect: "text",
         cursor: "text",
       },
@@ -2579,9 +2599,12 @@ export class Assistant {
       styles: {
         display: "flex",
         flexDirection: "column",
-        height: isDetachedWindow ? "100%" : "auto",
-        minHeight: "100%",
-        overflow: isDetachedWindow ? "hidden" : "visible",
+        height: "100%",
+        width: "100%",
+        overflow: "hidden",
+        minWidth: "0",
+        maxWidth: "100%",
+        boxSizing: "border-box",
       },
     });
 
@@ -2598,8 +2621,12 @@ export class Assistant {
         display: "flex",
         flexDirection: "row",
         flex: "1",
-        overflow: isDetachedWindow ? "hidden" : "visible",
-        minHeight: isDetachedWindow ? "0" : "auto",
+        overflow: "hidden",
+        minHeight: "0",
+        width: "100%",
+        minWidth: "0",
+        maxWidth: "100%",
+        boxSizing: "border-box",
       },
     });
 
@@ -2610,7 +2637,7 @@ export class Assistant {
         flex: "1",
         backgroundColor: "var(--background-primary)",
         overflowX: "auto",
-        overflowY: isDetachedWindow ? "auto" : "visible",
+        overflowY: "auto",
         minWidth: "0",
       },
     });
@@ -2652,7 +2679,7 @@ export class Assistant {
         minWidth: "48px",
         display: "flex",
         flexDirection: "column",
-        height: isDetachedWindow ? "100%" : "auto",
+        height: "100%",
         position: "relative",
         backgroundColor: "var(--background-secondary)",
         borderLeft: "1px solid var(--border-primary)",
@@ -2998,6 +3025,9 @@ export class Assistant {
         overflow: "hidden",
         gap: "8px",
         padding: "8px",
+        minWidth: "0",
+        maxWidth: "100%",
+        boxSizing: "border-box",
       },
     });
 
@@ -3007,6 +3037,10 @@ export class Assistant {
         display: "flex",
         gap: "8px",
         alignItems: "center",
+        flexWrap: "wrap",
+        minWidth: "0",
+        maxWidth: "100%",
+        boxSizing: "border-box",
       },
     });
 
@@ -3019,12 +3053,14 @@ export class Assistant {
       properties: { id: "semantic-scholar-search-input" },
       styles: {
         flex: "1",
+        minWidth: "0",
         padding: "10px 14px",
         border: "1px solid var(--border-primary)",
         borderRadius: "6px",
         fontSize: "13px",
         backgroundColor: "var(--background-primary)",
         color: "var(--text-primary)",
+        boxSizing: "border-box",
       },
     }) as HTMLInputElement;
 
@@ -3039,6 +3075,8 @@ export class Assistant {
         fontSize: "13px",
         fontWeight: "500",
         cursor: "pointer",
+        flexShrink: "0",
+        whiteSpace: "nowrap",
       },
       listeners: [
         {
@@ -3075,6 +3113,7 @@ export class Assistant {
         fontSize: "14px",
         cursor: "help",
         opacity: "0.6",
+        flexShrink: "0",
       },
     });
 
@@ -3090,6 +3129,7 @@ export class Assistant {
         fontSize: "14px",
         cursor: "pointer",
         marginLeft: "4px",
+        flexShrink: "0",
       },
     });
 
@@ -3249,6 +3289,7 @@ export class Assistant {
         fontSize: "14px",
         cursor: "pointer",
         marginLeft: "4px",
+        flexShrink: "0",
       },
     });
 
@@ -3528,6 +3569,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
         fontSize: "14px",
         cursor: "pointer",
         marginLeft: "4px",
+        flexShrink: "0",
       },
     });
 
@@ -3743,6 +3785,9 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
         border: "1px solid var(--border-primary)",
         borderRadius: "6px",
         backgroundColor: "var(--background-primary)",
+        minWidth: "0",
+        minHeight: "0",
+        boxSizing: "border-box",
       },
     });
 
@@ -3764,6 +3809,8 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
         borderRadius: "6px",
         overflow: "hidden",
         marginBottom: "4px",
+        minWidth: "0",
+        boxSizing: "border-box",
       },
     });
 
@@ -3793,6 +3840,8 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
         marginBottom: "12px",
         paddingBottom: "12px",
         borderBottom: "1px solid var(--border-primary)",
+        flexWrap: "wrap",
+        minWidth: "0",
       },
     });
 
@@ -3811,12 +3860,14 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
       properties: { id: "preset-select" },
       styles: {
         flex: "1",
+        minWidth: "0",
         padding: "4px 8px",
         border: "1px solid var(--border-primary)",
         borderRadius: "4px",
         fontSize: "11px",
         backgroundColor: "var(--background-primary)",
         color: "var(--text-primary)",
+        boxSizing: "border-box",
       },
       listeners: [
         {
@@ -8259,6 +8310,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         borderBottom: "1px solid var(--border-primary)",
         alignItems: "center",
         flexWrap: "wrap",
+        flexShrink: "0",
+        width: "100%",
+        minWidth: "0",
+        boxSizing: "border-box",
       },
     });
 
@@ -8460,7 +8515,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       properties: { className: "table-search-input" },
       styles: {
         flex: "1",
-        minWidth: "100px",
+        minWidth: "60px",
         padding: "6px 10px",
         border: "1px solid var(--border-primary)",
         borderRadius: "4px",
@@ -8468,6 +8523,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         backgroundColor: "var(--background-primary)",
         color: "var(--text-primary)",
         outline: "none",
+        boxSizing: "border-box",
       },
       listeners: [
         {
@@ -13572,6 +13628,17 @@ You MUST call the generate_tags function.`;
     // Paper column width (stored in config or default to 280)
     let paperColumnWidth = (currentTableConfig as any)?.paperColumnWidth ?? 280;
 
+    // Calculate total width of all columns to convert to percentages.
+    // This ensures columns always fill exactly 100% of the available space
+    // and shrink proportionally when the panel narrows, regardless of
+    // how wide the user has manually resized individual columns.
+    const actionsColumnWidth = 70;
+    const totalColumnWidth =
+      paperColumnWidth +
+      otherColumns.reduce((sum, col) => sum + col.width, 0) +
+      actionsColumnWidth;
+    const paperPct = ((paperColumnWidth / totalColumnWidth) * 100).toFixed(2);
+
     // Add combined "Paper" header (for title, author, year, sources)
     const paperHeader = ztoolkit.UI.createElement(doc, "th", {
       properties: { innerText: "Paper", className: "sortable" },
@@ -13583,7 +13650,7 @@ You MUST call the generate_tags function.`;
         padding: "8px 10px",
         textAlign: "left",
         fontWeight: "600",
-        width: `${paperColumnWidth}px`,
+        width: `${paperPct}%`,
         minWidth: "40px",
         cursor: "pointer",
         userSelect: "none",
@@ -13643,15 +13710,44 @@ You MUST call the generate_tags function.`;
         const newWidth = Math.max(40, startWidth + delta);
         paperColumnWidth = newWidth;
 
+        // Recalculate all column percentages so the table always fits 100%
+        const newTotal =
+          newWidth +
+          otherColumns.reduce((sum, col) => sum + col.width, 0) +
+          actionsColumnWidth;
+        const newPaperPct = ((newWidth / newTotal) * 100).toFixed(2);
+
         // Update header width
-        (paperHeader as HTMLElement).style.width = `${newWidth}px`;
+        (paperHeader as HTMLElement).style.width = `${newPaperPct}%`;
 
         // Update all Paper cells (first column)
         const cells = table.querySelectorAll(
           `td:nth-child(1), th:nth-child(1)`,
         );
         cells.forEach((cell: Element) => {
-          (cell as HTMLElement).style.width = `${newWidth}px`;
+          (cell as HTMLElement).style.width = `${newPaperPct}%`;
+        });
+
+        // Update other column percentages
+        otherColumns.forEach((col, idx) => {
+          const colPct = ((col.width / newTotal) * 100).toFixed(2);
+          const colCells = table.querySelectorAll(
+            `td:nth-child(${idx + 2}), th:nth-child(${idx + 2})`,
+          );
+          colCells.forEach((cell: Element) => {
+            (cell as HTMLElement).style.width = `${colPct}%`;
+            (cell as HTMLElement).style.maxWidth = `${colPct}%`;
+          });
+        });
+
+        // Update actions column percentage
+        const actionsPct = ((actionsColumnWidth / newTotal) * 100).toFixed(2);
+        const lastColIdx = otherColumns.length + 2;
+        const actionsCells = table.querySelectorAll(
+          `td:nth-child(${lastColIdx}), th:nth-child(${lastColIdx})`,
+        );
+        actionsCells.forEach((cell: Element) => {
+          (cell as HTMLElement).style.width = `${actionsPct}%`;
         });
       };
 
@@ -13690,8 +13786,8 @@ You MUST call the generate_tags function.`;
           padding: "8px 10px",
           textAlign: "left",
           fontWeight: "600",
-          width: `${col.width}px`,
-          minWidth: `${col.minWidth}px`,
+          width: `${((col.width / totalColumnWidth) * 100).toFixed(2)}%`,
+          minWidth: "40px",
           cursor: isComputedColumn
             ? "pointer"
             : col.sortable
@@ -13818,16 +13914,47 @@ You MUST call the generate_tags function.`;
             const newWidth = Math.max(col.minWidth, startWidth + delta);
             col.width = newWidth;
 
+            // Recalculate all column percentages so the table always fits 100%
+            const newTotal =
+              paperColumnWidth +
+              otherColumns.reduce((sum, c) => sum + c.width, 0) +
+              actionsColumnWidth;
+            const colPct = ((newWidth / newTotal) * 100).toFixed(2);
+
             // Update header width
-            th.style.width = `${newWidth}px`;
+            th.style.width = `${colPct}%`;
 
             // Update all cells in this column (+2 because Paper is +1 and nth-child is 1-indexed)
             const cells = table.querySelectorAll(
               `td:nth-child(${colIndex + 1}), th:nth-child(${colIndex + 1})`,
             );
             cells.forEach((cell: Element) => {
-              (cell as HTMLElement).style.width = `${newWidth}px`;
-              (cell as HTMLElement).style.maxWidth = `${newWidth}px`;
+              (cell as HTMLElement).style.width = `${colPct}%`;
+              (cell as HTMLElement).style.maxWidth = `${colPct}%`;
+            });
+
+            // Update paper column percentage
+            const paperPctNew = ((paperColumnWidth / newTotal) * 100).toFixed(
+              2,
+            );
+            const paperCells = table.querySelectorAll(
+              `td:nth-child(1), th:nth-child(1)`,
+            );
+            paperCells.forEach((cell: Element) => {
+              (cell as HTMLElement).style.width = `${paperPctNew}%`;
+            });
+
+            // Update actions column percentage
+            const actionsPctNew = (
+              (actionsColumnWidth / newTotal) *
+              100
+            ).toFixed(2);
+            const lastColIdx = otherColumns.length + 2;
+            const actionsCells = table.querySelectorAll(
+              `td:nth-child(${lastColIdx}), th:nth-child(${lastColIdx})`,
+            );
+            actionsCells.forEach((cell: Element) => {
+              (cell as HTMLElement).style.width = `${actionsPctNew}%`;
             });
           };
 
@@ -13854,6 +13981,9 @@ You MUST call the generate_tags function.`;
     });
 
     // Add Actions header cell
+    const actionsPct = ((actionsColumnWidth / totalColumnWidth) * 100).toFixed(
+      2,
+    );
     const actionsHeader = ztoolkit.UI.createElement(doc, "th", {
       properties: { innerText: "Actions" },
       attributes: { title: "Save or remove row" },
@@ -13864,7 +13994,8 @@ You MUST call the generate_tags function.`;
         borderRight: "1px solid rgba(128, 128, 128, 0.4)",
         fontSize: "11px",
         fontWeight: "600",
-        width: "70px",
+        width: `${actionsPct}%`,
+        minWidth: "40px",
         textAlign: "center",
       },
     });
@@ -13955,8 +14086,9 @@ You MUST call the generate_tags function.`;
           borderRight: "1px solid rgba(128, 128, 128, 0.4)",
           verticalAlign: "top",
           cursor: "pointer",
-          width: `${paperColumnWidth}px`,
+          width: `${paperPct}%`,
           minWidth: "40px",
+          overflow: "hidden",
         },
       });
 
@@ -14109,8 +14241,7 @@ You MUST call the generate_tags function.`;
             textOverflow: "ellipsis",
             whiteSpace: "normal",
             wordBreak: "break-word",
-            maxWidth: `${col.width}px`,
-            width: `${col.width}px`,
+            width: `${((col.width / totalColumnWidth) * 100).toFixed(2)}%`,
             maxHeight: "60px",
             lineHeight: "1.4",
             verticalAlign: "top",
@@ -14584,10 +14715,11 @@ You MUST call the generate_tags function.`;
           padding: "4px",
           borderBottom: "1px solid rgba(128, 128, 128, 0.4)",
           borderRight: "1px solid rgba(128, 128, 128, 0.4)",
-          width: "120px",
-          minWidth: "120px",
+          width: `${actionsPct}%`,
+          minWidth: "40px",
           textAlign: "center",
           verticalAlign: "middle",
+          overflow: "hidden",
         },
       });
 
@@ -16721,6 +16853,8 @@ You MUST call the generate_tags function.`;
         padding: "0",
         width: "100%", // Take mostly all space if no columns
         verticalAlign: "top",
+        minWidth: "0",
+        overflow: "hidden",
       },
     });
 
@@ -16740,7 +16874,7 @@ You MUST call the generate_tags function.`;
           padding: "12px",
           verticalAlign: "top",
           borderLeft: "1px solid var(--border-primary)",
-          minWidth: "150px",
+          minWidth: "80px",
           maxWidth: "250px",
           backgroundColor: "rgba(0,0,0,0.01)", // Slight tint for AI columns
         },
@@ -16883,6 +17017,9 @@ You MUST call the generate_tags function.`;
         flex: "1",
         minHeight: "0",
         overflow: "hidden",
+        minWidth: "0",
+        maxWidth: "100%",
+        boxSizing: "border-box",
       },
     });
 
@@ -16891,6 +17028,7 @@ You MUST call the generate_tags function.`;
       styles: {
         flex: "1",
         overflow: "auto",
+        minWidth: "0",
       },
     });
 
@@ -16999,7 +17137,7 @@ You MUST call the generate_tags function.`;
             fontWeight: "600",
             borderBottom: "2px solid var(--border-primary)",
             borderLeft: "1px solid var(--border-primary)",
-            minWidth: `${col.width || 200}px`, // Use saved width
+            minWidth: `${Math.min(col.width || 200, 120)}px`, // Use saved width, cap minWidth
             width: `${col.width || 200}px`,
             maxWidth: "600px",
             color: "var(--text-primary)",
@@ -20881,6 +21019,9 @@ ${tableRows}  </tbody>
         flexDirection: "column",
         gap: "6px",
         marginBottom: "10px",
+        minWidth: "0",
+        maxWidth: "100%",
+        boxSizing: "border-box",
       },
     });
 
@@ -20978,11 +21119,40 @@ ${tableRows}  </tbody>
       });
     };
 
-    // Input row (text input + send button)
+    // Input area: toolbar row + text input row (stacked vertically)
     const inputArea = ztoolkit.UI.createElement(doc, "div", {
       styles: {
         display: "flex",
-        gap: "8px",
+        flexDirection: "column",
+        gap: "6px",
+        minWidth: "0",
+        maxWidth: "100%",
+        boxSizing: "border-box",
+      },
+    });
+
+    // Toolbar row (buttons that wrap at narrow widths)
+    const toolbarRow = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "4px",
+        alignItems: "center",
+        minWidth: "0",
+        maxWidth: "100%",
+        boxSizing: "border-box",
+      },
+    });
+
+    // Text input row (textarea + send button, always full width)
+    const textInputRow = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        display: "flex",
+        gap: "6px",
+        alignItems: "flex-end",
+        minWidth: "0",
+        maxWidth: "100%",
+        boxSizing: "border-box",
       },
     });
 
@@ -20998,6 +21168,7 @@ ${tableRows}  </tbody>
       },
       styles: {
         flex: "1",
+        minWidth: "0",
         padding: "6px 10px",
         border: "1px solid var(--border-primary)",
         borderRadius: "6px",
@@ -21171,6 +21342,8 @@ ${tableRows}  </tbody>
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        flexShrink: "0",
+        whiteSpace: "nowrap",
       },
       listeners: [
         {
@@ -21626,15 +21799,14 @@ ${tableRows}  </tbody>
       },
     );
 
-    inputArea.appendChild(agenticContainer);
-    inputArea.appendChild(settingsContainer);
-    inputArea.appendChild(promptsContainer);
-    inputArea.appendChild(placeholderBtn);
-    inputArea.appendChild(input);
-    inputArea.appendChild(sendBtn);
-    inputArea.appendChild(stopBtn);
-    inputArea.appendChild(clearBtn);
-    inputArea.appendChild(saveBtn);
+    // Toolbar row: all buttons except textarea and send
+    toolbarRow.appendChild(agenticContainer);
+    toolbarRow.appendChild(settingsContainer);
+    toolbarRow.appendChild(promptsContainer);
+    toolbarRow.appendChild(placeholderBtn);
+    toolbarRow.appendChild(stopBtn);
+    toolbarRow.appendChild(clearBtn);
+    toolbarRow.appendChild(saveBtn);
 
     // History Button
     const historyBtn = ztoolkit.UI.createElement(doc, "button", {
@@ -21661,7 +21833,15 @@ ${tableRows}  </tbody>
         },
       ],
     });
-    inputArea.appendChild(historyBtn);
+    toolbarRow.appendChild(historyBtn);
+
+    // Text input row: textarea + send button
+    textInputRow.appendChild(input);
+    textInputRow.appendChild(sendBtn);
+
+    // Assemble: toolbar row on top, text input row below
+    inputArea.appendChild(toolbarRow);
+    inputArea.appendChild(textInputRow);
 
     if (contextChipsArea) {
       inputContainer.appendChild(contextChipsArea);
@@ -22959,11 +23139,13 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
         borderRadius: isUser ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
         fontSize: "13px",
         maxWidth: "90%",
+        minWidth: "0",
         minHeight: "auto",
         alignSelf: isUser ? "flex-end" : "flex-start",
-        flexShrink: "0", // Prevent bubble from shrinking in flex container
         boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
         position: "relative",
+        overflow: "hidden",
+        boxSizing: "border-box",
         backgroundColor: isUser
           ? "var(--accent-blue, #1976d2)"
           : "var(--background-secondary, #f5f5f5)",
@@ -23062,7 +23244,14 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
 
     const contentDiv = ztoolkit.UI.createElement(doc, "div", {
       attributes: { "data-content": "true", "data-raw": text },
-      styles: { lineHeight: "1.6" }, // Increased line height
+      styles: {
+        lineHeight: "1.6",
+        overflowX: "auto",
+        overflowWrap: "break-word",
+        wordBreak: "break-word",
+        maxWidth: "100%",
+        minWidth: "0",
+      },
     });
 
     // Standard markdown container structure (used by streaming logic)

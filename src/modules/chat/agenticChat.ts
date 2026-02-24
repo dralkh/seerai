@@ -78,6 +78,9 @@ export function createToolProcessUI(doc: Document): {
         background: var(--background-primary, #fff);
         overflow: hidden;
         box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
     `;
 
   const summary = doc.createElementNS(HTML_NS, "summary") as HTMLElement;
@@ -273,6 +276,9 @@ export function createToolExecutionUI(
         border-radius: 6px;
         background: var(--background-primary, #fff);
         overflow: hidden;
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
     `;
 
   // Summary (Header)
@@ -351,6 +357,10 @@ export function createToolExecutionUI(
         background: var(--background-primary, #fff);
         color: var(--text-primary, #333);
         overflow-x: auto;
+        overflow-wrap: break-word;
+        word-break: break-word;
+        max-width: 100%;
+        box-sizing: border-box;
     `;
 
   // Arguments

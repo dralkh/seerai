@@ -298,14 +298,33 @@ html.dark .chip-tables {
 
 .message-user {
   background-color: var(--message-user-background);
-
   color: var(--message-user-text);
+  overflow: hidden;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .message-assistant {
   background-color: var(--message-assistant-background);
-
   color: var(--message-assistant-text);
+  overflow: hidden;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* Ensure message bubble content respects container width */
+.message-bubble {
+  overflow: hidden;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.message-bubble [data-content] {
+  overflow-x: auto;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
+  min-width: 0;
 }
 
 /* Tab Bar Styles */
@@ -316,6 +335,7 @@ html.dark .chip-tables {
   background-color: var(--background-secondary);
   border-radius: 6px 6px 0 0;
   overflow: hidden;
+  min-width: 0;
 }
 
 .tab-item {
@@ -330,6 +350,10 @@ html.dark .chip-tables {
   transition: all 0.2s ease;
   flex: 1;
   text-align: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tab-item:hover {
@@ -349,6 +373,9 @@ html.dark .chip-tables {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .table-toolbar {
@@ -359,17 +386,22 @@ html.dark .chip-tables {
   border-bottom: 1px solid var(--border-primary);
   align-items: center;
   flex-wrap: wrap;
+  flex-shrink: 0;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .table-search-input {
   flex: 1;
-  min-width: 150px;
+  min-width: 60px;
   padding: 6px 10px;
   border: 1px solid var(--border-primary);
   border-radius: 4px;
   font-size: 12px;
   background-color: var(--background-primary);
   color: var(--text-primary);
+  box-sizing: border-box;
 }
 
 .table-search-input::placeholder {
@@ -409,6 +441,7 @@ html.dark .chip-tables {
   flex: 1;
   overflow: auto;
   background-color: var(--background-primary);
+  min-width: 0;
 }
 
 .papers-table {
@@ -416,6 +449,7 @@ html.dark .chip-tables {
   border-collapse: collapse;
   font-size: 12px;
   table-layout: fixed;
+  max-width: 100%;
 }
 
 .papers-table th {
@@ -574,9 +608,12 @@ html.dark .chip-tables {
 .chat-md-table {
   border-collapse: collapse;
   width: 100%;
+  max-width: 100%;
   margin: 8px 0;
   font-size: 0.95em;
   background-color: var(--background-primary);
+  table-layout: fixed;
+  overflow: hidden;
 }
 
 .chat-md-th {
@@ -585,12 +622,18 @@ html.dark .chip-tables {
   background-color: var(--background-secondary);
   text-align: left;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
 }
 
 .chat-md-td {
   border: 1px solid var(--border-primary);
   padding: 8px;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
 }
 
 .chat-md-code {
@@ -600,6 +643,16 @@ html.dark .chip-tables {
   font-family: monospace;
   font-size: 0.9em;
   color: var(--text-primary);
+  word-break: break-all;
+}
+
+/* Markdown content container - ensure content fits within parent */
+.markdown-content {
+  overflow-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .chat-md-pre {
@@ -611,6 +664,10 @@ html.dark .chip-tables {
   font-size: 0.9em;
   margin: 8px 0;
   color: var(--text-primary);
+  max-width: 100%;
+  box-sizing: border-box;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .chat-md-link {
