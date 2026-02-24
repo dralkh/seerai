@@ -113,11 +113,12 @@ export function createMessageBubble(
     borderRadius: isUser ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
     fontSize: "13px",
     maxWidth: "90%",
+    width: "fit-content",
     alignSelf: isUser ? "flex-end" : "flex-start",
     color: textColor,
     boxShadow: "0 1px 2px rgba(0,0,0,0.1)",
     position: "relative",
-    overflow: "hidden",
+    boxSizing: "border-box",
   });
 
   // Header with sender and actions

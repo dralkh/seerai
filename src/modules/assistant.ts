@@ -23139,12 +23139,11 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
         borderRadius: isUser ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
         fontSize: "13px",
         maxWidth: "90%",
-        minWidth: "0",
+        width: "fit-content",
         minHeight: "auto",
         alignSelf: isUser ? "flex-end" : "flex-start",
         boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
         position: "relative",
-        overflow: "hidden",
         boxSizing: "border-box",
         backgroundColor: isUser
           ? "var(--accent-blue, #1976d2)"

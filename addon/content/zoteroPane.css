@@ -299,24 +299,20 @@ html.dark .chip-tables {
 .message-user {
   background-color: var(--message-user-background);
   color: var(--message-user-text);
-  overflow: hidden;
-  min-width: 0;
   box-sizing: border-box;
 }
 
 .message-assistant {
   background-color: var(--message-assistant-background);
   color: var(--message-assistant-text);
-  overflow: hidden;
-  min-width: 0;
   box-sizing: border-box;
 }
 
 /* Ensure message bubble content respects container width */
 .message-bubble {
-  overflow: hidden;
-  min-width: 0;
   box-sizing: border-box;
+  width: fit-content;
+  max-width: 90%;
 }
 
 .message-bubble [data-content] {
