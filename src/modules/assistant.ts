@@ -1884,7 +1884,7 @@ export class Assistant {
         const tabContent = ztoolkit.UI.createElement(doc, "div", {
           properties: { id: "tab-content" },
           styles: {
-            flex: "1",
+            flex: "1 1 0",
             display: "flex",
             flexDirection: "column",
             width: "100%",
@@ -1950,6 +1950,7 @@ export class Assistant {
       styles: {
         display: "flex",
         gap: "0",
+        flexShrink: "0",
         borderBottom: "1px solid var(--border-primary)",
         backgroundColor: "var(--background-secondary)",
         borderRadius: "6px 6px 0 0",
@@ -2202,15 +2203,15 @@ export class Assistant {
   ): Promise<HTMLElement> {
     const mainWrapper = doc.createElement("div");
     mainWrapper.style.cssText =
-      "display: flex; height: 100%; width: 100%; min-width: 0; max-width: 100%; overflow: hidden; box-sizing: border-box;";
+      "display: flex; flex: 1 1 0; min-height: 0; width: 100%; min-width: 0; max-width: 100%; overflow: hidden; box-sizing: border-box;";
 
     // === CHAT CONTENT ===
     const chatContainer = ztoolkit.UI.createElement(doc, "div", {
       styles: {
         display: "flex",
         flexDirection: "column",
-        height: "100%",
-        flex: "1",
+        flex: "1 1 0",
+        minHeight: "0",
         gap: "8px",
         padding: "4px 6px 6px 6px",
         minWidth: "0",
@@ -2235,19 +2236,19 @@ export class Assistant {
     // === MESSAGES AREA ===
     const messagesArea = ztoolkit.UI.createElement(doc, "div", {
       styles: {
-        flex: "1",
+        flex: "1 1 0",
+        minHeight: "0",
         overflowY: "auto",
+        overflowX: "hidden",
         border: "1px solid var(--border-primary)",
         borderRadius: "6px",
-        padding: "10px 10px 300px 10px",
+        padding: "10px",
         backgroundColor: "var(--background-primary)",
         display: "flex",
         flexDirection: "column",
         gap: "10px",
-        minHeight: "200px",
         minWidth: "0",
         maxWidth: "100%",
-        overflow: "auto",
         boxSizing: "border-box",
         userSelect: "text",
         cursor: "text",
@@ -21018,7 +21019,7 @@ ${tableRows}  </tbody>
         display: "flex",
         flexDirection: "column",
         gap: "6px",
-        marginBottom: "10px",
+        flexShrink: "0",
         minWidth: "0",
         maxWidth: "100%",
         boxSizing: "border-box",
@@ -23160,8 +23161,8 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
         borderRadius: isUser ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
         fontSize: "13px",
         maxWidth: "90%",
-        width: "fit-content",
-        minHeight: "auto",
+        minWidth: "0",
+        flexShrink: "0",
         alignSelf: isUser ? "flex-end" : "flex-start",
         boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
         position: "relative",

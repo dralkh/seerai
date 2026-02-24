@@ -308,11 +308,16 @@ html.dark .chip-tables {
   box-sizing: border-box;
 }
 
-/* Ensure message bubble content respects container width */
+/* Ensure message bubbles never shrink/truncate when new messages are added.
+   The messages area is a flex-column scroll container; bubbles must keep their
+   intrinsic height and let the container scroll instead. */
 .message-bubble {
   box-sizing: border-box;
-  width: fit-content;
   max-width: 90%;
+  min-width: 0;
+  flex-shrink: 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .message-bubble [data-content] {
