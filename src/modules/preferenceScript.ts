@@ -724,6 +724,12 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   const providerPresets = [
     { name: "— Select a preset —", apiURL: "", model: "", placeholder: "" },
     {
+      name: "NanoGPT",
+      apiURL: "https://nano-gpt.com/api/v1",
+      model: "",
+      placeholder: "nano-...",
+    },
+    {
       name: "OpenAI",
       apiURL: "https://api.openai.com/v1/",
       model: "gpt-5-mini",
@@ -785,7 +791,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     },
     {
       name: "OpenAI Compatible",
-      apiURL: "http://seerai.com:1234/v1/",
+      apiURL: "https://nano-gpt.com/api/v1",
       model: "local-model",
       placeholder: "(optional)",
     },
@@ -835,6 +841,11 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   // Preset selector (only show for new configs)
   const inputs: Record<string, HTMLInputElement> = {};
 
+  // NanoGPT model select container (declared outside if block so form fields can reference it)
+  let nanoGptModelSelect: HTMLElement | null = null;
+  // Hoisted fetch function reference, assigned inside the if-block
+  let fetchNanoGptModelsFn: (() => Promise<void>) | null = null;
+
   if (!isEdit) {
     const presetLabel = doc.createElementNS(HTML_NS, "label") as HTMLElement;
     presetLabel.textContent = "Provider Preset";
@@ -854,48 +865,350 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       ) as HTMLOptionElement;
       option.value = String(idx);
       option.textContent = preset.name;
+      if (idx === 1) option.selected = true; // Default to NanoGPT
       presetSelect.appendChild(option);
     });
+
+    // NanoGPT invitation card (shown when NanoGPT preset is selected)
+    const nanoGptCard = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    nanoGptCard.style.cssText = `
+      display: block;
+      margin: 8px 0 12px 0;
+      padding: 12px 14px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      border: 1px solid rgba(100, 180, 255, 0.25);
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+    `;
+    nanoGptCard.addEventListener("mouseenter", () => {
+      nanoGptCard.style.borderColor = "rgba(100, 180, 255, 0.5)";
+      nanoGptCard.style.boxShadow = "0 2px 12px rgba(100, 180, 255, 0.15)";
+    });
+    nanoGptCard.addEventListener("mouseleave", () => {
+      nanoGptCard.style.borderColor = "rgba(100, 180, 255, 0.25)";
+      nanoGptCard.style.boxShadow = "none";
+    });
+    nanoGptCard.addEventListener("click", () => {
+      // Open NanoGPT referral link in system browser
+      Zotero.launchURL("https://nano-gpt.com/r/RwCEN6fR");
+    });
+
+    const cardTitle = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    cardTitle.textContent = "NanoGPT — Pay-per-use AI";
+    cardTitle.style.cssText = `
+      font-size: 14px;
+      font-weight: 600;
+      color: #e0e0ff;
+      margin-bottom: 4px;
+    `;
+    nanoGptCard.appendChild(cardTitle);
+
+    const cardDesc = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    cardDesc.textContent =
+      "Access 300+ AI models. Pay only for what you use via Apple Pay, Google Pay, credit card, or crypto. Click to sign up.";
+    cardDesc.style.cssText = `
+      font-size: 11px;
+      color: #a0b4d0;
+      line-height: 1.4;
+    `;
+    nanoGptCard.appendChild(cardDesc);
+
+    const cardLink = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    cardLink.textContent = "nano-gpt.com →";
+    cardLink.style.cssText = `
+      font-size: 11px;
+      color: #64b4ff;
+      margin-top: 6px;
+      font-weight: 500;
+    `;
+    nanoGptCard.appendChild(cardLink);
+
+    // NanoGPT searchable model dropdown (replaces text input when NanoGPT is selected)
+    const nanoModelContainer = doc.createElementNS(
+      HTML_NS,
+      "div",
+    ) as HTMLDivElement;
+    nanoGptModelSelect = nanoModelContainer;
+    nanoModelContainer.id = "model-config-nanogpt-model-select";
+    nanoModelContainer.style.cssText = `
+      width: 100%;
+      margin-bottom: 16px;
+      box-sizing: border-box;
+      display: none;
+      position: relative;
+    `;
+
+    // Search input
+    const nanoSearchInput = doc.createElementNS(
+      HTML_NS,
+      "input",
+    ) as HTMLInputElement;
+    nanoSearchInput.type = "text";
+    nanoSearchInput.placeholder = "Search models...";
+    nanoSearchInput.style.cssText = `
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
+      border-radius: 6px;
+      font-size: 14px;
+      box-sizing: border-box;
+      background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
+      color: ${inputText || defaultTitleColor};
+    `;
+    nanoModelContainer.appendChild(nanoSearchInput);
+
+    // Scrollable model list
+    const nanoModelList = doc.createElementNS(HTML_NS, "div") as HTMLDivElement;
+    nanoModelList.style.cssText = `
+      width: 100%;
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
+      border-top: none;
+      border-radius: 0 0 6px 6px;
+      box-sizing: border-box;
+      background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
+      display: none;
+    `;
+    nanoModelContainer.appendChild(nanoModelList);
+
+    // State for the searchable dropdown
+    let allNanoModels: string[] = [];
+    let selectedNanoModel = "";
+
+    function renderNanoModelItems(filter: string) {
+      nanoModelList.innerHTML = "";
+      const query = filter.toLowerCase();
+      const filtered = query
+        ? allNanoModels.filter((m) => m.toLowerCase().includes(query))
+        : allNanoModels;
+
+      if (filtered.length === 0) {
+        const emptyItem = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+        emptyItem.textContent = query
+          ? "No matching models"
+          : "No models available";
+        emptyItem.style.cssText = `
+          padding: 8px 12px;
+          font-size: 13px;
+          color: ${isDark ? "#888" : "#999"};
+          font-style: italic;
+        `;
+        nanoModelList.appendChild(emptyItem);
+        return;
+      }
+
+      filtered.forEach((modelId) => {
+        const item = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+        item.textContent = modelId;
+        const isSelected = modelId === selectedNanoModel;
+        item.style.cssText = `
+          padding: 7px 12px;
+          font-size: 13px;
+          cursor: pointer;
+          color: ${inputText || defaultTitleColor};
+          background: ${isSelected ? (isDark ? "#3a3a5e" : "#e0e8ff") : "transparent"};
+        `;
+        item.addEventListener("mouseenter", () => {
+          if (modelId !== selectedNanoModel) {
+            item.style.background = isDark ? "#333" : "#f0f0f0";
+          }
+        });
+        item.addEventListener("mouseleave", () => {
+          item.style.background =
+            modelId === selectedNanoModel
+              ? isDark
+                ? "#3a3a5e"
+                : "#e0e8ff"
+              : "transparent";
+        });
+        item.addEventListener("click", () => {
+          selectedNanoModel = modelId;
+          nanoSearchInput.value = modelId;
+          nanoModelList.style.display = "none";
+          // Round the search input corners back
+          nanoSearchInput.style.borderRadius = "6px";
+          nanoSearchInput.style.borderBottom = `1px solid ${inputBorder || (isDark ? "#444" : "#ccc")}`;
+          // Sync to hidden model text input and auto-fill name
+          if (inputs.model) inputs.model.value = modelId;
+          if (inputs.name) inputs.name.value = `nano-${modelId}`;
+        });
+        nanoModelList.appendChild(item);
+      });
+    }
+
+    // Show/hide list on focus/blur
+    nanoSearchInput.addEventListener("focus", () => {
+      nanoSearchInput.style.borderColor = inputFocusBorder;
+      nanoSearchInput.style.outline = "none";
+      if (allNanoModels.length > 0) {
+        nanoModelList.style.display = "";
+        // Flatten bottom corners of search input when list is open
+        nanoSearchInput.style.borderRadius = "6px 6px 0 0";
+        nanoSearchInput.style.borderBottom = "none";
+        renderNanoModelItems(
+          nanoSearchInput.value === selectedNanoModel
+            ? ""
+            : nanoSearchInput.value,
+        );
+      }
+    });
+
+    // Filter on input
+    nanoSearchInput.addEventListener("input", () => {
+      renderNanoModelItems(nanoSearchInput.value);
+      if (nanoModelList.style.display === "none" && allNanoModels.length > 0) {
+        nanoModelList.style.display = "";
+        nanoSearchInput.style.borderRadius = "6px 6px 0 0";
+        nanoSearchInput.style.borderBottom = "none";
+      }
+    });
+
+    // Close list when clicking outside
+    doc.addEventListener("click", (e: Event) => {
+      if (!nanoModelContainer.contains(e.target as Node)) {
+        nanoModelList.style.display = "none";
+        nanoSearchInput.style.borderRadius = "6px";
+        nanoSearchInput.style.borderBottom = `1px solid ${inputBorder || (isDark ? "#444" : "#ccc")}`;
+        nanoSearchInput.style.borderColor =
+          inputBorder || (isDark ? "#444" : "#ccc");
+        // If user cleared the search without picking, restore previous selection
+        if (selectedNanoModel && nanoSearchInput.value !== selectedNanoModel) {
+          nanoSearchInput.value = selectedNanoModel;
+        }
+      }
+    });
+
+    // Status message helper
+    function setNanoModelStatus(text: string) {
+      nanoModelList.style.display = "none";
+      nanoSearchInput.value = "";
+      nanoSearchInput.placeholder = text;
+      allNanoModels = [];
+      selectedNanoModel = "";
+    }
+
+    setNanoModelStatus("Loading models...");
+
+    // Function to fetch and populate NanoGPT models
+    let nanoGptModelsFetched = false;
+    async function fetchNanoGptModels() {
+      if (nanoGptModelsFetched) return;
+      try {
+        setNanoModelStatus("Fetching models...");
+
+        const response = await fetch("https://nano-gpt.com/api/v1/models", {
+          headers: { "x-seer-ai": "1" },
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = (await response.json()) as {
+          data?: { id: string; owned_by?: string }[];
+        };
+
+        if (data?.data && Array.isArray(data.data)) {
+          allNanoModels = data.data.map((m) => m.id).sort();
+          nanoSearchInput.placeholder = "Search models...";
+          nanoSearchInput.value = "";
+          nanoGptModelsFetched = true;
+          Zotero.debug(
+            `[seerai] Fetched ${allNanoModels.length} NanoGPT models`,
+          );
+        }
+      } catch (e) {
+        Zotero.debug(`[seerai] Failed to fetch NanoGPT models: ${e}`);
+        setNanoModelStatus("Failed to load models (type manually below)");
+        // Show the text input as fallback
+        if (inputs.model) inputs.model.style.display = "";
+        nanoModelContainer.style.display = "none";
+      }
+    }
 
     presetSelect.addEventListener("change", () => {
       const idx = parseInt(presetSelect.value);
       const preset = providerPresets[idx];
+
+      // Cache the current API key before switching presets
+      const currentApiUrl = inputs.apiURL?.value?.trim();
+      const currentApiKey = inputs.apiKey?.value?.trim();
+      if (currentApiUrl && currentApiKey) {
+        try {
+          const cached = JSON.parse(
+            (Zotero.Prefs.get(
+              `${config.prefsPrefix}.cachedProviderApiKeys`,
+            ) as string) || "{}",
+          );
+          cached[currentApiUrl] = currentApiKey;
+          Zotero.Prefs.set(
+            `${config.prefsPrefix}.cachedProviderApiKeys`,
+            JSON.stringify(cached),
+          );
+        } catch (_) {
+          /* ignore parse errors */
+        }
+      }
+
       if (preset && idx > 0) {
-        if (inputs.name && !inputs.name.value) inputs.name.value = preset.name;
         if (inputs.apiURL) inputs.apiURL.value = preset.apiURL;
         if (inputs.model) inputs.model.value = preset.model;
         if (inputs.apiKey)
           inputs.apiKey.placeholder = preset.placeholder || "API Key";
+
+        // Restore cached API key for this provider
+        if (inputs.apiKey && preset.apiURL) {
+          try {
+            const cached = JSON.parse(
+              (Zotero.Prefs.get(
+                `${config.prefsPrefix}.cachedProviderApiKeys`,
+              ) as string) || "{}",
+            );
+            inputs.apiKey.value = cached[preset.apiURL] || "";
+          } catch (_) {
+            /* ignore parse errors */
+          }
+        }
+
+        // For NanoGPT, name is set dynamically on model select; set placeholder for now
+        const isNanoGpt = preset.name === "NanoGPT";
+        if (isNanoGpt) {
+          if (inputs.name && !inputs.name.value) inputs.name.value = "NanoGPT";
+        } else {
+          if (inputs.name && !inputs.name.value)
+            inputs.name.value = preset.name;
+        }
+      }
+
+      // NanoGPT-specific behavior
+      const isNanoGpt = preset?.name === "NanoGPT";
+
+      if (isNanoGpt) {
+        // Show model dropdown, hide text input
+        nanoModelContainer.style.display = "";
+        if (inputs.model) inputs.model.style.display = "none";
+        fetchNanoGptModels();
+      } else {
+        // Show text input, hide model dropdown
+        nanoModelContainer.style.display = "none";
+        if (inputs.model) inputs.model.style.display = "";
       }
     });
 
     modal.appendChild(presetSelect);
+    modal.appendChild(nanoGptCard);
 
     // Divider
     const dividerBg = getCssVar("--divider-bg");
-    const dividerTextBg = getCssVar("--divider-text-bg");
-    const dividerTextColor = getCssVar("--divider-text-color");
 
     const divider = doc.createElementNS(HTML_NS, "div") as HTMLElement;
     divider.style.cssText = `
       border-top: 1px solid ${dividerBg};
       margin: 4px 0 16px 0;
-      position: relative;
     `;
-    const dividerText = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-    dividerText.textContent = "or fill manually";
-    dividerText.style.cssText = `
-      position: absolute;
-      top: -9px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: ${dividerTextBg};
-      padding: 0 12px;
-      font-size: 11px;
-      color: ${dividerTextColor};
-    `;
-    divider.appendChild(dividerText);
     modal.appendChild(divider);
+
+    // Expose fetchNanoGptModels to outer scope for auto-apply after fields are created
+    fetchNanoGptModelsFn = fetchNanoGptModels;
   }
 
   // Create form fields
@@ -911,7 +1224,9 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       id: "apiURL",
       label: "API URL",
       placeholder: "https://api.openai.com/v1/",
-      value: existingConfig?.apiURL || "https://api.openai.com/v1/",
+      value:
+        existingConfig?.apiURL ||
+        (isEdit ? "https://api.openai.com/v1/" : "https://nano-gpt.com/api/v1"),
       type: "text",
     },
     {
@@ -943,6 +1258,12 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     input.style.cssText = inputStyle;
     input.id = `model-config-${field.id}`;
     inputs[field.id] = input;
+
+    // Insert NanoGPT model dropdown right before the model text input
+    if (field.id === "model" && !isEdit && nanoGptModelSelect) {
+      modal.appendChild(nanoGptModelSelect);
+    }
+
     modal.appendChild(input);
 
     // Add focus effect
@@ -954,6 +1275,28 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       input.style.borderColor = inputBorder;
     });
   });
+
+  // Auto-apply NanoGPT preset now that form fields exist
+  if (!isEdit && nanoGptModelSelect && fetchNanoGptModelsFn) {
+    nanoGptModelSelect.style.display = "";
+    if (inputs.model) inputs.model.style.display = "none";
+    fetchNanoGptModelsFn();
+
+    // Restore cached API key for the default NanoGPT preset
+    if (inputs.apiKey) {
+      try {
+        const cached = JSON.parse(
+          (Zotero.Prefs.get(
+            `${config.prefsPrefix}.cachedProviderApiKeys`,
+          ) as string) || "{}",
+        );
+        const nanoUrl = "https://nano-gpt.com/api/v1";
+        if (cached[nanoUrl]) inputs.apiKey.value = cached[nanoUrl];
+      } catch (_) {
+        /* ignore parse errors */
+      }
+    }
+  }
 
   // --- Rate Limit Section ---
   const rlLabel = doc.createElementNS(HTML_NS, "label") as HTMLElement;
@@ -1131,9 +1474,15 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   });
 
   saveBtn.addEventListener("click", () => {
+    // Enforce NanoGPT URL if the config is using a nano-gpt.com endpoint
+    let apiURL = inputs.apiURL.value.trim();
+    if (apiURL.includes("nano-gpt.com")) {
+      apiURL = "https://nano-gpt.com/api/v1";
+    }
+
     const newConfig = {
       name: inputs.name.value.trim(),
-      apiURL: inputs.apiURL.value.trim(),
+      apiURL,
       apiKey: inputs.apiKey.value.trim(),
       model: inputs.model.value.trim(),
       rateLimit: {
@@ -1157,6 +1506,24 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       updateModelConfig(existingConfig.id, newConfig);
     } else {
       addModelConfig(newConfig);
+    }
+
+    // Cache API key per provider URL for future reuse
+    if (newConfig.apiKey && newConfig.apiURL) {
+      try {
+        const cached = JSON.parse(
+          (Zotero.Prefs.get(
+            `${config.prefsPrefix}.cachedProviderApiKeys`,
+          ) as string) || "{}",
+        );
+        cached[newConfig.apiURL] = newConfig.apiKey;
+        Zotero.Prefs.set(
+          `${config.prefsPrefix}.cachedProviderApiKeys`,
+          JSON.stringify(cached),
+        );
+      } catch (_) {
+        /* ignore parse errors */
+      }
     }
 
     overlay.remove();

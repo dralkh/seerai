@@ -121,6 +121,7 @@ class FirecrawlService {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
+        "x-seer-ai": "1",
         ...(options.headers || {}),
       },
     });

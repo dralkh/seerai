@@ -173,6 +173,7 @@ class SemanticScholarService {
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
+      "x-seer-ai": "1",
       ...((options.headers as Record<string, string>) || {}),
     };
 
@@ -203,7 +204,9 @@ class SemanticScholarService {
     this.lastAutocompleteTime = Date.now();
 
     const apiKey = this.getApiKey();
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = {
+      "x-seer-ai": "1",
+    };
 
     if (apiKey) {
       headers["x-api-key"] = apiKey;
@@ -724,7 +727,9 @@ class UnpaywallService {
       const url = `${this.baseUrl}/${encodeURIComponent(doi)}?email=${this.email}`;
       Zotero.debug(`[seerai] Checking Unpaywall for DOI: ${doi}`);
 
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: { "x-seer-ai": "1" },
+      });
 
       if (!response.ok) {
         if (response.status === 404) {

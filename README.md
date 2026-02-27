@@ -29,6 +29,16 @@
   <img src="https://github.com/user-attachments/assets/fe543d48-eb68-47e4-b5f6-1d954e1597a2" width="600" />
 </p>
 
+<p align="center">
+  <a href="https://nano-gpt.com/r/RwCEN6fR">
+    <img src="https://ik.imagekit.io/nanogpt/og-image.png?tr=w-600" alt="Powered by NanoGPT" width="600" />
+  </a>
+</p>
+
+<p align="center">
+  <b>Powered by <a href="https://nano-gpt.com/r/RwCEN6fR">NanoGPT</a></b> — Access 300+ AI models with flexible pay-as-you-go or subscription plans.
+</p>
+
 **seerai** is an intelligent research assistant plugin for Zotero 8 that integrates AI-powered chat, advanced search, and data extraction capabilities directly into your research workflow. Chat with your papers, extract structured data, and accelerate your literature review with a local-first, privacy-focused design.
 
 ---
@@ -40,7 +50,7 @@
 - **Contextual Conversations**: Chat with AI about your selected papers with full context awareness.
 - **Smart Context Priority**: Automatically prioritizes content sources:
   1. **Zotero Notes** (OCR note, and other notes for highest priority)
-  2. **Indexed PDF Text** (Fast, efficient, howver consumes alot of tokens, and would cause limit issues)
+  2. **Indexed PDF Text** (Fast, efficient, however consumes a lot of tokens and may cause limit issues)
   3. **OCR** (Fallback for scanned documents with no indexed text)
 - **Multi-paper Support**: Add multiple papers to a single conversation for comparative analysis.
 - **Streaming Responses**: Real-time, token-by-token response rendering.
@@ -105,6 +115,7 @@
 ### Customizable AI
 
 - **Model Presets**: Pre-configured settings for popular providers:
+  - [NanoGPT](https://nano-gpt.com/r/RwCEN6fR) (300+ models, pay-as-you-go or subscription)
   - OpenAI (GPT-5, o3)
   - Anthropic (Claude Sonnet 4.5)
   - Google (Gemini 3 Pro)
@@ -155,6 +166,7 @@ Go to **Zotero → Settings → seerai** to configure your AI providers and serv
 
 Use the **Add Configuration** button to set up your AI models.
 
+- **[NanoGPT](https://nano-gpt.com/r/RwCEN6fR)** (Default): Pre-selected when adding a new model. Access 300+ AI models with flexible pricing — pay-as-you-go or subscription plans. Supports Apple Pay, Google Pay, credit card, and crypto. The model list is fetched automatically.
 - **Presets**: Select from built-in presets (OpenAI, Anthropic, Ollama, etc.) for quick setup.
 - **Custom**: Manually configure API URL, Key, and Model ID for any OpenAI-compatible provider.
 - **Default**: Set a preferred model as your default for new conversations.
@@ -184,7 +196,7 @@ Seer-AI now includes a Model Context Protocol (MCP) server and a local API for e
   - **Settings → seerai → API**.
   - Default Port: `23119`
 
-This mode requires highly sophistecated models with good tool function capabilities to function properly.
+This mode requires sophisticated models with strong tool/function-calling capabilities to function properly.
 
 ---
 
@@ -253,10 +265,10 @@ Enhanced search functionality to help users find relevant literature more effect
 
 ### Others
 
-Citations referencing within tables and chat on generation
-Internal custom support mcp json presets
-Connectors
-UI revamp
+- **Citation References**: Inline citations within tables and chat during generation.
+- **Internal MCP Presets**: Custom support for MCP JSON presets for streamlined integrations.
+- **Connectors**: External service connectors for extended workflows.
+- **UI Revamp**: Modernized interface with improved accessibility and responsiveness.
 
 ---
 
@@ -316,6 +328,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
+- [NanoGPT](https://nano-gpt.com/r/RwCEN6fR) — Partner
 - [Zotero](https://www.zotero.org)
 - [Mistral AI](https://mistral.ai)
 - [Semantic Scholar](https://www.semanticscholar.org)

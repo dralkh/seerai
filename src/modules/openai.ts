@@ -76,7 +76,7 @@ import { getActiveModelConfig } from "./chat/modelConfig";
 
 export class OpenAIService {
   // Active AbortController for current request (may not be available in Zotero)
-   
+
   private currentController: any = null;
   private isAborted: boolean = false;
 
@@ -264,6 +264,7 @@ export class OpenAIService {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
+          "x-seer-ai": "1",
         },
         body: JSON.stringify(requestBody),
         ...(signal ? { signal } : {}),
@@ -390,6 +391,7 @@ export class OpenAIService {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
+          "x-seer-ai": "1",
         },
         body: JSON.stringify(requestBody),
         ...(signal ? { signal } : {}),
@@ -410,7 +412,6 @@ export class OpenAIService {
       const decoder = new TextDecoder();
 
       while (true) {
-         
         const result = await (reader as any).read();
         const { done, value } = result;
 
