@@ -5,6 +5,190 @@
 
 import { ChatMessage } from "../types";
 import { parseMarkdown } from "../markdown";
+import { openAIService } from "../../openai";
+import { getActiveModelConfig } from "../modelConfig";
+
+// Global TTS audio state — only one message plays at a time
+let currentTtsAudio: HTMLAudioElement | null = null;
+let currentTtsButton: HTMLElement | null = null;
+let currentTtsBlobUrl: string | null = null;
+
+/**
+ * Strip markdown formatting from text so TTS reads naturally.
+ * Removes: headers, bold/italic markers, code blocks, links, images, etc.
+ */
+function stripMarkdownForTts(text: string): string {
+  return (
+    text
+      // Remove code blocks (``` ... ```) — drop the content entirely
+      .replace(/```[\s\S]*?```/g, "")
+      // Remove inline code (`...`)
+      .replace(/`([^`]+)`/g, "$1")
+      // Remove images ![alt](url)
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+      // Remove links [text](url) → keep text
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      // Remove headers (# ## ### etc.)
+      .replace(/^#{1,6}\s+/gm, "")
+      // Remove bold/italic markers (*** ** * ___ __ _)
+      .replace(/(\*{1,3}|_{1,3})(.*?)\1/g, "$2")
+      // Remove horizontal rules
+      .replace(/^[-*_]{3,}\s*$/gm, "")
+      // Remove blockquote markers
+      .replace(/^>\s+/gm, "")
+      // Remove list markers (- * + 1.)
+      .replace(/^[\s]*[-*+]\s+/gm, "")
+      .replace(/^[\s]*\d+\.\s+/gm, "")
+      // Collapse multiple newlines
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  );
+}
+
+/**
+ * Stop any currently playing TTS audio and reset button state
+ */
+export function stopTtsPlayback(): void {
+  if (currentTtsBlobUrl) {
+    URL.revokeObjectURL(currentTtsBlobUrl);
+    currentTtsBlobUrl = null;
+  }
+  if (currentTtsAudio) {
+    currentTtsAudio.pause();
+    currentTtsAudio.src = "";
+    currentTtsAudio = null;
+  }
+  if (currentTtsButton) {
+    currentTtsButton.innerText = "\u{1F50A}"; // 🔊
+    currentTtsButton.title = "Play TTS";
+    currentTtsButton = null;
+  }
+}
+
+/**
+ * Play TTS for the given text, updating the button state.
+ * Stops any currently playing TTS first.
+ */
+export async function playTts(
+  text: string,
+  button: HTMLElement,
+): Promise<void> {
+  // If this button is already playing, stop it
+  if (currentTtsButton === button && currentTtsAudio) {
+    stopTtsPlayback();
+    return;
+  }
+
+  // Stop any other playing TTS
+  stopTtsPlayback();
+
+  const originalText = button.innerText;
+  button.innerText = "\u23F3"; // ⏳
+  button.title = "Loading...";
+  currentTtsButton = button;
+
+  try {
+    const cleanText = stripMarkdownForTts(text);
+    const audioBuffer = await openAIService.textToSpeech(cleanText);
+    const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
+    const url = URL.createObjectURL(blob);
+    currentTtsBlobUrl = url;
+    const audio = button.ownerDocument!.createElement(
+      "audio",
+    ) as HTMLAudioElement;
+    audio.src = url;
+    currentTtsAudio = audio;
+
+    button.innerText = "\u23F9"; // ⏹
+    button.title = "Stop";
+
+    audio.addEventListener("ended", () => {
+      URL.revokeObjectURL(url);
+      currentTtsBlobUrl = null;
+      if (currentTtsButton === button) {
+        button.innerText = "\u{1F50A}"; // 🔊
+        button.title = "Play TTS";
+        currentTtsAudio = null;
+        currentTtsButton = null;
+      }
+    });
+
+    audio.addEventListener("error", () => {
+      URL.revokeObjectURL(url);
+      button.innerText = "\u274C"; // ❌
+      button.title = "TTS playback failed";
+      setTimeout(() => {
+        button.innerText = "\u{1F50A}"; // 🔊
+        button.title = "Play TTS";
+      }, 2000);
+      if (currentTtsButton === button) {
+        currentTtsAudio = null;
+        currentTtsButton = null;
+      }
+    });
+
+    await audio.play();
+  } catch (e) {
+    Zotero.debug(`[seerai] TTS error: ${e}`);
+    button.innerText = "\u274C"; // ❌
+    button.title = `TTS failed: ${e}`;
+    setTimeout(() => {
+      button.innerText = originalText;
+      button.title = "Play TTS";
+    }, 2000);
+    currentTtsButton = null;
+    currentTtsAudio = null;
+  }
+}
+
+/**
+ * Check if TTS is configured for the active model
+ */
+export function isTtsConfigured(): boolean {
+  const config = getActiveModelConfig();
+  return !!config?.ttsConfig?.model;
+}
+
+/**
+ * Auto-play TTS for an assistant response (no button needed).
+ * Uses the same global audio state so manual play/stop still works.
+ */
+export async function autoPlayTtsResponse(text: string): Promise<void> {
+  if (!isTtsConfigured() || !text.trim()) return;
+
+  // Stop any currently playing TTS
+  stopTtsPlayback();
+
+  try {
+    const cleanText = stripMarkdownForTts(text);
+    const audioBuffer = await openAIService.textToSpeech(cleanText);
+    const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
+    const url = URL.createObjectURL(blob);
+    currentTtsBlobUrl = url;
+    const doc = Zotero.getMainWindow().document;
+    const audio = doc.createElement("audio") as HTMLAudioElement;
+    audio.src = url;
+    currentTtsAudio = audio;
+    currentTtsButton = null; // No button for auto-play
+
+    audio.addEventListener("ended", () => {
+      URL.revokeObjectURL(url);
+      currentTtsBlobUrl = null;
+      currentTtsAudio = null;
+    });
+
+    audio.addEventListener("error", () => {
+      URL.revokeObjectURL(url);
+      currentTtsAudio = null;
+      Zotero.debug("[seerai] Auto-play TTS playback failed");
+    });
+
+    await audio.play();
+  } catch (e) {
+    Zotero.debug(`[seerai] Auto-play TTS error: ${e}`);
+    currentTtsAudio = null;
+  }
+}
 
 /**
  * Message colors configuration
@@ -152,6 +336,19 @@ export function createMessageBubble(
     copyToClipboard(text, copyBtn);
   });
   actionsDiv.appendChild(copyBtn);
+
+  // TTS play button (when TTS is configured)
+  if (isTtsConfigured()) {
+    Zotero.debug("[seerai] TTS configured, adding play button to message");
+    const ttsBtn = createActionButton(doc, "\u{1F50A}", "Play TTS", () => {
+      // Read the latest text from the content div's data-raw attribute
+      const currentText =
+        msgDiv.querySelector("[data-content]")?.getAttribute("data-raw") ||
+        text;
+      playTts(currentText, ttsBtn);
+    });
+    actionsDiv.appendChild(ttsBtn);
+  }
 
   // Edit button (only for last user message)
   if (isUser && options?.isLastUserMsg && options?.onEdit) {

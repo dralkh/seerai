@@ -87,6 +87,11 @@ import {
   isDropdownOpen,
 } from "./chat/ui/placeholderDropdown";
 import { showChatSettings } from "./chat/ui/chatSettings";
+import {
+  isTtsConfigured,
+  autoPlayTtsResponse,
+  playTts,
+} from "./chat/ui/messageRenderer";
 import { ChatContextManager } from "./chat/context/contextManager";
 import { createContextChipsArea } from "./chat/context/contextUI";
 import { ContextItem, ContextItemType } from "./chat/context/contextTypes";
@@ -1538,6 +1543,12 @@ export class Assistant {
           total +=
             tableConfig.addedPaperIds.length *
             (options.includeNotesOnly ? 200 : 1000);
+        }
+      } else if (item.type === "file") {
+        // Uploaded file — token estimate was computed at upload time and stored in metadata
+        const fileTokens = item.metadata?.estimatedTokens as number | undefined;
+        if (fileTokens && fileTokens > 0) {
+          total += fileTokens;
         }
       } else if (item.type === "collection" || item.type === "tag") {
         try {
@@ -21824,11 +21835,1408 @@ ${tableRows}  </tbody>
       },
     );
 
-    // Toolbar row: left group (first 4) and right group (last 4)
+    // Toolbar row: left group and right group
     toolbarLeft.appendChild(agenticContainer);
     toolbarLeft.appendChild(settingsContainer);
     toolbarLeft.appendChild(promptsContainer);
     toolbarLeft.appendChild(placeholderBtn);
+
+    // ── 📎 File Upload Button ──
+    // Opens a file picker for PDF/audio/text/markdown, adds to context system
+    const uploadBtn = ztoolkit.UI.createElement(doc, "button", {
+      properties: {
+        innerText: "\u{1F4CE}",
+        title: "Attach file (PDF, audio, text, markdown)",
+      },
+      styles: {
+        padding: "0 12px",
+        height: "32px",
+        fontSize: "13px",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "6px",
+        backgroundColor: "var(--background-secondary)",
+        color: "var(--text-secondary)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      },
+    }) as HTMLButtonElement;
+
+    uploadBtn.addEventListener("click", async () => {
+      try {
+        const win = Zotero.getMainWindow() as any;
+
+        // Use Zotero's FilePicker (XPCOM nsIFilePicker wrapper)
+        const fp = new win.FilePicker();
+        fp.init(win, "Attach File to Chat", fp.modeOpen);
+
+        // Add filters for supported file types
+        fp.appendFilter(
+          "All Supported Files",
+          "*.pdf;*.txt;*.md;*.markdown;*.csv;*.json;*.xml;*.html;*.htm;*.rtf;*.docx;*.doc;*.mp3;*.wav;*.ogg;*.webm;*.m4a;*.flac;*.aac",
+        );
+        fp.appendFilter(
+          "Documents",
+          "*.pdf;*.txt;*.md;*.markdown;*.csv;*.json;*.xml;*.html;*.htm;*.rtf;*.docx;*.doc",
+        );
+        fp.appendFilter(
+          "Audio Files",
+          "*.mp3;*.wav;*.ogg;*.webm;*.m4a;*.flac;*.aac",
+        );
+        fp.appendFilters(fp.filterAll);
+
+        const result = await fp.show();
+        if (result !== fp.returnOK) return;
+
+        const filePath = fp.file;
+        if (!filePath) return;
+
+        // Extract filename from path
+        const filename = filePath.split(/[/\\]/).pop() || "unknown";
+        const ext = filename.split(".").pop()?.toLowerCase() || "";
+
+        // Determine file category for metadata
+        const audioExts = ["mp3", "wav", "ogg", "webm", "m4a", "flac", "aac"];
+        const textExts = [
+          "txt",
+          "md",
+          "markdown",
+          "csv",
+          "json",
+          "xml",
+          "html",
+          "htm",
+        ];
+        const richDocExts = ["rtf", "docx", "doc"];
+        const fileCategory = audioExts.includes(ext)
+          ? "audio"
+          : ext === "pdf"
+            ? "pdf"
+            : textExts.includes(ext)
+              ? "text"
+              : richDocExts.includes(ext)
+                ? "richdoc"
+                : "other";
+
+        // Generate unique ID for this file context item
+        const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+
+        // ── Extract content immediately at upload time ──
+        let extractedContent = "";
+        let fileSize = 0;
+        let extractionError = "";
+
+        try {
+          const contentBytes = await IOUtils.read(filePath);
+          fileSize = contentBytes.length;
+
+          if (fileCategory === "audio") {
+            // Audio: transcribe via STT API and store the resulting text
+            try {
+              const activeModelCfg = getActiveModelConfig();
+              if (!activeModelCfg?.sttConfig?.model) {
+                extractionError =
+                  "Speech-to-Text not configured. Add an STT model in settings to transcribe audio files.";
+              } else {
+                Zotero.debug(
+                  `[seerai] Transcribing audio file: ${filename} (${contentBytes.length} bytes)`,
+                );
+                const sttResult = await openAIService.speechToText(
+                  contentBytes,
+                  { filename: filename },
+                );
+                if (
+                  sttResult.transcription &&
+                  sttResult.transcription.length > 0
+                ) {
+                  extractedContent = sttResult.transcription;
+                  Zotero.debug(
+                    `[seerai] Audio transcribed: ${extractedContent.length} chars`,
+                  );
+                } else {
+                  extractionError =
+                    "Audio transcription returned empty result. The file may be silent or too short.";
+                }
+              }
+            } catch (sttErr: any) {
+              extractionError = `Audio transcription failed: ${sttErr.message || sttErr}`;
+              Zotero.debug(
+                `[seerai] STT error for "${filename}": ${sttErr.message || sttErr}`,
+              );
+            }
+          } else if (fileCategory === "pdf") {
+            // PDF: use Zotero's built-in PDFWorker (pdf.js) for reliable text extraction.
+            // PDFWorker._query sends the raw buffer to the pdf.js web worker which handles
+            // all PDF decompression (FlateDecode etc.) and text extraction properly.
+            try {
+              const pdfWorker = (Zotero as any).PDFWorker as any;
+              if (pdfWorker && pdfWorker._query && pdfWorker._enqueue) {
+                // Must copy buffer — the transfer in postMessage detaches it
+                const buf = new Uint8Array(contentBytes).buffer.slice(0);
+                const pdfResult = await pdfWorker._enqueue(async () => {
+                  return await pdfWorker._query(
+                    "getFulltext",
+                    { buf, maxPages: 0 },
+                    [buf],
+                  );
+                }, false);
+                if (pdfResult && pdfResult.text && pdfResult.text.length > 0) {
+                  extractedContent = pdfResult.text;
+                  Zotero.debug(
+                    `[seerai] PDF extracted via PDFWorker: ${extractedContent.length} chars, ${pdfResult.extractedPages}/${pdfResult.totalPages} pages`,
+                  );
+                } else {
+                  extractionError =
+                    "PDF text extraction returned no content. The PDF may be image-based — try OCR.";
+                }
+              } else {
+                extractionError =
+                  "Zotero PDFWorker not available. Add this PDF as a Zotero item for text extraction.";
+              }
+            } catch (pdfErr: any) {
+              Zotero.debug(
+                `[seerai] PDFWorker extraction failed for "${filename}": ${pdfErr.message || pdfErr}`,
+              );
+              extractionError = `PDF extraction failed: ${pdfErr.message || pdfErr}. Try adding as a Zotero item and using OCR.`;
+            }
+
+            // Cap at 200K chars for PDFs
+            const maxPdfChars = 200_000;
+            if (extractedContent.length > maxPdfChars) {
+              extractedContent =
+                extractedContent.substring(0, maxPdfChars) +
+                `\n[... truncated, ${extractedContent.length - maxPdfChars} chars omitted ...]`;
+            }
+          } else if (fileCategory === "text") {
+            // Text-based files: use IOUtils.readUTF8 for reliable UTF-8 reading
+            try {
+              extractedContent = await IOUtils.readUTF8(filePath);
+            } catch {
+              // Fallback to binary read + TextDecoder if readUTF8 fails (e.g. non-UTF8)
+              extractedContent = new TextDecoder("utf-8", {
+                fatal: false,
+              }).decode(contentBytes);
+            }
+
+            // Strip HTML tags for .html/.htm files
+            if (ext === "html" || ext === "htm") {
+              extractedContent = extractedContent
+                .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+                .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+                .replace(/<[^>]*>/g, " ")
+                .replace(/&nbsp;/gi, " ")
+                .replace(/&amp;/gi, "&")
+                .replace(/&lt;/gi, "<")
+                .replace(/&gt;/gi, ">")
+                .replace(/&quot;/gi, '"')
+                .replace(/&#39;/gi, "'")
+                .replace(/\s{3,}/g, "  ")
+                .trim();
+            }
+
+            Zotero.debug(
+              `[seerai] Text file read: ${extractedContent.length} chars from ${filename}`,
+            );
+
+            // Cap at 200K chars
+            const maxTextChars = 200_000;
+            if (extractedContent.length > maxTextChars) {
+              extractedContent =
+                extractedContent.substring(0, maxTextChars) +
+                `\n[... truncated, ${extractedContent.length - maxTextChars} chars omitted ...]`;
+            }
+          } else if (fileCategory === "richdoc") {
+            // Rich document formats: RTF, DOCX, DOC
+
+            if (ext === "rtf") {
+              // RTF: Strip RTF control codes to extract plain text
+              let rtfText = new TextDecoder("utf-8", {
+                fatal: false,
+              }).decode(contentBytes);
+
+              // Remove RTF header/footer
+              rtfText = rtfText.replace(/^\{\\rtf1?[^}]*\}?/, "");
+
+              // Remove font table, color table, stylesheet, info blocks
+              rtfText = rtfText.replace(
+                /\{\\(fonttbl|colortbl|stylesheet|info|header|footer|headerf|footerf)\b[^{}]*(\{[^{}]*\}[^{}]*)*\}/g,
+                "",
+              );
+
+              // Remove picture data
+              rtfText = rtfText.replace(
+                /\{\\pict[^{}]*(\{[^{}]*\}[^{}]*)*\}/g,
+                "",
+              );
+
+              // Remove \' hex escapes → actual characters
+              rtfText = rtfText.replace(/\\'([0-9a-fA-F]{2})/g, (_m, hex) =>
+                String.fromCharCode(parseInt(hex, 16)),
+              );
+
+              // Remove Unicode escapes \uNNNNN with their replacement char
+              rtfText = rtfText.replace(/\\u(-?\d+)[?]?/g, (_m, code) => {
+                const cp = parseInt(code, 10);
+                return cp >= 0
+                  ? String.fromCharCode(cp)
+                  : String.fromCharCode(cp + 65536);
+              });
+
+              // Convert paragraph/line breaks to newlines
+              rtfText = rtfText.replace(/\\par\b/g, "\n");
+              rtfText = rtfText.replace(/\\line\b/g, "\n");
+              rtfText = rtfText.replace(/\\tab\b/g, "\t");
+
+              // Remove all remaining RTF control words (\word, \word123, \*)
+              rtfText = rtfText.replace(/\\[a-z]+(-?\d+)?\s?/gi, "");
+              rtfText = rtfText.replace(/\\\*/g, "");
+
+              // Remove braces
+              rtfText = rtfText.replace(/[{}]/g, "");
+
+              // Clean up whitespace
+              extractedContent = rtfText
+                .replace(/\r\n/g, "\n")
+                .replace(/\r/g, "\n")
+                .replace(/\n{3,}/g, "\n\n")
+                .replace(/[ \t]{2,}/g, " ")
+                .trim();
+
+              Zotero.debug(
+                `[seerai] RTF extracted: ${extractedContent.length} chars from ${filename}`,
+              );
+            } else if (ext === "docx") {
+              // DOCX: ZIP archive containing word/document.xml
+              // Use Zotero's built-in ZIP reading via jar: protocol or manual extraction
+              try {
+                // In Gecko, we can use the nsIZipReader XPCOM component
+                const zipReader = (Components.classes as any)[
+                  "@mozilla.org/libjar/zip-reader;1"
+                ].createInstance(Components.interfaces.nsIZipReader);
+
+                // Open the DOCX file as a ZIP
+                const fileObj = (Components.classes as any)[
+                  "@mozilla.org/file/local;1"
+                ].createInstance(Components.interfaces.nsIFile);
+                fileObj.initWithPath(filePath);
+                zipReader.open(fileObj);
+
+                try {
+                  // Read word/document.xml which contains the main body text
+                  if (zipReader.hasEntry("word/document.xml")) {
+                    const inputStream =
+                      zipReader.getInputStream("word/document.xml");
+                    const scriptableStream = (Components.classes as any)[
+                      "@mozilla.org/scriptableinputstream;1"
+                    ].createInstance(
+                      Components.interfaces.nsIScriptableInputStream,
+                    );
+                    scriptableStream.init(inputStream);
+
+                    const xmlBytes = scriptableStream.read(
+                      scriptableStream.available(),
+                    );
+                    scriptableStream.close();
+                    inputStream.close();
+
+                    // Parse XML and extract text from <w:t> elements
+                    let docXml = xmlBytes;
+
+                    // Extract text from <w:t ...>text</w:t> tags
+                    const textMatches = docXml.match(
+                      /<w:t[^>]*>([^<]*)<\/w:t>/g,
+                    );
+                    if (textMatches && textMatches.length > 0) {
+                      // Also detect paragraph boundaries <w:p> for newlines
+                      // Process the full XML to preserve structure
+                      extractedContent = docXml
+                        // Add newlines at paragraph boundaries
+                        .replace(/<\/w:p>/g, "\n</w:p>")
+                        // Remove all XML tags except w:t content
+                        .replace(/<w:t[^>]*>([^<]*)<\/w:t>/g, "$1")
+                        .replace(/<[^>]*>/g, "")
+                        // Decode XML entities
+                        .replace(/&amp;/g, "&")
+                        .replace(/&lt;/g, "<")
+                        .replace(/&gt;/g, ">")
+                        .replace(/&quot;/g, '"')
+                        .replace(/&apos;/g, "'")
+                        // Clean up whitespace
+                        .replace(/\n{3,}/g, "\n\n")
+                        .trim();
+
+                      Zotero.debug(
+                        `[seerai] DOCX extracted: ${extractedContent.length} chars from ${filename}`,
+                      );
+                    } else {
+                      extractionError =
+                        "DOCX file has no text content in word/document.xml";
+                    }
+                  } else {
+                    extractionError =
+                      "Invalid DOCX: word/document.xml not found";
+                  }
+                } finally {
+                  zipReader.close();
+                }
+              } catch (docxErr: any) {
+                extractionError = `DOCX extraction failed: ${docxErr.message || docxErr}`;
+                Zotero.debug(
+                  `[seerai] DOCX error for "${filename}": ${docxErr.message || docxErr}`,
+                );
+              }
+            } else if (ext === "doc") {
+              // Legacy .doc (OLE2 binary format) — very complex to parse without a library.
+              // Attempt basic text extraction: .doc files contain text runs as readable ASCII/UTF-16LE
+              // embedded in the binary structure. Extract the longest coherent text sections.
+              try {
+                const rawText = new TextDecoder("utf-8", {
+                  fatal: false,
+                }).decode(contentBytes);
+
+                // Strategy: find long runs of printable ASCII (doc files embed text)
+                const textRuns = rawText.match(/[\x20-\x7E\n\r\t]{20,}/g);
+                if (textRuns && textRuns.length > 0) {
+                  // Filter out runs that look like binary metadata
+                  const goodRuns = textRuns.filter((run) => {
+                    // Skip runs that are mostly punctuation/symbols
+                    const alphaRatio =
+                      (run.match(/[a-zA-Z]/g) || []).length / run.length;
+                    return alphaRatio > 0.3 && run.length > 30;
+                  });
+                  extractedContent = goodRuns.join("\n").trim();
+                }
+
+                if (extractedContent.length < 100) {
+                  // Try UTF-16LE decoding (Word stores text in UTF-16LE)
+                  const utf16Text = new TextDecoder("utf-16le", {
+                    fatal: false,
+                  }).decode(contentBytes);
+                  const utf16Runs = utf16Text.match(
+                    /[\x20-\x7E\u00A0-\uFFFF]{20,}/g,
+                  );
+                  if (utf16Runs && utf16Runs.length > 0) {
+                    const goodUtf16Runs = utf16Runs.filter((run) => {
+                      const alphaRatio =
+                        (run.match(/[a-zA-Z\u00C0-\u024F]/g) || []).length /
+                        run.length;
+                      return alphaRatio > 0.3 && run.length > 30;
+                    });
+                    const utf16Content = goodUtf16Runs.join("\n").trim();
+                    if (utf16Content.length > extractedContent.length) {
+                      extractedContent = utf16Content;
+                    }
+                  }
+                }
+
+                if (extractedContent.length < 100) {
+                  extractedContent = "";
+                  extractionError =
+                    "Legacy .doc format has limited support. Save as .docx or .rtf for better results.";
+                } else {
+                  Zotero.debug(
+                    `[seerai] DOC extracted (best-effort): ${extractedContent.length} chars from ${filename}`,
+                  );
+                }
+              } catch (docErr: any) {
+                extractionError = `DOC extraction failed: ${docErr.message || docErr}`;
+              }
+            }
+
+            // Cap rich docs at 200K chars
+            const maxRichChars = 200_000;
+            if (extractedContent.length > maxRichChars) {
+              extractedContent =
+                extractedContent.substring(0, maxRichChars) +
+                `\n[... truncated, ${extractedContent.length - maxRichChars} chars omitted ...]`;
+            }
+          } else {
+            extractionError = `Unsupported file type: .${ext}`;
+          }
+        } catch (readErr: any) {
+          extractionError = `Failed to read file: ${readErr.message || readErr}`;
+          Zotero.debug(
+            `[seerai] File read error for "${filePath}": ${readErr}`,
+          );
+        }
+
+        // Estimate tokens (~4 chars per token is a common heuristic)
+        const charCount = extractedContent.length;
+        const estimatedTokens = Math.ceil(charCount / 4);
+
+        // Chip displays just the filename; details go in metadata for tooltip/context counter
+        const displayName = filename;
+
+        // Add to context manager as a "file" type with extracted content in metadata
+        contextManager.addItem(
+          fileId,
+          "file" as ContextItemType,
+          displayName,
+          "toolbar",
+          {
+            filePath: filePath,
+            fileCategory: fileCategory,
+            fileExtension: ext,
+            filename: filename,
+            fileSize: fileSize,
+            extractedContent: extractedContent,
+            charCount: charCount,
+            estimatedTokens: estimatedTokens,
+            extractionError: extractionError || undefined,
+          },
+        );
+
+        Zotero.debug(
+          `[seerai] File attached: ${filename} (${fileCategory}, ${fileSize} bytes, ${charCount} chars, ~${estimatedTokens} tokens)${extractionError ? ` [${extractionError}]` : ""}`,
+        );
+      } catch (err: any) {
+        Zotero.debug(`[seerai] File upload error: ${err.message || err}`);
+      }
+    });
+
+    toolbarLeft.appendChild(uploadBtn);
+
+    // ── 🎨 Image Generation Button (Two-part: emoji sends, ▲ opens settings) ──
+    // Persisted image generation settings
+    let imageGenSize: "256x256" | "512x512" | "1024x1024" = "1024x1024";
+    let imageGenSeed: number | undefined;
+
+    const imageGenContainer = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        display: "flex",
+        alignItems: "center",
+        position: "relative",
+      },
+    });
+
+    const imageGenBtn = ztoolkit.UI.createElement(doc, "button", {
+      properties: {
+        innerText: "\u{1F3A8}",
+        title: "Generate Image from prompt",
+      },
+      styles: {
+        padding: "0 8px",
+        height: "32px",
+        fontSize: "13px",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "6px 0 0 6px",
+        backgroundColor: "var(--background-secondary)",
+        color: "var(--text-secondary)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      },
+    }) as HTMLButtonElement;
+
+    const imageGenDropupBtn = ztoolkit.UI.createElement(doc, "button", {
+      properties: { innerText: "\u25B2", title: "Image generation settings" },
+      styles: {
+        padding: "0 4px",
+        height: "32px",
+        fontSize: "8px",
+        border: "1px solid var(--border-primary)",
+        borderLeft: "none",
+        borderRadius: "0 6px 6px 0",
+        backgroundColor: "var(--background-secondary)",
+        color: "var(--text-secondary)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      },
+    }) as HTMLButtonElement;
+
+    // Image settings dropup panel
+    imageGenDropupBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      // Remove any existing dropup
+      const existing = doc.querySelector(".seerai-image-settings-dropup");
+      if (existing) {
+        existing.remove();
+        return;
+      }
+
+      const activeConfig = getActiveModelConfig();
+      const currentModel = activeConfig?.imageConfig?.model || "not configured";
+
+      const panel = doc.createElement("div");
+      panel.className = "seerai-image-settings-dropup";
+      panel.style.cssText = `
+        position: absolute; bottom: 38px; left: 0; z-index: 1000;
+        background: var(--background-primary); border: 1px solid var(--border-primary);
+        border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        padding: 12px; min-width: 220px; font-size: 12px;
+      `;
+
+      // Build panel content via DOM (not innerHTML — Gecko XHTML parser chokes on emojis)
+      const titleDiv = doc.createElement("div");
+      titleDiv.style.cssText =
+        "font-weight: 600; margin-bottom: 8px; font-size: 13px;";
+      titleDiv.textContent = "Image Settings";
+
+      const modelDiv = doc.createElement("div");
+      modelDiv.style.cssText =
+        "margin-bottom: 6px; color: var(--text-secondary); font-size: 11px;";
+      modelDiv.textContent = "Model: " + currentModel;
+
+      const sizeLabel = doc.createElement("label");
+      sizeLabel.style.cssText =
+        "display: block; margin-bottom: 4px; font-weight: 500;";
+      sizeLabel.textContent = "Size:";
+
+      const sizeSelect = doc.createElement("select") as HTMLSelectElement;
+      sizeSelect.id = "img-size-select";
+      sizeSelect.style.cssText =
+        "width: 100%; padding: 4px 6px; border: 1px solid var(--border-primary); border-radius: 4px; margin-bottom: 8px; font-size: 12px; background: var(--background-primary); color: var(--text-primary);";
+      const sizeOptions: [string, string][] = [
+        ["256x256", "256x256"],
+        ["512x512", "512x512"],
+        ["1024x1024", "1024x1024 (default)"],
+      ];
+      for (const [val, label] of sizeOptions) {
+        const opt = doc.createElement("option");
+        opt.value = val;
+        opt.textContent = label;
+        if (imageGenSize === val) opt.selected = true;
+        sizeSelect.appendChild(opt);
+      }
+
+      const seedLabel = doc.createElement("label");
+      seedLabel.style.cssText =
+        "display: block; margin-bottom: 4px; font-weight: 500;";
+      seedLabel.textContent = "Seed (optional):";
+
+      const seedInput = doc.createElement("input") as HTMLInputElement;
+      seedInput.id = "img-seed-input";
+      seedInput.type = "number";
+      seedInput.placeholder = "Random";
+      seedInput.value = imageGenSeed !== undefined ? String(imageGenSeed) : "";
+      seedInput.style.cssText =
+        "width: 100%; padding: 4px 6px; border: 1px solid var(--border-primary); border-radius: 4px; font-size: 12px; box-sizing: border-box; background: var(--background-primary); color: var(--text-primary);";
+
+      const hintDiv = doc.createElement("div");
+      hintDiv.style.cssText =
+        "margin-top: 6px; font-size: 10px; color: var(--text-tertiary);";
+      hintDiv.textContent = "Prompt = textarea text + context";
+
+      panel.appendChild(titleDiv);
+      panel.appendChild(modelDiv);
+      panel.appendChild(sizeLabel);
+      panel.appendChild(sizeSelect);
+      panel.appendChild(seedLabel);
+      panel.appendChild(seedInput);
+      panel.appendChild(hintDiv);
+
+      imageGenContainer.appendChild(panel);
+
+      // Bind change events
+      sizeSelect.addEventListener("change", () => {
+        imageGenSize = sizeSelect.value as typeof imageGenSize;
+      });
+      seedInput.addEventListener("change", () => {
+        const val = seedInput.value.trim();
+        imageGenSeed = val ? parseInt(val, 10) : undefined;
+      });
+
+      // Close on outside click (use mousedown — Gecko renders <select> popups
+      // outside the DOM tree, so click targets from option lists fail panel.contains())
+      const closeHandler = (ev: Event) => {
+        const target = ev.target as Node;
+        if (
+          !panel.contains(target) &&
+          target !== imageGenDropupBtn &&
+          !imageGenContainer.contains(target)
+        ) {
+          // Double-check: if a panel input/select is focused, don't close
+          const active = doc.activeElement;
+          if (active && panel.contains(active)) return;
+          panel.remove();
+          doc.removeEventListener("mousedown", closeHandler);
+        }
+      };
+      setTimeout(() => doc.addEventListener("mousedown", closeHandler), 0);
+    });
+
+    // Image generation send handler
+    imageGenBtn.addEventListener("click", async () => {
+      const promptText = (input as unknown as HTMLTextAreaElement).value.trim();
+      if (!promptText || this.isStreaming) return;
+
+      const activeConfig = getActiveModelConfig();
+      if (!activeConfig?.imageConfig?.model) {
+        this.appendMessage(
+          messagesArea,
+          "Assistant",
+          "Image generation not configured. Go to Settings and add an Image model in your model configuration.",
+        );
+        return;
+      }
+
+      // Show user message
+      const userMsg: ChatMessage = {
+        id: Date.now().toString(),
+        role: "user",
+        content: `\u{1F3A8} [Image Generation] ${promptText}`,
+        timestamp: new Date(),
+      };
+      conversationMessages.push(userMsg);
+      try {
+        await getMessageStore().appendMessage(userMsg);
+      } catch (e) {
+        Zotero.debug(`[seerai] Error saving image gen user message: ${e}`);
+      }
+      this.appendMessage(
+        messagesArea,
+        "You",
+        `\u{1F3A8} [Image Generation] ${promptText}`,
+        userMsg.id,
+        true,
+      );
+      (input as unknown as HTMLTextAreaElement).value = "";
+      currentDraftText = "";
+
+      // Gather rich context for LLM prompt refinement (full content is fine for LLM, just not for image API)
+      const contextManager = ChatContextManager.getInstance();
+      const contextItems = contextManager.getItems();
+      let contextForLLM = "";
+      if (contextItems.length > 0) {
+        const parts: string[] = [];
+        for (const item of contextItems) {
+          if (item.type === "file" && item.metadata?.extractedContent) {
+            parts.push(
+              `[File: ${item.displayName}]\n${(item.metadata.extractedContent as string).substring(0, 2000)}`,
+            );
+          } else if (item.type === "paper") {
+            parts.push(`[Paper: ${item.displayName}]`);
+          } else if (item.type === "topic") {
+            parts.push(`[Topic: ${item.displayName}]`);
+          }
+        }
+        contextForLLM = parts.join("\n\n");
+      }
+
+      // Show generating indicator
+      const genMsgId = `img_${Date.now()}`;
+      const genDiv = this.appendMessage(
+        messagesArea,
+        "Assistant",
+        "",
+        genMsgId,
+        false,
+      );
+      const genContent = genDiv.querySelector("[data-content]") as HTMLElement;
+      // Build generating indicator via DOM (not innerHTML — Gecko XHTML parser chokes on emojis)
+      genContent.innerHTML = "";
+      const imgStatusRow = doc.createElement("div");
+      imgStatusRow.style.cssText =
+        "display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-style: italic;";
+      const imgStatusIcon = doc.createElement("span");
+      imgStatusIcon.textContent = "\u{1F3A8} Refining prompt with AI";
+      imgStatusRow.appendChild(imgStatusIcon);
+      const imgDots = doc.createElement("span");
+      const dot1 = doc.createElement("span");
+      dot1.className = "dot";
+      dot1.style.cssText = "animation: blink 1.4s infinite .2s;";
+      dot1.textContent = ".";
+      const dot2 = doc.createElement("span");
+      dot2.className = "dot";
+      dot2.style.cssText = "animation: blink 1.4s infinite .4s;";
+      dot2.textContent = ".";
+      const dot3 = doc.createElement("span");
+      dot3.className = "dot";
+      dot3.style.cssText = "animation: blink 1.4s infinite .6s;";
+      dot3.textContent = ".";
+      imgDots.appendChild(dot1);
+      imgDots.appendChild(dot2);
+      imgDots.appendChild(dot3);
+      imgStatusRow.appendChild(imgDots);
+      genContent.appendChild(imgStatusRow);
+
+      try {
+        // Step 1: Use chat LLM to refine the vague prompt into a detailed visual description
+        let imagePrompt = promptText;
+        try {
+          const imgModel = activeConfig.imageConfig.model;
+          const systemMsg = {
+            role: "system" as const,
+            content: `You are an expert image prompt engineer. The user wants to generate an image using an AI image generation model (model: ${imgModel}, size: ${imageGenSize}). Your job is to convert their request into a detailed, concrete visual description that the image generation model can render well.
+
+Rules:
+- Output ONLY the image prompt, nothing else. No explanations, no preamble.
+- Be specific about visual elements: layout, colors, style, composition.
+- If the user references a paper/document, extract the key themes and translate them into a visually compelling scene. Do NOT try to reproduce text or data tables — image models cannot render text accurately.
+- For "infographic" requests: describe a visually appealing illustration that represents the key concepts, NOT actual data tables or text blocks.
+- Keep the prompt under 400 characters. Shorter, more focused prompts work better.
+- Do NOT include quotes, special characters, or meta-instructions.
+- Do NOT include text that the image should display — image models render text poorly.`,
+          };
+
+          let userContent = promptText;
+          if (contextForLLM) {
+            userContent = `${promptText}\n\nContext from attached materials:\n${contextForLLM}`;
+          }
+
+          const refinedPrompt = await openAIService.chatCompletion([
+            systemMsg,
+            { role: "user" as const, content: userContent },
+          ]);
+
+          if (refinedPrompt && refinedPrompt.trim().length > 10) {
+            imagePrompt = refinedPrompt.trim().substring(0, 800);
+            Zotero.debug(
+              `[seerai] Image prompt refined by LLM: "${imagePrompt.substring(0, 100)}..."`,
+            );
+          }
+        } catch (refineErr: any) {
+          // If refinement fails, fall back to original prompt — don't block generation
+          Zotero.debug(
+            `[seerai] Image prompt refinement failed, using original: ${refineErr.message || refineErr}`,
+          );
+        }
+
+        // Update status to "Generating image..."
+        imgStatusIcon.textContent = "\u{1F3A8} Generating image";
+
+        // Step 2: Call the image generation API with the refined prompt
+        const result = await openAIService.generateImage(imagePrompt, {
+          size: imageGenSize,
+          seed: imageGenSeed,
+          response_format: "url",
+        });
+
+        // Render generated image(s) inline
+        genContent.innerHTML = "";
+        const imgContainer = doc.createElement("div");
+        imgContainer.style.cssText =
+          "display: flex; flex-direction: column; gap: 8px;";
+
+        for (const img of result.images) {
+          const imgSrc =
+            img.url ||
+            (img.b64_json ? `data:image/png;base64,${img.b64_json}` : "");
+          if (!imgSrc) continue;
+
+          const wrapper = doc.createElement("div");
+          wrapper.style.cssText =
+            "position: relative; display: inline-block; max-width: 100%;";
+
+          const imgEl = doc.createElement("img");
+          imgEl.src = imgSrc;
+          imgEl.alt = promptText.substring(0, 100);
+          imgEl.style.cssText = `
+            max-width: 100%; max-height: 400px; border-radius: 8px;
+            border: 1px solid var(--border-primary); cursor: pointer;
+          `;
+          imgEl.title = "Click to open in new tab";
+          imgEl.addEventListener("click", () => {
+            const win = Zotero.getMainWindow();
+            if (win) (win as any).open(imgSrc, "_blank");
+          });
+
+          // Download button
+          const downloadBtn = doc.createElement("button");
+          downloadBtn.innerText = "\u{2B07}\u{FE0F}";
+          downloadBtn.title = "Save image";
+          downloadBtn.style.cssText = `
+            position: absolute; top: 6px; right: 6px;
+            padding: 4px 8px; border: none; border-radius: 4px;
+            background: rgba(0,0,0,0.6); color: white; cursor: pointer;
+            font-size: 14px; opacity: 0.7; transition: opacity 0.2s;
+          `;
+          downloadBtn.addEventListener("mouseenter", () => {
+            downloadBtn.style.opacity = "1";
+          });
+          downloadBtn.addEventListener("mouseleave", () => {
+            downloadBtn.style.opacity = "0.7";
+          });
+          downloadBtn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            try {
+              const win = Zotero.getMainWindow() as any;
+              const fp = new win.FilePicker();
+              fp.init(win, "Save Generated Image", fp.modeSave);
+              fp.defaultString = `seerai_image_${Date.now()}.png`;
+              fp.appendFilter("PNG Images", "*.png");
+              fp.appendFilter("JPEG Images", "*.jpg;*.jpeg");
+              const res = await fp.show();
+              if (res === fp.returnOK || res === fp.returnReplace) {
+                if (img.url) {
+                  // Download from URL
+                  const resp = await fetch(img.url, {
+                    headers: { "x-seer-ai": "1" },
+                  });
+                  const arrayBuf = await resp.arrayBuffer();
+                  await IOUtils.write(fp.file, new Uint8Array(arrayBuf));
+                } else if (img.b64_json) {
+                  // Decode base64
+                  const binaryStr = atob(img.b64_json);
+                  const bytes = new Uint8Array(binaryStr.length);
+                  for (let i = 0; i < binaryStr.length; i++)
+                    bytes[i] = binaryStr.charCodeAt(i);
+                  await IOUtils.write(fp.file, bytes);
+                }
+                Zotero.debug(`[seerai] Image saved to: ${fp.file}`);
+              }
+            } catch (saveErr: any) {
+              Zotero.debug(`[seerai] Image save error: ${saveErr.message}`);
+            }
+          });
+
+          wrapper.appendChild(imgEl);
+          wrapper.appendChild(downloadBtn);
+          imgContainer.appendChild(wrapper);
+        }
+
+        // Cost info
+        if (result.cost !== undefined) {
+          const costDiv = doc.createElement("div");
+          costDiv.style.cssText =
+            "font-size: 10px; color: var(--text-tertiary); margin-top: 4px;";
+          costDiv.textContent = `Cost: $${result.cost.toFixed(4)}${result.remainingBalance !== undefined ? ` | Balance: $${result.remainingBalance.toFixed(2)}` : ""}`;
+          imgContainer.appendChild(costDiv);
+        }
+
+        genContent.appendChild(imgContainer);
+
+        // Store the result in conversation
+        const assistantMsg: ChatMessage = {
+          id: genMsgId,
+          role: "assistant",
+          content: `🎨 Generated image for: "${promptText.substring(0, 100)}"`,
+          timestamp: new Date(),
+        };
+        conversationMessages.push(assistantMsg);
+        try {
+          await getMessageStore().appendMessage(assistantMsg);
+        } catch (e) {
+          Zotero.debug(`[seerai] Error saving image gen result message: ${e}`);
+        }
+      } catch (err: any) {
+        genContent.innerHTML = "";
+        const mdContainer = doc.createElement("div");
+        mdContainer.className = "markdown-content";
+        mdContainer.setAttribute(
+          "data-raw",
+          `Image generation failed: ${err.message || err}`,
+        );
+        mdContainer.innerHTML = parseMarkdown(
+          `**Image generation failed:**\n\n${err.message || err}`,
+        );
+        genContent.appendChild(mdContainer);
+        Zotero.debug(`[seerai] Image generation error: ${err.message || err}`);
+      }
+
+      messagesArea.scrollTop = messagesArea.scrollHeight;
+    });
+
+    imageGenContainer.appendChild(imageGenBtn);
+    imageGenContainer.appendChild(imageGenDropupBtn);
+
+    // ── 🎬 Video Generation Button (Two-part: emoji sends, ▲ opens settings) ──
+    // Persisted video generation settings
+    let videoGenDuration = "5";
+    let videoGenAspectRatio: "16:9" | "9:16" | "1:1" | "4:3" | "3:4" = "16:9";
+    let videoGenResolution: "480p" | "720p" | "1080p" = "720p";
+    let videoGenNegativePrompt = "";
+
+    const videoGenContainer = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        display: "flex",
+        alignItems: "center",
+        position: "relative",
+      },
+    });
+
+    const videoGenBtn = ztoolkit.UI.createElement(doc, "button", {
+      properties: {
+        innerText: "\u{1F3AC}",
+        title: "Generate Video from prompt",
+      },
+      styles: {
+        padding: "0 8px",
+        height: "32px",
+        fontSize: "13px",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "6px 0 0 6px",
+        backgroundColor: "var(--background-secondary)",
+        color: "var(--text-secondary)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      },
+    }) as HTMLButtonElement;
+
+    const videoGenDropupBtn = ztoolkit.UI.createElement(doc, "button", {
+      properties: { innerText: "\u25B2", title: "Video generation settings" },
+      styles: {
+        padding: "0 4px",
+        height: "32px",
+        fontSize: "8px",
+        border: "1px solid var(--border-primary)",
+        borderLeft: "none",
+        borderRadius: "0 6px 6px 0",
+        backgroundColor: "var(--background-secondary)",
+        color: "var(--text-secondary)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      },
+    }) as HTMLButtonElement;
+
+    // Video settings dropup panel
+    videoGenDropupBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const existing = doc.querySelector(".seerai-video-settings-dropup");
+      if (existing) {
+        existing.remove();
+        return;
+      }
+
+      const activeConfig = getActiveModelConfig();
+      const currentModel = activeConfig?.videoConfig?.model || "not configured";
+
+      const panel = doc.createElement("div");
+      panel.className = "seerai-video-settings-dropup";
+      panel.style.cssText = `
+        position: absolute; bottom: 38px; left: 0; z-index: 1000;
+        background: var(--background-primary); border: 1px solid var(--border-primary);
+        border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        padding: 12px; min-width: 240px; font-size: 12px;
+      `;
+
+      // Build panel content via DOM (not innerHTML — Gecko XHTML parser chokes on emojis)
+      const titleDiv = doc.createElement("div");
+      titleDiv.style.cssText =
+        "font-weight: 600; margin-bottom: 8px; font-size: 13px;";
+      titleDiv.textContent = "Video Settings";
+
+      const modelDiv = doc.createElement("div");
+      modelDiv.style.cssText =
+        "margin-bottom: 6px; color: var(--text-secondary); font-size: 11px;";
+      modelDiv.textContent = "Model: " + currentModel;
+
+      // Duration input
+      const durLabel = doc.createElement("label");
+      durLabel.style.cssText =
+        "display: block; margin-bottom: 4px; font-weight: 500;";
+      durLabel.textContent = "Duration (seconds):";
+
+      const durInput = doc.createElement("input") as HTMLInputElement;
+      durInput.type = "text";
+      durInput.value = videoGenDuration;
+      durInput.placeholder = "5";
+      durInput.style.cssText =
+        "width: 100%; padding: 4px 6px; border: 1px solid var(--border-primary); border-radius: 4px; margin-bottom: 8px; font-size: 12px; box-sizing: border-box; background: var(--background-primary); color: var(--text-primary);";
+
+      // Aspect Ratio select
+      const aspectLabel = doc.createElement("label");
+      aspectLabel.style.cssText =
+        "display: block; margin-bottom: 4px; font-weight: 500;";
+      aspectLabel.textContent = "Aspect Ratio:";
+
+      const aspectSelect = doc.createElement("select") as HTMLSelectElement;
+      aspectSelect.style.cssText =
+        "width: 100%; padding: 4px 6px; border: 1px solid var(--border-primary); border-radius: 4px; margin-bottom: 8px; font-size: 12px; background: var(--background-primary); color: var(--text-primary);";
+      const aspectOptions: [string, string][] = [
+        ["16:9", "16:9 (Landscape)"],
+        ["9:16", "9:16 (Portrait)"],
+        ["1:1", "1:1 (Square)"],
+        ["4:3", "4:3"],
+        ["3:4", "3:4"],
+      ];
+      for (const [val, label] of aspectOptions) {
+        const opt = doc.createElement("option");
+        opt.value = val;
+        opt.textContent = label;
+        if (videoGenAspectRatio === val) opt.selected = true;
+        aspectSelect.appendChild(opt);
+      }
+
+      // Resolution select
+      const resLabel = doc.createElement("label");
+      resLabel.style.cssText =
+        "display: block; margin-bottom: 4px; font-weight: 500;";
+      resLabel.textContent = "Resolution:";
+
+      const resSelect = doc.createElement("select") as HTMLSelectElement;
+      resSelect.style.cssText =
+        "width: 100%; padding: 4px 6px; border: 1px solid var(--border-primary); border-radius: 4px; margin-bottom: 8px; font-size: 12px; background: var(--background-primary); color: var(--text-primary);";
+      const resOptions: [string, string][] = [
+        ["480p", "480p"],
+        ["720p", "720p (default)"],
+        ["1080p", "1080p"],
+      ];
+      for (const [val, label] of resOptions) {
+        const opt = doc.createElement("option");
+        opt.value = val;
+        opt.textContent = label;
+        if (videoGenResolution === val) opt.selected = true;
+        resSelect.appendChild(opt);
+      }
+
+      // Negative prompt input
+      const negLabel = doc.createElement("label");
+      negLabel.style.cssText =
+        "display: block; margin-bottom: 4px; font-weight: 500;";
+      negLabel.textContent = "Negative Prompt:";
+
+      const negPromptInput = doc.createElement("input") as HTMLInputElement;
+      negPromptInput.type = "text";
+      negPromptInput.value = videoGenNegativePrompt;
+      negPromptInput.placeholder = "blur, distort, low quality";
+      negPromptInput.style.cssText =
+        "width: 100%; padding: 4px 6px; border: 1px solid var(--border-primary); border-radius: 4px; font-size: 12px; box-sizing: border-box; background: var(--background-primary); color: var(--text-primary);";
+
+      const hintDiv = doc.createElement("div");
+      hintDiv.style.cssText =
+        "margin-top: 6px; font-size: 10px; color: var(--text-tertiary);";
+      hintDiv.textContent =
+        "Video is async -- polling status will show in chat";
+
+      panel.appendChild(titleDiv);
+      panel.appendChild(modelDiv);
+      panel.appendChild(durLabel);
+      panel.appendChild(durInput);
+      panel.appendChild(aspectLabel);
+      panel.appendChild(aspectSelect);
+      panel.appendChild(resLabel);
+      panel.appendChild(resSelect);
+      panel.appendChild(negLabel);
+      panel.appendChild(negPromptInput);
+      panel.appendChild(hintDiv);
+
+      videoGenContainer.appendChild(panel);
+
+      // Bind change events
+      durInput.addEventListener("change", () => {
+        videoGenDuration = durInput.value.trim() || "5";
+      });
+      aspectSelect.addEventListener("change", () => {
+        videoGenAspectRatio = aspectSelect.value as typeof videoGenAspectRatio;
+      });
+      resSelect.addEventListener("change", () => {
+        videoGenResolution = resSelect.value as typeof videoGenResolution;
+      });
+      negPromptInput.addEventListener("change", () => {
+        videoGenNegativePrompt = negPromptInput.value.trim();
+      });
+
+      // Close on outside click (use mousedown — Gecko renders <select> popups
+      // outside the DOM tree, so click targets from option lists fail panel.contains())
+      const closeHandler = (ev: Event) => {
+        const target = ev.target as Node;
+        if (
+          !panel.contains(target) &&
+          target !== videoGenDropupBtn &&
+          !videoGenContainer.contains(target)
+        ) {
+          // Double-check: if a panel input/select is focused, don't close
+          const active = doc.activeElement;
+          if (active && panel.contains(active)) return;
+          panel.remove();
+          doc.removeEventListener("mousedown", closeHandler);
+        }
+      };
+      setTimeout(() => doc.addEventListener("mousedown", closeHandler), 0);
+    });
+
+    // Video generation send handler
+    videoGenBtn.addEventListener("click", async () => {
+      const promptText = (input as unknown as HTMLTextAreaElement).value.trim();
+      if (!promptText || this.isStreaming) return;
+
+      const activeConfig = getActiveModelConfig();
+      if (!activeConfig?.videoConfig?.model) {
+        this.appendMessage(
+          messagesArea,
+          "Assistant",
+          "Video generation not configured. Go to Settings and add a Video model in your model configuration.",
+        );
+        return;
+      }
+
+      // Show user message
+      const userMsg: ChatMessage = {
+        id: Date.now().toString(),
+        role: "user",
+        content: `\u{1F3AC} [Video Generation] ${promptText}`,
+        timestamp: new Date(),
+      };
+      conversationMessages.push(userMsg);
+      try {
+        await getMessageStore().appendMessage(userMsg);
+      } catch (e) {
+        Zotero.debug(`[seerai] Error saving video gen user message: ${e}`);
+      }
+      this.appendMessage(
+        messagesArea,
+        "You",
+        `\u{1F3AC} [Video Generation] ${promptText}`,
+        userMsg.id,
+        true,
+      );
+      (input as unknown as HTMLTextAreaElement).value = "";
+      currentDraftText = "";
+
+      // Gather rich context for LLM prompt refinement
+      const contextMgr = ChatContextManager.getInstance();
+      const ctxItems = contextMgr.getItems();
+      let contextForVideoLLM = "";
+      if (ctxItems.length > 0) {
+        const parts: string[] = [];
+        for (const item of ctxItems) {
+          if (item.type === "file" && item.metadata?.extractedContent) {
+            parts.push(
+              `[File: ${item.displayName}]\n${(item.metadata.extractedContent as string).substring(0, 2000)}`,
+            );
+          } else if (item.type === "paper") {
+            parts.push(`[Paper: ${item.displayName}]`);
+          } else if (item.type === "topic") {
+            parts.push(`[Topic: ${item.displayName}]`);
+          }
+        }
+        contextForVideoLLM = parts.join("\n\n");
+      }
+
+      // Show generating indicator with live status updates
+      const genMsgId = `vid_${Date.now()}`;
+      const genDiv = this.appendMessage(
+        messagesArea,
+        "Assistant",
+        "",
+        genMsgId,
+        false,
+      );
+      const genContent = genDiv.querySelector("[data-content]") as HTMLElement;
+      const statusTextEl = doc.createElement("span");
+      statusTextEl.textContent = "Refining prompt with AI";
+      genContent.innerHTML = "";
+      const statusRow = doc.createElement("div");
+      statusRow.style.cssText =
+        "display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-style: italic;";
+      // Build via DOM (not innerHTML — Gecko XHTML parser chokes on emojis)
+      const vidStatusIcon = doc.createElement("span");
+      vidStatusIcon.textContent = "\u{1F3AC}";
+      statusRow.appendChild(vidStatusIcon);
+      statusRow.appendChild(statusTextEl);
+      const dotsSpan = doc.createElement("span");
+      const vDot1 = doc.createElement("span");
+      vDot1.className = "dot";
+      vDot1.style.cssText = "animation: blink 1.4s infinite .2s;";
+      vDot1.textContent = ".";
+      const vDot2 = doc.createElement("span");
+      vDot2.className = "dot";
+      vDot2.style.cssText = "animation: blink 1.4s infinite .4s;";
+      vDot2.textContent = ".";
+      const vDot3 = doc.createElement("span");
+      vDot3.className = "dot";
+      vDot3.style.cssText = "animation: blink 1.4s infinite .6s;";
+      vDot3.textContent = ".";
+      dotsSpan.appendChild(vDot1);
+      dotsSpan.appendChild(vDot2);
+      dotsSpan.appendChild(vDot3);
+      statusRow.appendChild(dotsSpan);
+      genContent.appendChild(statusRow);
+
+      try {
+        // Step 1: Use chat LLM to refine the vague prompt into a detailed video description
+        let videoPrompt = promptText;
+        try {
+          const vidModel = activeConfig.videoConfig.model;
+          const systemMsg = {
+            role: "system" as const,
+            content: `You are an expert video prompt engineer. The user wants to generate a video using an AI video generation model (model: ${vidModel}, duration: ${videoGenDuration}s, aspect ratio: ${videoGenAspectRatio}, resolution: ${videoGenResolution}). Your job is to convert their request into a detailed, concrete scene description that the video model can render well.
+
+Rules:
+- Output ONLY the video prompt, nothing else. No explanations, no preamble.
+- Be specific about: scene composition, camera movement, lighting, colors, motion, subjects, and mood.
+- The video is only ${videoGenDuration} seconds long — describe a single cohesive scene, not a multi-scene narrative.
+- If the user references a paper/document, extract the key themes and translate them into a visually compelling scene.
+- Keep the prompt under 400 characters. Shorter, more focused prompts work better.
+- Do NOT include quotes, special characters, or meta-instructions.
+- Do NOT describe text overlays — video models cannot render text accurately.`,
+          };
+
+          let userContent = promptText;
+          if (contextForVideoLLM) {
+            userContent = `${promptText}\n\nContext from attached materials:\n${contextForVideoLLM}`;
+          }
+
+          const refinedPrompt = await openAIService.chatCompletion([
+            systemMsg,
+            { role: "user" as const, content: userContent },
+          ]);
+
+          if (refinedPrompt && refinedPrompt.trim().length > 10) {
+            videoPrompt = refinedPrompt.trim().substring(0, 800);
+            Zotero.debug(
+              `[seerai] Video prompt refined by LLM: "${videoPrompt.substring(0, 100)}..."`,
+            );
+          }
+        } catch (refineErr: any) {
+          // If refinement fails, fall back to original prompt
+          Zotero.debug(
+            `[seerai] Video prompt refinement failed, using original: ${refineErr.message || refineErr}`,
+          );
+        }
+
+        // Update status to "Submitting..."
+        statusTextEl.textContent = "Submitting";
+
+        // Step 2: Call the video generation API with the refined prompt
+        const result = await openAIService.generateVideo(
+          videoPrompt,
+          {
+            duration: videoGenDuration,
+            aspect_ratio: videoGenAspectRatio,
+            resolution: videoGenResolution,
+            negative_prompt: videoGenNegativePrompt || undefined,
+          },
+          // Live status callback
+          (status, attempt, maxAttempts) => {
+            statusTextEl.textContent = `${status} (poll ${attempt}/${maxAttempts})`;
+            messagesArea.scrollTop = messagesArea.scrollHeight;
+          },
+        );
+
+        // Render result
+        genContent.innerHTML = "";
+        const vidContainer = doc.createElement("div");
+        vidContainer.style.cssText =
+          "display: flex; flex-direction: column; gap: 8px;";
+
+        if (result.videoUrl) {
+          // Inline video player
+          const videoEl = doc.createElement("video");
+          videoEl.src = result.videoUrl;
+          videoEl.controls = true;
+          videoEl.autoplay = false;
+          videoEl.preload = "metadata";
+          videoEl.style.cssText = `
+            max-width: 100%; max-height: 400px; border-radius: 8px;
+            border: 1px solid var(--border-primary);
+          `;
+
+          // Thumbnail poster
+          if (result.thumbnailUrl) {
+            videoEl.poster = result.thumbnailUrl;
+          }
+
+          vidContainer.appendChild(videoEl);
+
+          // Action buttons row
+          const actionsRow = doc.createElement("div");
+          actionsRow.style.cssText =
+            "display: flex; gap: 8px; align-items: center;";
+
+          // Open in browser
+          const openBtn = doc.createElement("button");
+          openBtn.innerText = "\u{1F517} Open";
+          openBtn.title = "Open video in browser";
+          openBtn.style.cssText = `
+            padding: 4px 10px; border: 1px solid var(--border-primary); border-radius: 4px;
+            background: var(--background-secondary); color: var(--text-secondary);
+            cursor: pointer; font-size: 11px;
+          `;
+          openBtn.addEventListener("click", () => {
+            const win = Zotero.getMainWindow();
+            if (win) (win as any).open(result.videoUrl, "_blank");
+          });
+          actionsRow.appendChild(openBtn);
+
+          // Save video
+          const saveVideoBtn = doc.createElement("button");
+          saveVideoBtn.innerText = "\u{2B07}\u{FE0F} Save";
+          saveVideoBtn.title = "Save video to disk";
+          saveVideoBtn.style.cssText = `
+            padding: 4px 10px; border: 1px solid var(--border-primary); border-radius: 4px;
+            background: var(--background-secondary); color: var(--text-secondary);
+            cursor: pointer; font-size: 11px;
+          `;
+          saveVideoBtn.addEventListener("click", async () => {
+            try {
+              const win = Zotero.getMainWindow() as any;
+              const fp = new win.FilePicker();
+              fp.init(win, "Save Generated Video", fp.modeSave);
+              fp.defaultString = `seerai_video_${Date.now()}.mp4`;
+              fp.appendFilter("MP4 Video", "*.mp4");
+              fp.appendFilter("WebM Video", "*.webm");
+              const res = await fp.show();
+              if (res === fp.returnOK || res === fp.returnReplace) {
+                const resp = await fetch(result.videoUrl!, {
+                  headers: { "x-seer-ai": "1" },
+                });
+                const arrayBuf = await resp.arrayBuffer();
+                await IOUtils.write(fp.file, new Uint8Array(arrayBuf));
+                Zotero.debug(`[seerai] Video saved to: ${fp.file}`);
+              }
+            } catch (saveErr: any) {
+              Zotero.debug(`[seerai] Video save error: ${saveErr.message}`);
+            }
+          });
+          actionsRow.appendChild(saveVideoBtn);
+
+          vidContainer.appendChild(actionsRow);
+        } else {
+          // No video URL — show metadata
+          const noUrlDiv = doc.createElement("div");
+          noUrlDiv.style.cssText =
+            "color: var(--text-secondary); font-style: italic;";
+          noUrlDiv.textContent = `Video generation completed (runId: ${result.runId}) but no video URL was returned. Check the provider dashboard.`;
+          vidContainer.appendChild(noUrlDiv);
+        }
+
+        // Cost info
+        if (result.cost !== undefined) {
+          const costDiv = doc.createElement("div");
+          costDiv.style.cssText =
+            "font-size: 10px; color: var(--text-tertiary); margin-top: 4px;";
+          costDiv.textContent = `Cost: $${result.cost.toFixed(4)}${result.remainingBalance !== undefined ? ` | Balance: $${result.remainingBalance.toFixed(2)}` : ""}`;
+          vidContainer.appendChild(costDiv);
+        }
+
+        genContent.appendChild(vidContainer);
+
+        // Store the result in conversation
+        const assistantMsg: ChatMessage = {
+          id: genMsgId,
+          role: "assistant",
+          content: `🎬 Generated video for: "${promptText.substring(0, 100)}"${result.videoUrl ? ` — ${result.videoUrl}` : ""}`,
+          timestamp: new Date(),
+        };
+        conversationMessages.push(assistantMsg);
+        try {
+          await getMessageStore().appendMessage(assistantMsg);
+        } catch (e) {
+          Zotero.debug(`[seerai] Error saving video gen result message: ${e}`);
+        }
+      } catch (err: any) {
+        genContent.innerHTML = "";
+        const mdContainer = doc.createElement("div");
+        mdContainer.className = "markdown-content";
+        mdContainer.setAttribute(
+          "data-raw",
+          `Video generation failed: ${err.message || err}`,
+        );
+        mdContainer.innerHTML = parseMarkdown(
+          `**Video generation failed:**\n\n${err.message || err}`,
+        );
+        genContent.appendChild(mdContainer);
+        Zotero.debug(`[seerai] Video generation error: ${err.message || err}`);
+      }
+
+      messagesArea.scrollTop = messagesArea.scrollHeight;
+    });
+
+    videoGenContainer.appendChild(videoGenBtn);
+    videoGenContainer.appendChild(videoGenDropupBtn);
+
     toolbarRow.appendChild(toolbarLeft);
 
     // History Button
@@ -21862,8 +23270,10 @@ ${tableRows}  </tbody>
     toolbarRight.appendChild(historyBtn);
     toolbarRow.appendChild(toolbarRight);
 
-    // Text input row: textarea + send button
+    // Text input row: textarea + [image | video] side by side + send button
     textInputRow.appendChild(input);
+    textInputRow.appendChild(imageGenContainer);
+    textInputRow.appendChild(videoGenContainer);
     textInputRow.appendChild(sendBtn);
 
     // Assemble: toolbar row on top, text input row below
@@ -22497,6 +23907,17 @@ ${tableRows}  </tbody>
           Zotero.debug(`[seerai] Error saving assistant message: ${e}`);
         }
 
+        // Auto-play TTS if enabled
+        if (
+          getChatStateManager().getOptions().autoPlayTts &&
+          isTtsConfigured() &&
+          cleanedContent
+        ) {
+          autoPlayTtsResponse(cleanedContent).catch((e) =>
+            Zotero.debug(`[seerai] Auto-play TTS failed: ${e}`),
+          );
+        }
+
         // Cleanup session
         activeAgentSession = null;
         this.isStreaming = false;
@@ -22849,6 +24270,35 @@ ${tableRows}  </tbody>
         } else if (item.type === "topic") {
           // Topic is a user-specified keyword/focus area
           context += `\n\nFocus Topic: "${item.displayName}" - Please consider this topic when answering.`;
+        } else if (item.type === "file") {
+          // Uploaded file — content was pre-extracted at upload time and stored in metadata
+          const filename =
+            (item.metadata?.filename as string) || item.displayName;
+          const category = item.metadata?.fileCategory as string | undefined;
+          const extractedContent = item.metadata?.extractedContent as
+            | string
+            | undefined;
+          const charCount = item.metadata?.charCount as number | undefined;
+          const extractionError = item.metadata?.extractionError as
+            | string
+            | undefined;
+
+          context += `\n\n--- File: ${filename} ---`;
+
+          if (extractedContent && extractedContent.length > 0) {
+            if (category === "audio") {
+              context += `\n[Transcribed audio: ${filename}]\n${extractedContent}`;
+            } else {
+              context += `\n${extractedContent}`;
+            }
+            Zotero.debug(
+              `[seerai] File context injected: ${filename} (${charCount ?? extractedContent.length} chars, ${category})`,
+            );
+          } else if (extractionError) {
+            context += `\n(${extractionError})`;
+          } else {
+            context += `\n(No text content could be extracted from this file)`;
+          }
         }
       }
 
@@ -23107,6 +24557,17 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
 
               // Clear pasted images after successful send
               clearImages();
+
+              // Auto-play TTS if enabled
+              if (
+                getChatStateManager().getOptions().autoPlayTts &&
+                isTtsConfigured() &&
+                cleanedContent
+              ) {
+                autoPlayTtsResponse(cleanedContent).catch((e) =>
+                  Zotero.debug(`[seerai] Auto-play TTS failed: ${e}`),
+                );
+              }
             },
             onError: (error) => {
               if (contentDiv) {
@@ -23256,6 +24717,26 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
     );
 
     actionsDiv.appendChild(copyBtn);
+
+    // TTS play button (when TTS is configured)
+    if (isTtsConfigured()) {
+      const ttsBtn = this.createActionButton(
+        doc,
+        "\u{1F50A}",
+        "Play TTS",
+        () => {
+          const msgBubble = (ttsBtn as HTMLElement).closest(".message-bubble");
+          const contentEl = msgBubble?.querySelector("[data-content]");
+          const mdContainer = contentEl?.querySelector(".markdown-content");
+          const currentText =
+            mdContainer?.getAttribute("data-raw") ||
+            contentEl?.getAttribute("data-raw") ||
+            text;
+          playTts(currentText, ttsBtn as HTMLElement);
+        },
+      );
+      actionsDiv.appendChild(ttsBtn);
+    }
 
     // Edit button (only for last user message)
     if (isUser && isLastUserMsg) {

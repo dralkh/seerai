@@ -10,6 +10,7 @@ import {
   getActiveProvider,
 } from "../../webSearchProvider";
 import { TOOL_NAMES } from "../tools/toolTypes";
+import { isTtsConfigured } from "./messageRenderer";
 
 export interface ChatSettingsOptions {
   onModeChange?: (mode: "lock" | "default" | "explore") => void;
@@ -727,6 +728,32 @@ export function showChatSettings(
   skipCheckRow.appendChild(skipCheckLabel);
   skipCheckRow.appendChild(skipCheckToggle);
   configSection.appendChild(skipCheckRow);
+
+  // Auto-Play TTS Row (only shown when TTS is configured)
+  if (isTtsConfigured()) {
+    const ttsRow = doc.createElement("div");
+    Object.assign(ttsRow.style, {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      fontSize: "11px",
+    });
+    const ttsLabel = doc.createElement("span");
+    ttsLabel.innerText = "Auto-play TTS:";
+    ttsLabel.title = "Automatically play TTS for assistant responses";
+
+    const ttsToggle = createToggleSwitch(
+      doc,
+      !!stateManager.getOptions().autoPlayTts,
+      (newState) => {
+        stateManager.setOptions({ autoPlayTts: newState });
+        Zotero.debug(`[seerai] autoPlayTts set to ${newState}`);
+      },
+    );
+    ttsRow.appendChild(ttsLabel);
+    ttsRow.appendChild(ttsToggle);
+    configSection.appendChild(ttsRow);
+  }
 
   body.appendChild(configSection);
 

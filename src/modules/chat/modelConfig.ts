@@ -4,7 +4,7 @@
  */
 
 import { config } from "../../../package.json";
-import { AIModelConfig } from "./types";
+import { AIModelConfig, ModelType } from "./types";
 
 const PREFS_KEY = `${config.prefsPrefix}.modelConfigs`;
 const ACTIVE_MODEL_KEY = `${config.prefsPrefix}.activeModelId`;
@@ -264,6 +264,17 @@ export function validateModelConfig(config: Partial<AIModelConfig>): string[] {
     !["low", "medium", "high"].includes(config.reasoningEffort)
   ) {
     errors.push("Invalid reasoning effort value");
+  }
+
+  const validModelTypes: ModelType[] = [
+    "chat",
+    "embedding",
+    "image",
+    "video",
+    "tts",
+  ];
+  if (config.modelType && !validModelTypes.includes(config.modelType)) {
+    errors.push("Invalid model type");
   }
 
   return errors;

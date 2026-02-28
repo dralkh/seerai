@@ -129,19 +129,85 @@ export interface ChatMessage {
   iterationCount?: number; // Total reasoning turns/iterations
 }
 
+// Model type categories for different API capabilities
+export type ModelType =
+  | "chat" // Chat Completions: POST /api/v1/chat/completions
+  | "embedding" // Embeddings: POST /api/v1/embeddings
+  | "image" // Image Generation: POST /api/generate-image
+  | "video" // Video Generation: POST /api/generate-video (async, poll /api/generate-video/status)
+  | "tts" // Text-to-Speech: POST /api/text-to-speech
+  | "stt"; // Speech-to-Text: POST /api/transcribe
+
+// API endpoint paths per model type
+export const MODEL_TYPE_ENDPOINTS: Record<
+  ModelType,
+  { path: string; label: string; icon: string; description: string }
+> = {
+  chat: {
+    path: "/chat/completions",
+    label: "Chat",
+    icon: "\u{1F4AC}", // 💬
+    description: "Text generation with streaming support",
+  },
+  embedding: {
+    path: "/embeddings",
+    label: "Embeddings",
+    icon: "\u{1F9E0}", // 🧠
+    description: "Vector embeddings for semantic search",
+  },
+  image: {
+    path: "/images/generations",
+    label: "Image",
+    icon: "\u{1F3A8}", // 🎨
+    description: "DALL-E, Midjourney, Flux, and more",
+  },
+  video: {
+    path: "/generate-video",
+    label: "Video",
+    icon: "\u{1F3AC}", // 🎬
+    description: "Kling, Veo, Hunyuan (async with polling)",
+  },
+  tts: {
+    path: "/audio/speech",
+    label: "TTS",
+    icon: "\u{1F50A}", // 🔊
+    description: "Convert text to natural-sounding audio",
+  },
+  stt: {
+    path: "/audio/transcriptions",
+    label: "STT",
+    icon: "\u{1F3A4}", // 🎤
+    description: "Transcribe audio to text (Whisper, etc.)",
+  },
+};
+
+// Per-capability model + endpoint override
+export interface ModelEndpointConfig {
+  model: string; // Model identifier for this capability
+  endpoint?: string; // Full override URL; if empty, uses apiURL + default path
+  voice?: string; // Voice identifier for TTS (e.g. "af_bella", "nova")
+}
+
 // AI Model Configuration - user-defined model settings
 export interface AIModelConfig {
   id: string; // Unique identifier (UUID)
   name: string; // Display name (e.g., "My GPT-4")
-  apiURL: string; // API endpoint URL
+  apiURL: string; // Base API endpoint URL (origin)
   apiKey: string; // API key
-  model: string; // Model identifier
+  model: string; // Primary model identifier (chat/completions)
+  modelType?: ModelType; // Kept for backward compat; ignored in new configs
   isDefault?: boolean; // Default model for new chats
   rateLimit?: {
     type: "tpm" | "rpm" | "concurrency";
     value: number;
   };
-  reasoningEffort?: "low" | "medium" | "high"; // For o1/o3/reasoning models
+  reasoningEffort?: "low" | "medium" | "high"; // For o1/o3/reasoning models (chat only)
+  // Per-capability model + endpoint configs (optional; empty = not configured)
+  ttsConfig?: ModelEndpointConfig; // Text-to-Speech
+  sttConfig?: ModelEndpointConfig; // Speech-to-Text
+  embeddingConfig?: ModelEndpointConfig; // Embeddings
+  imageConfig?: ModelEndpointConfig; // Image Generation
+  videoConfig?: ModelEndpointConfig; // Video Generation
   createdAt?: string; // ISO date string
   updatedAt?: string; // ISO date string
 }
@@ -186,6 +252,7 @@ export interface ChatOptions {
   selectionMode: SelectionMode; // Navigation behavior: lock (no add), default (single focus), explore (multi-add)
   includeNotesOnly?: boolean; // Only use notes from items, skip PDF full text
   disableSameTitleNoteSkip?: boolean; // Don't skip PDF text even if same-title note exists
+  autoPlayTts?: boolean; // Auto-play TTS for assistant responses on completion
   maxTokens?: number;
   temperature?: number; // 0.0 - 2.0, undefined = provider default
   model?: string;
@@ -200,6 +267,7 @@ export const defaultChatOptions: ChatOptions = {
   selectionMode: "default",
   includeNotesOnly: false,
   disableSameTitleNoteSkip: false,
+  autoPlayTts: false,
 };
 
 // Selection chip display config

@@ -9,7 +9,8 @@ export type ContextItemType =
   | "author"
   | "collection"
   | "topic"
-  | "table";
+  | "table"
+  | "file";
 export type ContextSource = "toolbar" | "selection" | "command";
 
 /**
@@ -28,7 +29,7 @@ export interface ContextItem {
   /** Full name for tooltips and lookups */
   fullName?: string;
 
-  /** Command trigger character (/, ~, @, ^, #, $) */
+  /** Command trigger character (/, ~, @, ^, #, $, &) */
   trigger: string;
 
   /** How this item was added */
@@ -70,6 +71,7 @@ export const CONTEXT_ICONS: Record<ContextItemType, string> = {
   collection: "📁",
   topic: "#",
   table: "📊",
+  file: "📎",
 };
 
 /**
@@ -82,6 +84,7 @@ export const CONTEXT_COLORS: Record<ContextItemType, string> = {
   collection: "#5856D6", // Purple
   topic: "#FF2D55", // Pink
   table: "#00C7BE", // Teal
+  file: "#8E8E93", // Gray
 };
 
 /**

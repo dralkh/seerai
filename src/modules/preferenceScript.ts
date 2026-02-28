@@ -8,7 +8,7 @@ import {
   setDefaultModelConfig,
   validateModelConfig,
 } from "./chat/modelConfig";
-import { AIModelConfig } from "./chat/types";
+import { AIModelConfig, ModelType, MODEL_TYPE_ENDPOINTS } from "./chat/types";
 
 // Track selected model config ID
 let selectedConfigId: string | null = null;
@@ -617,9 +617,63 @@ function renderModelList() {
     `;
 
     const info = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    // Build capability badges
+    const configuredTypes: { icon: string; label: string; color: string }[] = [
+      { icon: "\u{1F4AC}", label: "Chat", color: accentColor },
+    ];
+    if (cfg.ttsConfig?.model)
+      configuredTypes.push({
+        icon: "\u{1F50A}",
+        label: "TTS",
+        color: "#00bfa5",
+      });
+    if (cfg.sttConfig?.model)
+      configuredTypes.push({
+        icon: "\u{1F3A4}",
+        label: "STT",
+        color: "#ff9100",
+      });
+    if (cfg.embeddingConfig?.model)
+      configuredTypes.push({
+        icon: "\u{1F9E0}",
+        label: "Embed",
+        color: "#7c4dff",
+      });
+    if (cfg.imageConfig?.model)
+      configuredTypes.push({
+        icon: "\u{1F3A8}",
+        label: "Image",
+        color: "#e91e63",
+      });
+    if (cfg.videoConfig?.model)
+      configuredTypes.push({
+        icon: "\u{1F3AC}",
+        label: "Video",
+        color: "#ff6d00",
+      });
+
+    const badgesHtml = configuredTypes
+      .map(
+        (b) => `<span style="
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 10px;
+        background: ${b.color}22;
+        color: ${b.color};
+        border: 1px solid ${b.color}44;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        white-space: nowrap;
+      ">${b.icon} ${b.label}</span>`,
+      )
+      .join("");
+
     info.innerHTML = `
-      <strong style="font-size: 13px;">${escapeHtml(cfg.name)}</strong>
-      ${cfg.isDefault ? `<span style="color: ${accentColor}; font-size: 11px; margin-left: 8px;">★ Default</span>` : ""}
+      <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">
+        <strong style="font-size: 13px;">${escapeHtml(cfg.name)}</strong>
+        ${badgesHtml}
+        ${cfg.isDefault ? `<span style="color: ${accentColor}; font-size: 11px;">★ Default</span>` : ""}
+      </div>
       <div style="font-size: 11px; color: ${secondaryTextColor}; margin-top: 2px;">
         ${escapeHtml(cfg.model)} • ${escapeHtml(new URL(cfg.apiURL).hostname)}
       </div>
@@ -703,8 +757,10 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     color: ${modalTitleColor || defaultTitleColor};
     border-radius: 8px;
     padding: 24px;
-    min-width: 420px;
-    max-width: 500px;
+    min-width: 480px;
+    max-width: 560px;
+    max-height: 90vh;
+    overflow-y: auto;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
     border: 1px solid rgba(255, 255, 255, 0.1);
   `;
@@ -719,6 +775,20 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     color: ${modalTitleColor || defaultTitleColor};
   `;
   modal.appendChild(titleEl);
+
+  // References for conditional fields (will be set after creation)
+  let rateLimitSection: HTMLElement | null = null;
+  let reasoningSection: HTMLElement | null = null;
+
+  // Endpoint config inputs (populated after form fields are created)
+  const endpointInputs: Record<
+    string,
+    {
+      model: HTMLInputElement;
+      endpoint: HTMLInputElement;
+      voice?: HTMLInputElement;
+    }
+  > = {};
 
   // Provider presets
   const providerPresets = [
@@ -845,6 +915,10 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   let nanoGptModelSelect: HTMLElement | null = null;
   // Hoisted fetch function reference, assigned inside the if-block
   let fetchNanoGptModelsFn: (() => Promise<void>) | null = null;
+  // Hoisted NanoGPT model list so TTS searchable dropdown can share it
+  let allNanoModels: string[] = [];
+  // Track whether current provider is NanoGPT (for TTS searchable dropdown)
+  let isCurrentProviderNanoGpt = !isEdit; // defaults to NanoGPT for new configs
 
   if (!isEdit) {
     const presetLabel = doc.createElementNS(HTML_NS, "label") as HTMLElement;
@@ -975,7 +1049,6 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     nanoModelContainer.appendChild(nanoModelList);
 
     // State for the searchable dropdown
-    let allNanoModels: string[] = [];
     let selectedNanoModel = "";
 
     function renderNanoModelItems(filter: string) {
@@ -1115,6 +1188,8 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
           Zotero.debug(
             `[seerai] Fetched ${allNanoModels.length} NanoGPT models`,
           );
+          // Now that models are loaded, show chat search dropdown if NanoGPT is active
+          updateChatModelDropdownVisibility(true);
         }
       } catch (e) {
         Zotero.debug(`[seerai] Failed to fetch NanoGPT models: ${e}`);
@@ -1152,6 +1227,10 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       if (preset && idx > 0) {
         if (inputs.apiURL) inputs.apiURL.value = preset.apiURL;
         if (inputs.model) inputs.model.value = preset.model;
+        // Also sync to the chat model input in the endpoints section
+        if (endpointInputs.chat?.model) {
+          endpointInputs.chat.model.value = preset.model;
+        }
         if (inputs.apiKey)
           inputs.apiKey.placeholder = preset.placeholder || "API Key";
 
@@ -1181,17 +1260,14 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
 
       // NanoGPT-specific behavior
       const isNanoGpt = preset?.name === "NanoGPT";
+      isCurrentProviderNanoGpt = isNanoGpt;
 
       if (isNanoGpt) {
-        // Show model dropdown, hide text input
-        nanoModelContainer.style.display = "";
-        if (inputs.model) inputs.model.style.display = "none";
         fetchNanoGptModels();
-      } else {
-        // Show text input, hide model dropdown
-        nanoModelContainer.style.display = "none";
-        if (inputs.model) inputs.model.style.display = "";
       }
+
+      // Update chat model searchable dropdown visibility
+      updateChatModelDropdownVisibility(isNanoGpt);
     });
 
     modal.appendChild(presetSelect);
@@ -1236,14 +1312,18 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       value: existingConfig?.apiKey || "",
       type: "password",
     },
-    {
-      id: "model",
-      label: "Model",
-      placeholder: "gpt-4o-mini",
-      value: existingConfig?.model || "gpt-4o-mini",
-      type: "text",
-    },
   ];
+
+  // Hidden model input — synced by the chat capability row in the endpoints section
+  const hiddenModelInput = doc.createElementNS(
+    HTML_NS,
+    "input",
+  ) as HTMLInputElement;
+  hiddenModelInput.type = "hidden";
+  hiddenModelInput.value = existingConfig?.model || "gpt-4o-mini";
+  hiddenModelInput.id = "model-config-model";
+  inputs.model = hiddenModelInput;
+  modal.appendChild(hiddenModelInput);
 
   fields.forEach((field) => {
     const label = doc.createElementNS(HTML_NS, "label") as HTMLElement;
@@ -1259,11 +1339,6 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     input.id = `model-config-${field.id}`;
     inputs[field.id] = input;
 
-    // Insert NanoGPT model dropdown right before the model text input
-    if (field.id === "model" && !isEdit && nanoGptModelSelect) {
-      modal.appendChild(nanoGptModelSelect);
-    }
-
     modal.appendChild(input);
 
     // Add focus effect
@@ -1277,9 +1352,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   });
 
   // Auto-apply NanoGPT preset now that form fields exist
-  if (!isEdit && nanoGptModelSelect && fetchNanoGptModelsFn) {
-    nanoGptModelSelect.style.display = "";
-    if (inputs.model) inputs.model.style.display = "none";
+  if (!isEdit && fetchNanoGptModelsFn) {
     fetchNanoGptModelsFn();
 
     // Restore cached API key for the default NanoGPT preset
@@ -1299,10 +1372,13 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   }
 
   // --- Rate Limit Section ---
+  rateLimitSection = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  rateLimitSection.id = "model-config-rate-limit-section";
+
   const rlLabel = doc.createElementNS(HTML_NS, "label") as HTMLElement;
   rlLabel.textContent = "Rate Limit";
   rlLabel.style.cssText = labelStyle;
-  modal.appendChild(rlLabel);
+  rateLimitSection.appendChild(rlLabel);
 
   const rlContainer = doc.createElementNS(HTML_NS, "div") as HTMLElement;
   rlContainer.style.cssText = `
@@ -1362,13 +1438,17 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   });
 
   rlContainer.appendChild(rlValueInput);
-  modal.appendChild(rlContainer);
+  rateLimitSection.appendChild(rlContainer);
+  modal.appendChild(rateLimitSection);
 
-  // --- Reasoning Effort Section ---
+  // --- Reasoning Effort Section (chat models only) ---
+  reasoningSection = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  reasoningSection.id = "model-config-reasoning-section";
+
   const reLabel = doc.createElementNS(HTML_NS, "label") as HTMLElement;
   reLabel.textContent = "Reasoning Effort (for o1/o3/reasoning models)";
   reLabel.style.cssText = labelStyle;
-  modal.appendChild(reLabel);
+  reasoningSection.appendChild(reLabel);
 
   const reSelect = doc.createElementNS(HTML_NS, "select") as HTMLSelectElement;
   reSelect.style.cssText = selectStyle;
@@ -1393,7 +1473,457 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     reSelect.appendChild(option);
   });
 
-  modal.appendChild(reSelect);
+  reasoningSection.appendChild(reSelect);
+  modal.appendChild(reasoningSection);
+
+  // --- Model Endpoint Configuration Section ---
+  const endpointSectionLabel = doc.createElementNS(
+    HTML_NS,
+    "label",
+  ) as HTMLElement;
+  endpointSectionLabel.textContent = "Model Endpoints";
+  endpointSectionLabel.style.cssText = `
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: ${labelColor || defaultTitleColor};
+    margin-bottom: 8px;
+  `;
+  modal.appendChild(endpointSectionLabel);
+
+  const endpointSectionDesc = doc.createElementNS(
+    HTML_NS,
+    "div",
+  ) as HTMLElement;
+  endpointSectionDesc.textContent =
+    "Configure models for each capability. Leave blank to skip. Endpoint defaults to API URL + default path if empty.";
+  endpointSectionDesc.style.cssText = `
+    font-size: 11px;
+    color: ${isDark ? "#888" : "#999"};
+    margin-bottom: 12px;
+    line-height: 1.4;
+  `;
+  modal.appendChild(endpointSectionDesc);
+
+  const endpointSection = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  endpointSection.style.cssText = `
+    border: 1px solid ${isDark ? "#3a3a3a" : "#e0e0e0"};
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  `;
+
+  // All capabilities including chat (chat is now the first row with NanoGPT search support)
+  const capabilityRows: {
+    key: "chat" | "tts" | "stt" | "embedding" | "image" | "video";
+    configKey:
+      | "model"
+      | "ttsConfig"
+      | "sttConfig"
+      | "embeddingConfig"
+      | "imageConfig"
+      | "videoConfig";
+    type: ModelType;
+  }[] = [
+    { key: "chat", configKey: "model", type: "chat" },
+    { key: "tts", configKey: "ttsConfig", type: "tts" },
+    { key: "stt", configKey: "sttConfig", type: "stt" },
+    { key: "embedding", configKey: "embeddingConfig", type: "embedding" },
+    { key: "image", configKey: "imageConfig", type: "image" },
+    { key: "video", configKey: "videoConfig", type: "video" },
+  ];
+
+  // Chat NanoGPT searchable dropdown elements (hoisted for visibility toggling)
+  let chatNanoSearchContainer: HTMLElement | null = null;
+  let chatPlainModelInput: HTMLInputElement | null = null;
+
+  // Called when preset changes to show/hide chat NanoGPT search
+  function updateChatModelDropdownVisibility(isNanoGpt: boolean) {
+    if (chatNanoSearchContainer && chatPlainModelInput) {
+      if (isNanoGpt && allNanoModels.length > 0) {
+        chatNanoSearchContainer.style.display = "";
+        chatPlainModelInput.style.display = "none";
+      } else {
+        chatNanoSearchContainer.style.display = "none";
+        chatPlainModelInput.style.display = "";
+      }
+    }
+  }
+
+  capabilityRows.forEach((cap, idx) => {
+    const info = MODEL_TYPE_ENDPOINTS[cap.type];
+    // For chat, read from the primary model field; for others, read from sub-config
+    const existing =
+      cap.type === "chat"
+        ? existingConfig
+          ? { model: existingConfig.model, endpoint: undefined }
+          : undefined
+        : existingConfig?.[
+            cap.configKey as
+              | "ttsConfig"
+              | "sttConfig"
+              | "embeddingConfig"
+              | "imageConfig"
+              | "videoConfig"
+          ];
+    const typeColor =
+      cap.type === "chat"
+        ? "#4fc3f7"
+        : cap.type === "embedding"
+          ? "#7c4dff"
+          : cap.type === "image"
+            ? "#e91e63"
+            : cap.type === "video"
+              ? "#ff6d00"
+              : cap.type === "stt"
+                ? "#ff9100" // amber-orange for STT
+                : "#00bfa5"; // tts
+
+    const row = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    const isLast = idx === capabilityRows.length - 1;
+    row.style.cssText = `
+      padding: 10px 14px;
+      border-bottom: ${isLast ? "none" : `1px solid ${isDark ? "#333" : "#eee"}`};
+      background: ${isDark ? "#252525" : "#fafafa"};
+    `;
+
+    // Row header with icon + label
+    const rowHeader = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    rowHeader.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    `;
+
+    const iconBadge = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+    iconBadge.textContent = info.icon;
+    iconBadge.style.cssText = `font-size: 15px;`;
+    rowHeader.appendChild(iconBadge);
+
+    const capLabel = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+    capLabel.textContent =
+      cap.type === "chat"
+        ? "Text to Text"
+        : cap.type === "tts"
+          ? "Text to Speech"
+          : cap.type === "stt"
+            ? "Speech to Text"
+            : `Model ${info.label}`;
+    capLabel.style.cssText = `
+      font-size: 13px;
+      font-weight: 600;
+      color: ${typeColor};
+    `;
+    rowHeader.appendChild(capLabel);
+
+    const capDesc = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+    capDesc.textContent = info.description;
+    capDesc.style.cssText = `
+      font-size: 11px;
+      color: ${isDark ? "#777" : "#aaa"};
+      margin-left: auto;
+    `;
+    rowHeader.appendChild(capDesc);
+
+    row.appendChild(rowHeader);
+
+    // Two-column: Model + Endpoint
+    const fieldRow = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    fieldRow.style.cssText = `
+      display: flex;
+      gap: 8px;
+    `;
+
+    // Model input (plain text — always created, may be hidden for TTS+NanoGPT)
+    const modelInput = doc.createElementNS(
+      HTML_NS,
+      "input",
+    ) as HTMLInputElement;
+    modelInput.type = "text";
+    modelInput.placeholder = "Model name";
+    modelInput.value = existing?.model || "";
+    modelInput.style.cssText = `
+      flex: 1;
+      padding: 7px 10px;
+      border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
+      border-radius: 5px;
+      font-size: 13px;
+      box-sizing: border-box;
+      background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
+      color: ${inputText || defaultTitleColor};
+      transition: border-color 0.2s;
+    `;
+    modelInput.addEventListener("focus", () => {
+      modelInput.style.borderColor = inputFocusBorder;
+      modelInput.style.outline = "none";
+    });
+    modelInput.addEventListener("blur", () => {
+      modelInput.style.borderColor = inputBorder || (isDark ? "#444" : "#ccc");
+    });
+
+    // Chat: add a NanoGPT searchable model dropdown (shown when provider is NanoGPT)
+    if (cap.type === "chat") {
+      chatPlainModelInput = modelInput;
+      // Sync plain text input to hidden inputs.model
+      modelInput.addEventListener("input", () => {
+        if (inputs.model) inputs.model.value = modelInput.value;
+      });
+
+      const chatSearchContainer = doc.createElementNS(
+        HTML_NS,
+        "div",
+      ) as HTMLElement;
+      chatSearchContainer.style.cssText = `
+        flex: 1;
+        position: relative;
+        display: none;
+      `;
+      chatNanoSearchContainer = chatSearchContainer;
+
+      const chatSearchInput = doc.createElementNS(
+        HTML_NS,
+        "input",
+      ) as HTMLInputElement;
+      chatSearchInput.type = "text";
+      chatSearchInput.placeholder = "Search models...";
+      chatSearchInput.value = existing?.model || "";
+      chatSearchInput.style.cssText = `
+        width: 100%;
+        padding: 7px 10px;
+        border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
+        border-radius: 5px;
+        font-size: 13px;
+        box-sizing: border-box;
+        background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
+        color: ${inputText || defaultTitleColor};
+        transition: border-color 0.2s;
+      `;
+
+      const chatDropdownList = doc.createElementNS(
+        HTML_NS,
+        "div",
+      ) as HTMLElement;
+      chatDropdownList.style.cssText = `
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        max-height: 180px;
+        overflow-y: auto;
+        border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
+        border-top: none;
+        border-radius: 0 0 5px 5px;
+        background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
+        z-index: 10001;
+        display: none;
+      `;
+
+      let selectedChatModel = existing?.model || "";
+
+      function renderChatModelItems(filter: string) {
+        chatDropdownList.innerHTML = "";
+        const query = filter.toLowerCase();
+        const filtered = query
+          ? allNanoModels.filter((m) => m.toLowerCase().includes(query))
+          : allNanoModels;
+
+        if (filtered.length === 0) {
+          const emptyItem = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+          emptyItem.textContent = query
+            ? "No matching models"
+            : "No models available";
+          emptyItem.style.cssText = `
+            padding: 7px 10px;
+            font-size: 12px;
+            color: ${isDark ? "#888" : "#999"};
+            font-style: italic;
+          `;
+          chatDropdownList.appendChild(emptyItem);
+          return;
+        }
+
+        filtered.forEach((modelId) => {
+          const item = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+          item.textContent = modelId;
+          const isSelected = modelId === selectedChatModel;
+          item.style.cssText = `
+            padding: 6px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            color: ${inputText || defaultTitleColor};
+            background: ${isSelected ? (isDark ? "#3a3a5e" : "#e0e8ff") : "transparent"};
+          `;
+          item.addEventListener("mouseenter", () => {
+            if (modelId !== selectedChatModel) {
+              item.style.background = isDark ? "#333" : "#f0f0f0";
+            }
+          });
+          item.addEventListener("mouseleave", () => {
+            item.style.background =
+              modelId === selectedChatModel
+                ? isDark
+                  ? "#3a3a5e"
+                  : "#e0e8ff"
+                : "transparent";
+          });
+          item.addEventListener("click", () => {
+            selectedChatModel = modelId;
+            chatSearchInput.value = modelId;
+            chatDropdownList.style.display = "none";
+            chatSearchInput.style.borderRadius = "5px";
+            chatSearchInput.style.borderBottom = `1px solid ${inputBorder || (isDark ? "#444" : "#ccc")}`;
+            // Sync to the hidden plain model input and hidden inputs.model
+            modelInput.value = modelId;
+            if (inputs.model) inputs.model.value = modelId;
+            if (inputs.name) inputs.name.value = `nano-${modelId}`;
+          });
+          chatDropdownList.appendChild(item);
+        });
+      }
+
+      chatSearchInput.addEventListener("focus", () => {
+        chatSearchInput.style.borderColor = inputFocusBorder;
+        chatSearchInput.style.outline = "none";
+        if (allNanoModels.length > 0) {
+          chatDropdownList.style.display = "";
+          chatSearchInput.style.borderRadius = "5px 5px 0 0";
+          chatSearchInput.style.borderBottom = "none";
+          renderChatModelItems(
+            chatSearchInput.value === selectedChatModel
+              ? ""
+              : chatSearchInput.value,
+          );
+        }
+      });
+
+      chatSearchInput.addEventListener("input", () => {
+        renderChatModelItems(chatSearchInput.value);
+        if (
+          chatDropdownList.style.display === "none" &&
+          allNanoModels.length > 0
+        ) {
+          chatDropdownList.style.display = "";
+          chatSearchInput.style.borderRadius = "5px 5px 0 0";
+          chatSearchInput.style.borderBottom = "none";
+        }
+      });
+
+      // Close dropdown when clicking outside
+      doc.addEventListener("click", (e: Event) => {
+        if (!chatSearchContainer.contains(e.target as Node)) {
+          chatDropdownList.style.display = "none";
+          chatSearchInput.style.borderRadius = "5px";
+          chatSearchInput.style.borderBottom = `1px solid ${inputBorder || (isDark ? "#444" : "#ccc")}`;
+          chatSearchInput.style.borderColor =
+            inputBorder || (isDark ? "#444" : "#ccc");
+          if (
+            selectedChatModel &&
+            chatSearchInput.value !== selectedChatModel
+          ) {
+            chatSearchInput.value = selectedChatModel;
+          }
+        }
+      });
+
+      chatSearchContainer.appendChild(chatSearchInput);
+      chatSearchContainer.appendChild(chatDropdownList);
+
+      // Show NanoGPT search or plain input based on current provider
+      if (isCurrentProviderNanoGpt && allNanoModels.length > 0) {
+        chatSearchContainer.style.display = "";
+        modelInput.style.display = "none";
+      } else if (isCurrentProviderNanoGpt) {
+        // NanoGPT selected but models not loaded yet — will be toggled after fetch
+        chatSearchContainer.style.display = "none";
+        modelInput.style.display = "";
+      }
+
+      fieldRow.appendChild(chatSearchContainer);
+    }
+
+    fieldRow.appendChild(modelInput);
+
+    // Endpoint input
+    const endpointInput = doc.createElementNS(
+      HTML_NS,
+      "input",
+    ) as HTMLInputElement;
+    endpointInput.type = "text";
+    endpointInput.placeholder = `Default: {url}${info.path}`;
+    endpointInput.value = existing?.endpoint || "";
+    endpointInput.style.cssText = `
+      flex: 1.3;
+      padding: 7px 10px;
+      border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
+      border-radius: 5px;
+      font-size: 12px;
+      box-sizing: border-box;
+      background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
+      color: ${isDark ? "#999" : "#777"};
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      transition: border-color 0.2s;
+    `;
+    endpointInput.addEventListener("focus", () => {
+      endpointInput.style.borderColor = inputFocusBorder;
+      endpointInput.style.outline = "none";
+      endpointInput.style.color = inputText || defaultTitleColor;
+    });
+    endpointInput.addEventListener("blur", () => {
+      endpointInput.style.borderColor =
+        inputBorder || (isDark ? "#444" : "#ccc");
+      if (!endpointInput.value) {
+        endpointInput.style.color = isDark ? "#999" : "#777";
+      }
+    });
+
+    fieldRow.appendChild(endpointInput);
+
+    // Voice input (TTS only)
+    let voiceInput: HTMLInputElement | undefined;
+    if (cap.type === "tts") {
+      voiceInput = doc.createElementNS(HTML_NS, "input") as HTMLInputElement;
+      voiceInput.type = "text";
+      voiceInput.placeholder = "Voice (e.g. af_bella)";
+      voiceInput.value = existing?.voice || "";
+      voiceInput.style.cssText = `
+        flex: 0.7;
+        padding: 7px 10px;
+        border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
+        border-radius: 5px;
+        font-size: 12px;
+        box-sizing: border-box;
+        background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
+        color: ${voiceInput.value ? inputText || defaultTitleColor : isDark ? "#999" : "#777"};
+        font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+        transition: border-color 0.2s;
+      `;
+      voiceInput.addEventListener("focus", () => {
+        voiceInput!.style.borderColor = inputFocusBorder;
+        voiceInput!.style.outline = "none";
+        voiceInput!.style.color = inputText || defaultTitleColor;
+      });
+      voiceInput.addEventListener("blur", () => {
+        voiceInput!.style.borderColor =
+          inputBorder || (isDark ? "#444" : "#ccc");
+        if (!voiceInput!.value) {
+          voiceInput!.style.color = isDark ? "#999" : "#777";
+        }
+      });
+      fieldRow.appendChild(voiceInput);
+    }
+
+    row.appendChild(fieldRow);
+    endpointSection.appendChild(row);
+
+    endpointInputs[cap.key] = {
+      model: modelInput,
+      endpoint: endpointInput,
+      ...(voiceInput && { voice: voiceInput }),
+    };
+  });
+
+  modal.appendChild(endpointSection);
 
   // Error message container
   const errorBg = getCssVar("--modal-error-bg");
@@ -1484,13 +2014,57 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       name: inputs.name.value.trim(),
       apiURL,
       apiKey: inputs.apiKey.value.trim(),
-      model: inputs.model.value.trim(),
+      model: (endpointInputs.chat?.model.value || inputs.model.value).trim(),
       rateLimit: {
         type: rlTypeSelect.value as "tpm" | "rpm" | "concurrency",
         value: parseInt(rlValueInput.value) || 5,
       },
       ...(reSelect.value && {
         reasoningEffort: reSelect.value as "low" | "medium" | "high",
+      }),
+      // Per-capability endpoint configs (only include if model is provided)
+      ...(endpointInputs.tts?.model.value.trim() && {
+        ttsConfig: {
+          model: endpointInputs.tts.model.value.trim(),
+          ...(endpointInputs.tts.endpoint.value.trim() && {
+            endpoint: endpointInputs.tts.endpoint.value.trim(),
+          }),
+          ...(endpointInputs.tts.voice?.value.trim() && {
+            voice: endpointInputs.tts.voice.value.trim(),
+          }),
+        },
+      }),
+      ...(endpointInputs.stt?.model.value.trim() && {
+        sttConfig: {
+          model: endpointInputs.stt.model.value.trim(),
+          ...(endpointInputs.stt.endpoint.value.trim() && {
+            endpoint: endpointInputs.stt.endpoint.value.trim(),
+          }),
+        },
+      }),
+      ...(endpointInputs.embedding?.model.value.trim() && {
+        embeddingConfig: {
+          model: endpointInputs.embedding.model.value.trim(),
+          ...(endpointInputs.embedding.endpoint.value.trim() && {
+            endpoint: endpointInputs.embedding.endpoint.value.trim(),
+          }),
+        },
+      }),
+      ...(endpointInputs.image?.model.value.trim() && {
+        imageConfig: {
+          model: endpointInputs.image.model.value.trim(),
+          ...(endpointInputs.image.endpoint.value.trim() && {
+            endpoint: endpointInputs.image.endpoint.value.trim(),
+          }),
+        },
+      }),
+      ...(endpointInputs.video?.model.value.trim() && {
+        videoConfig: {
+          model: endpointInputs.video.model.value.trim(),
+          ...(endpointInputs.video.endpoint.value.trim() && {
+            endpoint: endpointInputs.video.endpoint.value.trim(),
+          }),
+        },
       }),
     };
 

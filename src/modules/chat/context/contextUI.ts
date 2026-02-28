@@ -163,6 +163,39 @@ function updateChips(
         : item.displayName;
 
     chip.title = `${icon} ${item.fullName || item.displayName} (${item.type})`;
+
+    // For file items, build a richer tooltip with size/token details
+    if (item.type === "file" && item.metadata) {
+      const fileSize = item.metadata.fileSize as number | undefined;
+      const estimatedTokens = item.metadata.estimatedTokens as
+        | number
+        | undefined;
+      const fileCategory = item.metadata.fileCategory as string | undefined;
+      const extractionError = item.metadata.extractionError as
+        | string
+        | undefined;
+      const parts: string[] = [`${icon} ${item.fullName || item.displayName}`];
+      if (fileSize) {
+        const sizeStr =
+          fileSize >= 1_000_000
+            ? `${(fileSize / 1_000_000).toFixed(1)}MB`
+            : fileSize >= 1_000
+              ? `${(fileSize / 1_000).toFixed(1)}KB`
+              : `${fileSize}B`;
+        parts.push(`Size: ${sizeStr}`);
+      }
+      if (estimatedTokens && estimatedTokens > 0) {
+        const tokStr =
+          estimatedTokens >= 1000
+            ? `~${(estimatedTokens / 1000).toFixed(1)}k`
+            : `~${estimatedTokens}`;
+        parts.push(`Tokens: ${tokStr}`);
+      }
+      if (fileCategory === "audio") parts.push("(transcribed)");
+      if (extractionError) parts.push(`Error: ${extractionError}`);
+      chip.title = parts.join(" | ");
+    }
+
     chip.innerText = `${icon} ${nameText}`;
 
     // Remove Button
@@ -246,6 +279,31 @@ async function copyContextItemsContent(copyBtn: HTMLElement): Promise<void> {
         parts.push(`*Table item: ${item.displayName}*\n`);
         if (item.metadata) {
           parts.push(`Metadata: ${JSON.stringify(item.metadata, null, 2)}\n`);
+        }
+      } else if (item.type === "file") {
+        // For files, include the pre-extracted content
+        const filename =
+          (item.metadata?.filename as string) || item.displayName;
+        const charCount = item.metadata?.charCount as number | undefined;
+        const extractedContent = item.metadata?.extractedContent as
+          | string
+          | undefined;
+        const extractionError = item.metadata?.extractionError as
+          | string
+          | undefined;
+        const category = item.metadata?.fileCategory as string | undefined;
+
+        if (extractedContent && extractedContent.length > 0) {
+          const typeLabel =
+            category === "audio" ? "Audio transcription" : "File";
+          parts.push(
+            `*${typeLabel}: ${filename} (${charCount ?? extractedContent.length} chars)*\n`,
+          );
+          parts.push(`\n### Content:\n${extractedContent}\n`);
+        } else {
+          parts.push(
+            `*File: ${filename} — ${extractionError || "no content extracted"}*\n`,
+          );
         }
       } else if (item.type === "collection" || item.type === "tag") {
         // For collections and tags, include basic info
