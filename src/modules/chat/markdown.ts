@@ -212,13 +212,13 @@ export function parseMarkdown(markdown: string): string {
     if (inTable && (tableHeader.length > 0 || tableRows.length > 0)) {
       // Wrap table in scrollable container to prevent sidebar overflow
       let tableHtml =
-        '<div style="overflow-x: auto; margin: 8px 0; max-width: 100%;">';
+        '<div style="overflow-x: auto; margin: 8px 0; width: 100%;">';
       tableHtml +=
-        '<table style="border-collapse: collapse; width: max-content; min-width: 100%; font-size: 0.85em; table-layout: auto;">';
+        '<table style="border-collapse: collapse; width: 100%; font-size: 0.85em; table-layout: auto;">';
       if (tableHeader.length > 0) {
         tableHtml += "<thead><tr>";
         tableHeader.forEach((cell) => {
-          tableHtml += `<th style="border: 1px solid var(--border-primary, #ddd); padding: 4px 6px; background: var(--background-secondary, rgba(0,0,0,0.05)); text-align: left; white-space: nowrap; font-size: 0.9em;">${parseInline(cell.trim())}</th>`;
+          tableHtml += `<th style="border: 1px solid var(--border-primary, #ddd); padding: 4px 6px; background: var(--background-secondary, rgba(0,0,0,0.05)); text-align: left; font-size: 0.9em; word-break: break-word;">${parseInline(cell.trim())}</th>`;
         });
         tableHtml += "</tr></thead>";
       }
@@ -227,7 +227,7 @@ export function parseMarkdown(markdown: string): string {
         tableRows.forEach((row) => {
           tableHtml += "<tr>";
           row.forEach((cell) => {
-            tableHtml += `<td style="border: 1px solid var(--border-primary, #ddd); padding: 4px 6px; max-width: 200px; overflow: hidden; text-overflow: ellipsis;">${parseInline(cell.trim())}</td>`;
+            tableHtml += `<td style="border: 1px solid var(--border-primary, #ddd); padding: 4px 6px; word-break: break-word;">${parseInline(cell.trim())}</td>`;
           });
           tableHtml += "</tr>";
         });

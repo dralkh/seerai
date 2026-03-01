@@ -313,11 +313,18 @@ html.dark .chip-tables {
    intrinsic height and let the container scroll instead. */
 .message-bubble {
   box-sizing: border-box;
-  max-width: 90%;
   min-width: 0;
   flex-shrink: 0;
   overflow-wrap: break-word;
   word-break: break-word;
+}
+
+.message-bubble.message-user {
+  max-width: 90%;
+}
+
+.message-bubble.message-assistant {
+  max-width: 100%;
 }
 
 .message-bubble [data-content] {
@@ -609,12 +616,10 @@ html.dark .chip-tables {
 .chat-md-table {
   border-collapse: collapse;
   width: 100%;
-  max-width: 100%;
   margin: 8px 0;
   font-size: 0.95em;
   background-color: var(--background-primary);
-  table-layout: fixed;
-  overflow: hidden;
+  table-layout: auto;
 }
 
 .chat-md-th {
@@ -623,8 +628,6 @@ html.dark .chip-tables {
   background-color: var(--background-secondary);
   text-align: left;
   color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
   word-break: break-word;
 }
 
@@ -632,8 +635,6 @@ html.dark .chip-tables {
   border: 1px solid var(--border-primary);
   padding: 8px;
   color: var(--text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
   word-break: break-word;
 }
 

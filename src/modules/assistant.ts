@@ -2079,11 +2079,11 @@ export class Assistant {
     // In Pane: use 100vh for ALL tabs for consistent sidebar height and width containment
     // In Detached: force 100% height and hidden overflow to maintain window bounds
     if (!isDetachedWindow) {
-      // Sidepanel (all tabs): Force viewport height to ensure internal scrolling works
-      // and width is properly constrained by the parent.
+      // Sidepanel (all tabs): Use calc(100vh - 20px) to prevent the chat from
+      // taking the full viewport height and leaving no breathing room.
       // Using 100vh instead of 100% because sidebar parent container often grows with content relative to the parent provided by Zotero.
       // Table tab previously used height:auto which broke width containment.
-      container.style.height = "100vh";
+      container.style.height = "calc(100vh - 150px)";
       container.style.overflow = "hidden";
     } else {
       // Detached Window: 100% works correctly here as window is constrained
@@ -2343,7 +2343,7 @@ export class Assistant {
         innerText: "⇱",
       },
       styles: {
-        padding: "8px 12px",
+        padding: "4px 10px",
         cursor: "pointer",
         fontSize: "14px",
         fontWeight: "500",
@@ -2542,8 +2542,8 @@ export class Assistant {
         flexDirection: "column",
         flex: "1 1 0",
         minHeight: "0",
-        gap: "8px",
-        padding: "4px 6px 6px 6px",
+        gap: "4px",
+        padding: "2px 6px 10px 6px",
         minWidth: "0",
         maxWidth: "100%",
         position: "relative",
@@ -2569,14 +2569,14 @@ export class Assistant {
         flex: "1 1 0",
         minHeight: "0",
         overflowY: "auto",
-        overflowX: "hidden",
+        overflowX: "auto",
         border: "1px solid var(--border-primary)",
         borderRadius: "6px",
-        padding: "10px",
+        padding: "8px",
         backgroundColor: "var(--background-primary)",
         display: "flex",
         flexDirection: "column",
-        gap: "10px",
+        gap: "8px",
         minWidth: "0",
         maxWidth: "100%",
         boxSizing: "border-box",
@@ -21348,7 +21348,7 @@ ${tableRows}  </tbody>
       styles: {
         display: "flex",
         flexDirection: "column",
-        gap: "6px",
+        gap: "4px",
         flexShrink: "0",
         minWidth: "0",
         maxWidth: "100%",
@@ -21455,7 +21455,7 @@ ${tableRows}  </tbody>
       styles: {
         display: "flex",
         flexDirection: "column",
-        gap: "6px",
+        gap: "4px",
         minWidth: "0",
         maxWidth: "100%",
         boxSizing: "border-box",
@@ -25261,7 +25261,7 @@ Note: Context was automatically reduced using semantic search due to size constr
         padding: "12px 16px",
         borderRadius: isUser ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
         fontSize: "13px",
-        maxWidth: "90%",
+        maxWidth: isUser ? "90%" : "100%",
         minWidth: "0",
         flexShrink: "0",
         alignSelf: isUser ? "flex-end" : "flex-start",

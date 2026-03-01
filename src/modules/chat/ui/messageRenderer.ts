@@ -296,7 +296,7 @@ export function createMessageBubble(
     padding: "10px 14px",
     borderRadius: isUser ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
     fontSize: "13px",
-    maxWidth: "90%",
+    maxWidth: isUser ? "90%" : "100%",
     minWidth: "0",
     flexShrink: "0",
     alignSelf: isUser ? "flex-end" : "flex-start",
