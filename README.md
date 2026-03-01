@@ -13,7 +13,7 @@
     <img src="https://img.shields.io/badge/License-MIT-blue.svg" />
   </a>
   <a href="https://github.com/dralkh/seerai/releases">
-    <img src="https://img.shields.io/badge/Version-1.5.5-blue" />
+    <img src="https://img.shields.io/badge/Version-1.6.0-blue" />
   </a>
 </p>
 
@@ -39,6 +39,12 @@
   <b>Powered by <a href="https://nano-gpt.com/r/RwCEN6fR">NanoGPT</a></b> — Access 300+ AI models with flexible pay-as-you-go or subscription plans.
 </p>
 
+<p align="center">
+  <a href="https://github.com/dralkh/seerai/releases/latest/download/seerai.xpi">
+    <img src="https://img.shields.io/badge/Install-Download%20.xpi-brightgreen?style=for-the-badge&logo=zotero" alt="Download seerai.xpi" />
+  </a>
+</p>
+
 **seerai** is an intelligent research assistant plugin for Zotero 8 that integrates AI-powered chat, advanced search, and data extraction capabilities directly into your research workflow. Chat with your papers, extract structured data, and accelerate your literature review with a local-first, privacy-focused design.
 
 ---
@@ -56,6 +62,8 @@
 - **Streaming Responses**: Real-time, token-by-token response rendering.
 - **Markdown & Math**: Responses are formatted with syntax highlighting and LaTeX math support.
 - **Vision Support**: Paste images directly into chat for multimodal analysis.
+- **Multimodal Generation**: Generate images, videos, speech-to-text, and text-to-speech directly from chat.
+- **Attachments Upload**: Add files to conversations via the context menu.
 - **Interactive Follow-ups**: Deepen the conversation with streaming follow-up questions.
 - **Configurable Citations**: Choose your preferred citation style for AI insights and chat.
 - **Smart Copy**: Select and copy text with preserved formatting (Markdown) directly from chat bubbles.
@@ -65,9 +73,11 @@
   - `Ctrl+Shift+S`: Toggle/Focus detachable window
 - **Detachable Window**: Pop out the SeerAI interface into a standalone resizable floating window to maintain chat access while navigating your library.
 - **Themed UI**: Enhanced dialogs and components with full theme support for a consistent look across Zotero's Light and Dark modes.
+- **Responsive Layout**: Chat, tables, and search tabs dynamically adapt to panel width changes.
 
 ### Semantic Search & Discovery
 
+- **RAG (Retrieval-Augmented Generation)**: Per-context embeddings with chunking, vector store, and semantic retrieval for large documents.
 - **Web Search**: Integrated Firecrawl & Tavily support for finding high-quality full-text content.
 - **Semantic Scholar Agent**: Advanced paper search with:
   - **Advanced Filters**: Fine-tune results by Year, Venue, and Citation Count.
@@ -114,6 +124,7 @@
 
 ### Customizable AI
 
+- **Persistent API Keys**: API keys are saved and persisted across all configured providers.
 - **Model Presets**: Pre-configured settings for popular providers:
   - [NanoGPT](https://nano-gpt.com/r/RwCEN6fR) (300+ models, pay-as-you-go or subscription)
   - OpenAI (GPT-5, o3)
@@ -240,35 +251,14 @@ This mode requires sophisticated models with strong tool/function-calling capabi
 
 ## Future Implementations Ideas
 
-Propose several advanced features to enhance seerai's capabilities. These are currently in the just idea board.
-
-### 1. Advanced Search Capabilities
-
 Enhanced search functionality to help users find relevant literature more effectively.
 
 - **Autocomplete**: Intelligent suggestions for tags, creators, and collections as you type.
 - **Complex Queries**: Support for boolean logic (AND/OR) and nested search conditions (e.g., "Title contains X AND Year > 2020").
 - **Field-Specific Search**: Dedicated filters for titles, authors, years, and tags.
-
-### 2. Semantic Vector Search
-
-- **Voice, Transcription, Embedding Integration**: Support for OpenAI-compatible embedding, voice, transcription models (e.g., `text-embedding-3-small`, local Ollama embeddings).
-- **Contextual Retrieval**: Find papers based on conceptual similarity rather than just exact text matches.
-- **In-Memory Vector Store** — Fast, local indexing of session-relevant papers for semantic analysis.
-- **RAG** - used when 80% limit reached to context size
-
-### 3. Data Verification & Quality Control
-
-- **Verifier Button** — One-click verification to check all extracted data against source text.
-- **Confidence Scores** — AI-generated confidence ratings for each extracted data point.
-- **Source Highlighting** — Click a cell to see the exact passage in the paper where the data came from.
-
-### Others
-
 - **Citation References**: Inline citations within tables and chat during generation.
 - **Internal MCP Presets**: Custom support for MCP JSON presets for streamlined integrations.
 - **Connectors**: External service connectors for extended workflows.
-- **UI Revamp**: Modernized interface with improved accessibility and responsiveness.
 
 ---
 
@@ -289,10 +279,12 @@ seerai/
 ├── src/
 │   ├── modules/           # Core feature modules
 │   │   ├── chat/          # Chat engine & state
+│   │   │   └── rag/       # RAG pipeline (chunker, embeddings, retrieval, vector store)
 │   │   ├── assistant.ts   # Main assistant logic
 │   │   ├── firecrawl.ts   # Firecrawl integration
+│   │   ├── nanogptWeb.ts  # NanoGPT web integration
 │   │   ├── ocr.ts         # OCR implementation
-│   │   ├── openai.ts      # LLM client implementation
+│   │   ├── openai.ts      # LLM & multimodal client
 │   │   ├── semanticScholar.ts # Semantic Scholar integration
 │   │   └── preferenceScript.ts # Preferences logic
 │   ├── utils/             # Utility functions
