@@ -1,6 +1,6 @@
 /**
  * Web Search Provider Abstraction
- * Unified interface for web search providers (Firecrawl, Tavily)
+ * Unified interface for web search providers (NanoGPT, Firecrawl, Tavily)
  *
  * Allows switching between providers via preferences without
  * changing tool/consumer code.
@@ -12,10 +12,11 @@ import {
   FirecrawlSearchResult as FirecrawlResult,
 } from "./firecrawl";
 import { tavilyService, WebSearchResult as TavilyResult } from "./tavily";
+import { nanogptWebService } from "./nanogptWeb";
 
 // ==================== Types ====================
 
-export type WebSearchProviderType = "firecrawl" | "tavily";
+export type WebSearchProviderType = "firecrawl" | "tavily" | "nanogpt";
 
 export interface WebSearchResult {
   url: string;
@@ -201,10 +202,74 @@ class TavilyProviderWrapper implements WebSearchProvider {
   }
 }
 
+/**
+ * Wraps NanoGPT web search service to conform to WebSearchProvider interface
+ */
+class NanogptProviderWrapper implements WebSearchProvider {
+  isConfigured(): boolean {
+    return nanogptWebService.isConfigured();
+  }
+
+  async webSearch(query: string, limit?: number): Promise<WebSearchResult[]> {
+    return await nanogptWebService.webSearch(query, limit);
+  }
+
+  async scrapeUrl(url: string): Promise<WebSearchResult | null> {
+    return await nanogptWebService.scrapeUrl(url);
+  }
+
+  async researchSearch(
+    title: string,
+    authors?: string[],
+    doi?: string,
+  ): Promise<PdfDiscoveryResult | null> {
+    const result = await nanogptWebService.researchSearch(title, authors, doi);
+    return result ? { ...result, source: "nanogpt" as const } : null;
+  }
+
+  async searchForPdf(
+    title: string,
+    authors?: string[],
+    doi?: string,
+  ): Promise<PdfDiscoveryResult> {
+    const result = await nanogptWebService.searchForPdf(title, authors, doi);
+    return { ...result, source: "nanogpt" as const };
+  }
+
+  getCachedPdfResult(paperId: string): PdfDiscoveryResult | null | undefined {
+    const result = nanogptWebService.getCachedPdfResult(paperId);
+    return result ? { ...result, source: "nanogpt" as const } : result;
+  }
+
+  setCachedPdfResult(paperId: string, result: PdfDiscoveryResult | null): void {
+    nanogptWebService.setCachedPdfResult(
+      paperId,
+      result ? { ...result, source: "nanogpt" } : null,
+    );
+  }
+
+  clearCache(): void {
+    nanogptWebService.clearCache();
+  }
+
+  clearPdfCache(): void {
+    nanogptWebService.clearPdfCache();
+  }
+
+  clearPdfCacheForPaper(title: string, authors?: string[], doi?: string): void {
+    nanogptWebService.clearPdfCacheForPaper(title, authors, doi);
+  }
+
+  getSearchLimit(): number {
+    return nanogptWebService.getSearchLimit();
+  }
+}
+
 // ==================== Singleton Instances ====================
 
 const firecrawlProvider = new FirecrawlProviderWrapper();
 const tavilyProvider = new TavilyProviderWrapper();
+const nanogptProvider = new NanogptProviderWrapper();
 
 // ==================== Provider Selection ====================
 
@@ -216,7 +281,9 @@ export function getActiveProviderType(): WebSearchProviderType {
   const provider = Zotero.Prefs.get(
     `${prefPrefix}.webSearchProvider`,
   ) as string;
-  return provider === "tavily" ? "tavily" : "firecrawl";
+  if (provider === "nanogpt") return "nanogpt";
+  if (provider === "tavily") return "tavily";
+  return "firecrawl";
 }
 
 /**
@@ -224,21 +291,29 @@ export function getActiveProviderType(): WebSearchProviderType {
  */
 export function getActiveProvider(): WebSearchProvider {
   const providerType = getActiveProviderType();
-  return providerType === "tavily" ? tavilyProvider : firecrawlProvider;
+  if (providerType === "nanogpt") return nanogptProvider;
+  if (providerType === "tavily") return tavilyProvider;
+  return firecrawlProvider;
 }
 
 /**
  * Get a specific provider by type
  */
 export function getProvider(type: WebSearchProviderType): WebSearchProvider {
-  return type === "tavily" ? tavilyProvider : firecrawlProvider;
+  if (type === "nanogpt") return nanogptProvider;
+  if (type === "tavily") return tavilyProvider;
+  return firecrawlProvider;
 }
 
 /**
  * Check if any web search provider is configured
  */
 export function isAnyProviderConfigured(): boolean {
-  return firecrawlProvider.isConfigured() || tavilyProvider.isConfigured();
+  return (
+    nanogptProvider.isConfigured() ||
+    firecrawlProvider.isConfigured() ||
+    tavilyProvider.isConfigured()
+  );
 }
 
 /**
@@ -253,6 +328,7 @@ export function isActiveProviderConfigured(): boolean {
  */
 export function getConfiguredProviders(): WebSearchProviderType[] {
   const providers: WebSearchProviderType[] = [];
+  if (nanogptProvider.isConfigured()) providers.push("nanogpt");
   if (firecrawlProvider.isConfigured()) providers.push("firecrawl");
   if (tavilyProvider.isConfigured()) providers.push("tavily");
   return providers;
@@ -263,6 +339,8 @@ export function getConfiguredProviders(): WebSearchProviderType[] {
  */
 export function getProviderDisplayName(type: WebSearchProviderType): string {
   switch (type) {
+    case "nanogpt":
+      return "NanoGPT (Tavily)";
     case "firecrawl":
       return "Firecrawl";
     case "tavily":

@@ -2,15 +2,14 @@ import {
   getModelConfigs,
   getActiveModelConfig,
   setActiveModelId,
+  updateModelConfig,
 } from "../modelConfig";
 import { getChatStateManager } from "../stateManager";
-import {
-  isActiveProviderConfigured,
-  getActiveProviderType,
-  getActiveProvider,
-} from "../../webSearchProvider";
+import { config } from "../../../../package.json";
 import { TOOL_NAMES } from "../tools/toolTypes";
 import { isTtsConfigured } from "./messageRenderer";
+import { getEmbeddingService } from "../rag/embeddingService";
+import { getRAGConfig } from "../rag/retrievalEngine";
 
 export interface ChatSettingsOptions {
   onModeChange?: (mode: "lock" | "default" | "explore") => void;
@@ -447,122 +446,7 @@ export function showChatSettings(
   modeSection.appendChild(modeContainer);
   body.appendChild(modeSection);
 
-  // --- 3. Web Search ---
-  if (isActiveProviderConfigured()) {
-    const webSection = doc.createElement("div");
-    const webHeader = doc.createElement("div");
-    Object.assign(webHeader.style, {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: "4px",
-    });
-
-    const webLabel = doc.createElement("div");
-    webLabel.innerText = "Web Search";
-    webLabel.style.fontSize = "11px";
-    webLabel.style.color = "var(--text-secondary, #666)";
-
-    // Toggle Switch
-    const toggleWrapper = doc.createElement("div");
-    Object.assign(toggleWrapper.style, {
-      position: "relative",
-      width: "28px",
-      height: "16px",
-      backgroundColor: stateManager.getOptions().webSearchEnabled
-        ? "#4cd964"
-        : "#e5e5ea",
-      borderRadius: "8px",
-      cursor: "pointer",
-      transition: "background 0.2s",
-    });
-
-    const toggleKnob = doc.createElement("div");
-    Object.assign(toggleKnob.style, {
-      position: "absolute",
-      top: "2px",
-      left: stateManager.getOptions().webSearchEnabled ? "14px" : "2px",
-      width: "12px",
-      height: "12px",
-      backgroundColor: "#fff",
-      borderRadius: "50%",
-      boxShadow: "0 1px 2px rgba(0,0,0,0.2)",
-      transition: "left 0.2s",
-    });
-
-    const helperContainer = doc.createElement("div");
-    helperContainer.style.width = "28px";
-    helperContainer.style.height = "16px";
-    helperContainer.appendChild(toggleWrapper);
-    toggleWrapper.appendChild(toggleKnob);
-
-    // Limit container forward decl
-    const limitContainer = doc.createElement("div");
-
-    helperContainer.addEventListener("click", (e) => {
-      e.stopPropagation(); // Prevent closing
-      const current = stateManager.getOptions().webSearchEnabled;
-      const newState = !current;
-      stateManager.setOptions({ webSearchEnabled: newState });
-
-      // Update UI
-      toggleWrapper.style.backgroundColor = newState ? "#4cd964" : "#e5e5ea";
-      toggleKnob.style.left = newState ? "14px" : "2px";
-      limitContainer.style.display = newState ? "flex" : "none";
-    });
-
-    webHeader.appendChild(webLabel);
-    webHeader.appendChild(helperContainer);
-    webSection.appendChild(webHeader);
-
-    // Limit & Concurrent Inputs
-    Object.assign(limitContainer.style, {
-      display: stateManager.getOptions().webSearchEnabled ? "flex" : "none",
-      justifyContent: "flex-start", // Left align
-      gap: "12px",
-      alignItems: "center",
-      fontSize: "11px",
-      marginTop: "2px",
-      paddingLeft: "4px",
-    });
-
-    limitContainer.innerHTML = "<span>Results:</span>";
-    const prefPrefix = "extensions.seerai";
-
-    const limitInput = doc.createElement("input");
-    limitInput.type = "number";
-    limitInput.min = "1";
-    limitInput.max = "10";
-    const currentLimit = getActiveProvider().getSearchLimit();
-    limitInput.value = String(currentLimit);
-
-    Object.assign(limitInput.style, {
-      width: "40px",
-      padding: "2px",
-      fontSize: "11px",
-      border: "1px solid var(--border-primary)",
-      borderRadius: "4px",
-      textAlign: "center",
-    });
-
-    limitInput.addEventListener("change", () => {
-      const val = parseInt(limitInput.value);
-      if (val >= 1 && val <= 20) {
-        const providerType = getActiveProviderType();
-        if (providerType === "tavily") {
-          Zotero.Prefs.set(`${prefPrefix}.tavilySearchLimit`, val);
-        } else {
-          Zotero.Prefs.set(`${prefPrefix}.firecrawlSearchLimit`, val);
-        }
-      }
-    });
-    limitInput.addEventListener("click", (e) => e.stopPropagation());
-
-    limitContainer.appendChild(limitInput);
-
-    webSection.appendChild(limitContainer);
-    body.appendChild(webSection);
-  }
+  // --- 3. Web Search --- (moved to input area search button)
 
   // --- 4. Agent Config (Max Iterations & Auto-OCR) ---
   const configSection = doc.createElement("div");
@@ -804,7 +688,197 @@ export function showChatSettings(
     return wrapper;
   }
 
-  // --- 5. Tool Permissions ---
+  // --- 5. Smart Context (RAG / Semantic Search) ---
+  const ragSection = doc.createElement("div");
+  ragSection.style.marginTop = "8px";
+  ragSection.style.borderTop = "1px solid var(--border-primary)";
+  ragSection.style.paddingTop = "8px";
+
+  const ragHeader = doc.createElement("div");
+  Object.assign(ragHeader.style, {
+    fontSize: "11px",
+    fontWeight: "600",
+    color: "var(--text-secondary, #666)",
+    marginBottom: "6px",
+  });
+  ragHeader.innerText = "Smart Context";
+  ragSection.appendChild(ragHeader);
+
+  // Embedding status indicator
+  const embeddingService = getEmbeddingService();
+  const isEmbeddingConfigured = embeddingService.isConfigured();
+  const ragConfig = getRAGConfig();
+
+  const statusRow = doc.createElement("div");
+  Object.assign(statusRow.style, {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    fontSize: "10px",
+    color: "var(--text-tertiary, #999)",
+    marginBottom: "6px",
+  });
+
+  const statusDot = doc.createElement("span");
+  Object.assign(statusDot.style, {
+    width: "6px",
+    height: "6px",
+    borderRadius: "50%",
+    backgroundColor: isEmbeddingConfigured ? "#4cd964" : "#e5e5ea",
+    display: "inline-block",
+  });
+  statusRow.appendChild(statusDot);
+
+  const statusText = doc.createElement("span");
+  if (isEmbeddingConfigured) {
+    const modelName = embeddingService.getConfiguredModel() || "configured";
+    statusText.innerText = `Embedding: ${modelName}`;
+  } else {
+    statusText.innerText = "Embedding: not configured (set in Preferences)";
+  }
+  statusRow.appendChild(statusText);
+  ragSection.appendChild(statusRow);
+
+  // Semantic Search toggle
+  const ragToggleRow = doc.createElement("div");
+  Object.assign(ragToggleRow.style, {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: "4px",
+    opacity: isEmbeddingConfigured ? "1" : "0.5",
+  });
+
+  const ragToggleLabel = doc.createElement("span");
+  ragToggleLabel.style.fontSize = "11px";
+  ragToggleLabel.innerText = "Semantic Search";
+  ragToggleLabel.title =
+    "When enabled, uses embeddings to retrieve only the most relevant passages instead of sending full document text";
+
+  const currentRagEnabled =
+    currentOptions.ragEnabled !== undefined
+      ? currentOptions.ragEnabled
+      : ragConfig.enabled;
+
+  const ragToggle = createToggleSwitch(
+    doc,
+    currentRagEnabled && isEmbeddingConfigured,
+    (newState) => {
+      if (!isEmbeddingConfigured) return;
+      stateManager.setOptions({ ragEnabled: newState });
+      Zotero.Prefs.set(`${config.prefsPrefix}.ragEnabled`, newState);
+      Zotero.debug(`[seerai] RAG enabled set to ${newState}`);
+      // Show/hide sub-rows
+      if (alwaysUseRow) {
+        alwaysUseRow.style.display = newState ? "flex" : "none";
+      }
+      if (thresholdRow) {
+        const showThreshold = newState && !activeModelCfg?.ragAlwaysUse;
+        thresholdRow.style.display = showThreshold ? "flex" : "none";
+      }
+    },
+  );
+
+  ragToggleRow.appendChild(ragToggleLabel);
+  ragToggleRow.appendChild(ragToggle);
+  ragSection.appendChild(ragToggleRow);
+
+  // "Always Use RAG" toggle — persisted on the active model config
+  const activeModelCfg = getActiveModelConfig();
+  const currentAlwaysUse = activeModelCfg?.ragAlwaysUse ?? false;
+
+  const alwaysUseRow = doc.createElement("div");
+  Object.assign(alwaysUseRow.style, {
+    display: currentRagEnabled ? "flex" : "none",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: "4px",
+  });
+
+  const alwaysUseLabel = doc.createElement("span");
+  alwaysUseLabel.style.fontSize = "11px";
+  alwaysUseLabel.innerText = "Always Use RAG";
+  alwaysUseLabel.title =
+    "Always use semantic search regardless of token threshold (bypass size check)";
+
+  const alwaysUseToggle = createToggleSwitch(
+    doc,
+    currentAlwaysUse && isEmbeddingConfigured,
+    (newState) => {
+      if (!isEmbeddingConfigured || !activeModelCfg) return;
+      updateModelConfig(activeModelCfg.id, { ragAlwaysUse: newState });
+      Zotero.debug(
+        `[seerai] RAG always-use set to ${newState} for model ${activeModelCfg.name}`,
+      );
+      // Hide threshold when always-use is on (threshold is irrelevant)
+      if (thresholdRow) {
+        thresholdRow.style.display = newState ? "none" : "flex";
+      }
+    },
+  );
+
+  alwaysUseRow.appendChild(alwaysUseLabel);
+  alwaysUseRow.appendChild(alwaysUseToggle);
+  ragSection.appendChild(alwaysUseRow);
+
+  // Token threshold input — persisted on the active model config
+  const currentThreshold =
+    activeModelCfg?.ragTokenThreshold ??
+    currentOptions.ragTokenThreshold ??
+    ragConfig.tokenThreshold;
+
+  const thresholdRow = doc.createElement("div");
+  Object.assign(thresholdRow.style, {
+    display: currentRagEnabled && !currentAlwaysUse ? "flex" : "none",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: "4px",
+  });
+
+  const thresholdLabel = doc.createElement("span");
+  thresholdLabel.style.fontSize = "11px";
+  thresholdLabel.innerText = "Token Threshold";
+  thresholdLabel.title = "RAG activates when context exceeds this token count";
+
+  const thresholdInput = doc.createElement("input");
+  Object.assign(thresholdInput.style, {
+    width: "60px",
+    fontSize: "11px",
+    padding: "2px 4px",
+    border: "1px solid var(--border-primary)",
+    borderRadius: "3px",
+    backgroundColor: "var(--background-primary)",
+    color: "var(--text-primary)",
+    textAlign: "right",
+  });
+  thresholdInput.type = "number";
+  thresholdInput.min = "1000";
+  thresholdInput.max = "2000000";
+  thresholdInput.step = "1000";
+  thresholdInput.value = String(currentThreshold);
+
+  thresholdInput.addEventListener("change", () => {
+    const val = parseInt(thresholdInput.value, 10);
+    if (!isNaN(val) && val >= 1000) {
+      // Save to model config (persistent per model)
+      if (activeModelCfg) {
+        updateModelConfig(activeModelCfg.id, { ragTokenThreshold: val });
+        Zotero.debug(
+          `[seerai] RAG token threshold set to ${val} for model ${activeModelCfg.name}`,
+        );
+      }
+      // Also update conversation-level option
+      stateManager.setOptions({ ragTokenThreshold: val });
+    }
+  });
+
+  thresholdRow.appendChild(thresholdLabel);
+  thresholdRow.appendChild(thresholdInput);
+  ragSection.appendChild(thresholdRow);
+
+  body.appendChild(ragSection);
+
+  // --- 6. Tool Permissions ---
   const permSection = doc.createElement("div");
   permSection.style.marginTop = "8px";
   permSection.style.borderTop = "1px solid var(--border-primary)";

@@ -315,11 +315,81 @@
       style="min-width: 150px"
     >
       <menupopup>
+        <menuitem value="nanogpt" label="NanoGPT (Tavily)" />
         <menuitem value="firecrawl" label="Firecrawl" />
         <menuitem value="tavily" label="Tavily" />
       </menupopup>
     </menulist>
   </hbox>
+
+  <!-- NanoGPT (Tavily) Settings -->
+  <vbox
+    id="zotero-prefpane-__addonRef__-nanogptWebSettings"
+    style="
+      margin-left: 20px;
+      margin-bottom: 12px;
+      padding: 10px;
+      background: rgba(0, 0, 0, 0.03);
+      border-radius: 4px;
+    "
+  >
+    <hbox align="center" style="margin-bottom: 8px">
+      <label style="width: 100px">API Key:</label>
+      <html:input
+        type="password"
+        id="zotero-prefpane-__addonRef__-nanogptWebApiKey"
+        placeholder="Your NanoGPT API key"
+        style="flex: 1; min-width: 200px"
+      ></html:input>
+    </hbox>
+    <hbox align="center" style="margin-bottom: 8px">
+      <label style="width: 100px">Search Depth:</label>
+      <menulist
+        id="zotero-prefpane-__addonRef__-nanogptWebSearchDepth"
+        style="min-width: 120px"
+      >
+        <menupopup>
+          <menuitem value="standard" label="Standard (faster)" />
+          <menuitem value="deep" label="Deep (more thorough)" />
+        </menupopup>
+      </menulist>
+    </hbox>
+    <hbox align="center" style="margin-bottom: 8px">
+      <label style="width: 100px">Search Limit:</label>
+      <html:input
+        type="number"
+        id="zotero-prefpane-__addonRef__-nanogptWebSearchLimit"
+        placeholder="5"
+        min="1"
+        max="20"
+        style="width: 60px"
+      ></html:input>
+      <label style="margin-left: 8px; font-size: 11px; color: #666"
+        >Results per query (1-20)</label
+      >
+    </hbox>
+    <label style="font-size: 11px; color: #666; margin-bottom: 8px">
+      Uses your NanoGPT API key to route web searches through Tavily.
+      Minimum NanoGPT balance: $1.00.
+    </label>
+    <hbox align="center" style="gap: 16px">
+      <html:a
+        href="https://nano-gpt.com/r/RwCEN6fR"
+        style="
+          color: #0066cc;
+          text-decoration: underline;
+          cursor: pointer;
+          font-size: 12px;
+        "
+        onclick="
+          Zotero.launchURL(this.href);
+          return false;
+        "
+      >
+        Get NanoGPT API Key
+      </html:a>
+    </hbox>
+  </vbox>
 
   <!-- Firecrawl Settings -->
   <vbox

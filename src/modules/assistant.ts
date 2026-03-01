@@ -104,6 +104,12 @@ import {
 } from "./chat/agenticChat";
 import { ToolResult } from "./chat/tools/toolTypes";
 import { DetachedWindowManager } from "./ui/windowManager";
+import {
+  retrieveContext,
+  shouldActivateRAG,
+  getRAGConfig,
+} from "./chat/rag/retrievalEngine";
+import { getEmbeddingService } from "./chat/rag/embeddingService";
 
 // Debounce timer for autocomplete
 const autocompleteTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1122,6 +1128,314 @@ export class Assistant {
     const combined = parts.join("\n\n");
     return maxLength > 0 ? combined.substring(0, maxLength) : combined;
   }
+
+  /**
+   * Content extractor for the RAG retrieval engine.
+   * Extracts structured content (abstract, notes, PDF text) from a Zotero item
+   * in a format suitable for chunking and embedding.
+   */
+  public static async extractContentForRAG(itemId: number): Promise<{
+    abstract?: string;
+    notes?: string[];
+    pdfText?: string;
+    title?: string;
+    authors?: string[];
+  } | null> {
+    try {
+      const zoteroItem = Zotero.Items.get(itemId);
+      if (!zoteroItem || !zoteroItem.isRegularItem()) return null;
+
+      const title = (zoteroItem.getField("title") as string) || undefined;
+      const abstract =
+        (zoteroItem.getField("abstractNote") as string) || undefined;
+      const authors = zoteroItem
+        .getCreators()
+        .map((c: any) => `${c.firstName} ${c.lastName}`.trim())
+        .filter(Boolean);
+
+      // Collect notes
+      const notes: string[] = [];
+      const noteIds = zoteroItem.getNotes();
+      for (const noteId of noteIds) {
+        const note = Zotero.Items.get(noteId);
+        if (note) {
+          const noteHTML = note.getNote();
+          const plainText = noteHTML
+            .replace(/<[^>]*>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (plainText.length > 0) {
+            notes.push(plainText);
+          }
+        }
+      }
+
+      // Get PDF text
+      let pdfText: string | undefined;
+      const attachmentIds = zoteroItem.getAttachments();
+      for (const attId of attachmentIds) {
+        const att = Zotero.Items.get(attId);
+        if (!att || att.attachmentContentType !== "application/pdf") continue;
+        try {
+          const text = await (att as any).attachmentText;
+          if (text && text.length > 0) {
+            pdfText = text;
+            break;
+          }
+        } catch (e) {
+          Zotero.debug(
+            `[seerai] RAG: error extracting PDF for attachment ${attId}: ${e}`,
+          );
+        }
+      }
+
+      if (!abstract && notes.length === 0 && !pdfText) return null;
+
+      return { title, abstract, notes, pdfText, authors };
+    } catch (e) {
+      Zotero.debug(
+        `[seerai] RAG: error extracting content for item ${itemId}: ${e}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Expand context items for RAG: resolve tags, collections, and authors
+   * into their constituent paper item IDs, and collect passthrough content
+   * for non-indexable types (tables, files, topics).
+   *
+   * Returns:
+   *   expandedItems — deduplicated paper-type context items for vector search
+   *   passthroughContext — verbatim context string for tables, files, topics
+   */
+  public static async expandContextItemsForRAG(
+    contextItems: Array<{
+      id: number | string;
+      type: string;
+      displayName: string;
+      metadata?: Record<string, any>;
+    }>,
+  ): Promise<{
+    expandedItems: Array<{
+      id: number;
+      type: string;
+      displayName: string;
+      metadata?: Record<string, any>;
+    }>;
+    passthroughContext: string;
+  }> {
+    const seenPaperIds = new Set<number>();
+    const paperItems: Array<{
+      id: number;
+      type: string;
+      displayName: string;
+      metadata?: Record<string, any>;
+    }> = [];
+    const passthroughParts: string[] = [];
+
+    for (const item of contextItems) {
+      if (item.type === "paper" && typeof item.id === "number") {
+        // Direct paper reference — pass through
+        if (!seenPaperIds.has(item.id)) {
+          seenPaperIds.add(item.id);
+          paperItems.push({
+            id: item.id,
+            type: "paper",
+            displayName: item.displayName,
+            metadata: item.metadata,
+          });
+        }
+      } else if (item.type === "tag") {
+        // Expand tag → all papers with this tag
+        try {
+          const tagName = item.displayName;
+          const libraryID = Zotero.Libraries.userLibraryID;
+          const s = new Zotero.Search({ libraryID });
+          s.addCondition("tag", "is", tagName);
+          s.addCondition("itemType", "isNot", "attachment");
+          s.addCondition("itemType", "isNot", "note");
+          const itemIDs = await s.search();
+
+          for (const itemID of itemIDs) {
+            if (seenPaperIds.has(itemID)) continue;
+            const zItem = Zotero.Items.get(itemID);
+            if (!zItem || !zItem.isRegularItem()) continue;
+            seenPaperIds.add(itemID);
+            paperItems.push({
+              id: itemID,
+              type: "paper",
+              displayName:
+                (zItem.getField("title") as string) || `Item ${itemID}`,
+            });
+          }
+          Zotero.debug(
+            `[seerai] RAG expand: tag "${tagName}" → ${itemIDs.length} papers`,
+          );
+        } catch (e) {
+          Zotero.debug(
+            `[seerai] RAG expand: error expanding tag "${item.displayName}": ${e}`,
+          );
+        }
+      } else if (item.type === "collection") {
+        // Expand collection → all child items (recursive)
+        try {
+          const collectionId = item.id as number;
+          const collection = Zotero.Collections.get(collectionId);
+          if (collection) {
+            const childItemIDs = collection.getChildItems(true);
+            for (const childId of childItemIDs) {
+              if (seenPaperIds.has(childId)) continue;
+              const zItem = Zotero.Items.get(childId);
+              if (!zItem || !zItem.isRegularItem()) continue;
+              seenPaperIds.add(childId);
+              paperItems.push({
+                id: childId,
+                type: "paper",
+                displayName:
+                  (zItem.getField("title") as string) || `Item ${childId}`,
+              });
+            }
+            Zotero.debug(
+              `[seerai] RAG expand: collection "${item.displayName}" → ${childItemIDs.length} items`,
+            );
+          }
+        } catch (e) {
+          Zotero.debug(
+            `[seerai] RAG expand: error expanding collection "${item.displayName}": ${e}`,
+          );
+        }
+      } else if (item.type === "author") {
+        // Expand author → all papers by this author
+        try {
+          const authorName = item.displayName;
+          const libraryID = Zotero.Libraries.userLibraryID;
+          const s = new Zotero.Search({ libraryID });
+          s.addCondition("creator", "contains", authorName);
+          s.addCondition("itemType", "isNot", "attachment");
+          s.addCondition("itemType", "isNot", "note");
+          const itemIDs = await s.search();
+
+          for (const itemID of itemIDs) {
+            if (seenPaperIds.has(itemID)) continue;
+            const zItem = Zotero.Items.get(itemID);
+            if (!zItem || !zItem.isRegularItem()) continue;
+            seenPaperIds.add(itemID);
+            paperItems.push({
+              id: itemID,
+              type: "paper",
+              displayName:
+                (zItem.getField("title") as string) || `Item ${itemID}`,
+            });
+          }
+          Zotero.debug(
+            `[seerai] RAG expand: author "${authorName}" → ${itemIDs.length} papers`,
+          );
+        } catch (e) {
+          Zotero.debug(
+            `[seerai] RAG expand: error expanding author "${item.displayName}": ${e}`,
+          );
+        }
+      } else if (item.type === "table") {
+        // Tables: include verbatim as passthrough context (not vector-searchable)
+        try {
+          const storedTables = await getTableStore().getAllTables();
+          const tableConfig = storedTables.find((t: any) => t.id === item.id);
+          if (tableConfig) {
+            let tablePart = `\n--- Table: ${tableConfig.name} ---`;
+            const columnNames = tableConfig.columns.map(
+              (c: any) => c.name || c.title,
+            );
+            tablePart += `\nColumns: ${columnNames.join(", ")}`;
+            tablePart += `\nTotal papers: ${tableConfig.addedPaperIds.length}`;
+
+            const generatedData = tableConfig.generatedData || {};
+            if (tableConfig.addedPaperIds.length > 0) {
+              tablePart += `\n\n=== Table Data ===`;
+              for (const paperId of tableConfig.addedPaperIds) {
+                const zoteroItem = Zotero.Items.get(paperId);
+                if (!zoteroItem) continue;
+                const title = zoteroItem.getField("title") || "Untitled";
+                const creators = zoteroItem.getCreators();
+                const authorStr =
+                  creators.length > 0
+                    ? creators
+                        .map((c: any) => c.lastName || c.name)
+                        .slice(0, 3)
+                        .join(", ") + (creators.length > 3 ? " et al." : "")
+                    : "";
+                const year =
+                  zoteroItem.getField("year") ||
+                  zoteroItem.getField("date")?.substring(0, 4) ||
+                  "";
+                tablePart += `\n\n--- Paper: ${title} ---`;
+                if (authorStr) tablePart += `\nAuthors: ${authorStr}`;
+                if (year) tablePart += ` (${year})`;
+
+                const paperData = generatedData[paperId];
+                if (paperData && Object.keys(paperData).length > 0) {
+                  tablePart += `\n`;
+                  for (const column of tableConfig.columns as any[]) {
+                    const columnId = column.id;
+                    const columnName = column.name || column.title || columnId;
+                    const value = paperData[columnId];
+                    if (
+                      ["title", "author", "year", "sources"].includes(columnId)
+                    )
+                      continue;
+                    if (value) {
+                      tablePart += `\n${columnName}: ${value}`;
+                    }
+                  }
+                }
+              }
+            }
+            passthroughParts.push(tablePart);
+          }
+        } catch (e) {
+          Zotero.debug(
+            `[seerai] RAG expand: error building table passthrough for "${item.displayName}": ${e}`,
+          );
+        }
+      } else if (item.type === "file") {
+        // Uploaded files: include extracted content as passthrough
+        const filename =
+          (item.metadata?.filename as string) || item.displayName;
+        const extractedContent = item.metadata?.extractedContent as
+          | string
+          | undefined;
+        const category = item.metadata?.fileCategory as string | undefined;
+        const extractionError = item.metadata?.extractionError as
+          | string
+          | undefined;
+
+        let filePart = `\n--- File: ${filename} ---`;
+        if (extractedContent && extractedContent.length > 0) {
+          if (category === "audio") {
+            filePart += `\n[Transcribed audio: ${filename}]\n${extractedContent}`;
+          } else {
+            filePart += `\n${extractedContent}`;
+          }
+        } else if (extractionError) {
+          filePart += `\n(${extractionError})`;
+        } else {
+          filePart += `\n(No text content could be extracted from this file)`;
+        }
+        passthroughParts.push(filePart);
+      } else if (item.type === "topic") {
+        // Topics: include as passthrough focus directive
+        passthroughParts.push(
+          `\nFocus Topic: "${item.displayName}" - Please consider this topic when answering.`,
+        );
+      }
+    }
+
+    return {
+      expandedItems: paperItems,
+      passthroughContext: passthroughParts.join("\n"),
+    };
+  }
+
   public static getSearchState(): SearchState {
     return currentSearchState;
   }
@@ -23270,10 +23584,72 @@ Rules:
     toolbarRight.appendChild(historyBtn);
     toolbarRow.appendChild(toolbarRight);
 
-    // Text input row: textarea + [image | video] side by side + send button
+    // Web Search toggle button
+    const webSearchBtn = ztoolkit.UI.createElement(doc, "button", {
+      properties: {
+        innerText: "\uD83D\uDD0D",
+        title: "Toggle web search (enriches AI context with web results)",
+      },
+      styles: {
+        padding: "0 8px",
+        height: "32px",
+        fontSize: "13px",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "6px",
+        backgroundColor: stateManager.getOptions().webSearchEnabled
+          ? "var(--accent-color, #007AFF)"
+          : "var(--background-secondary)",
+        color: stateManager.getOptions().webSearchEnabled
+          ? "#fff"
+          : "var(--text-secondary)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: "0",
+        transition: "background-color 0.2s, color 0.2s",
+      },
+      listeners: [
+        {
+          type: "click",
+          listener: () => {
+            const current = stateManager.getOptions().webSearchEnabled;
+            const newState = !current;
+            stateManager.setOptions({ webSearchEnabled: newState });
+
+            // Update button visual state
+            const btn = webSearchBtn as HTMLElement;
+            if (newState) {
+              btn.style.backgroundColor = "var(--accent-color, #007AFF)";
+              btn.style.color = "#fff";
+              btn.style.borderColor = "var(--accent-color, #007AFF)";
+              btn.title = "Web search ON - click to disable";
+            } else {
+              btn.style.backgroundColor = "var(--background-secondary)";
+              btn.style.color = "var(--text-secondary)";
+              btn.style.borderColor = "var(--border-primary)";
+              btn.title =
+                "Toggle web search (enriches AI context with web results)";
+            }
+
+            Zotero.debug(`[seerai] Web search toggled: ${newState}`);
+          },
+        },
+      ],
+    }) as HTMLButtonElement;
+
+    // Set initial border color for active state
+    if (stateManager.getOptions().webSearchEnabled) {
+      (webSearchBtn as HTMLElement).style.borderColor =
+        "var(--accent-color, #007AFF)";
+      (webSearchBtn as HTMLElement).title = "Web search ON - click to disable";
+    }
+
+    // Text input row: textarea + [image | video | search] side by side + send button
     textInputRow.appendChild(input);
     textInputRow.appendChild(imageGenContainer);
     textInputRow.appendChild(videoGenContainer);
+    textInputRow.appendChild(webSearchBtn);
     textInputRow.appendChild(sendBtn);
 
     // Assemble: toolbar row on top, text input row below
@@ -23946,6 +24322,11 @@ Rules:
 
     let isFirstToken = true;
 
+    // RAG state — hoisted so catch block can reference them for error recovery
+    let ragActive = false;
+    const embeddingService = getEmbeddingService();
+    const ragConfig = getRAGConfig();
+
     try {
       // Build context from ChatContextManager
       const contextManager = ChatContextManager.getInstance();
@@ -24302,6 +24683,94 @@ Rules:
         }
       }
 
+      // ── RAG: Check if semantic search should replace full-text context ──
+      let ragStats: {
+        chunksRetrieved: number;
+        tokensUsed: number;
+        queryTimeMs: number;
+      } | null = null;
+
+      // Determine if RAG should activate based on context size
+      const estimatedTokens = ChatStateManager.countTokens(context);
+      const activeModelForRAG = getActiveModelConfig();
+
+      // Read per-model RAG settings, falling back to global pref defaults
+      const modelRagAlwaysUse = activeModelForRAG?.ragAlwaysUse ?? false;
+      const modelRagThreshold =
+        activeModelForRAG?.ragTokenThreshold ?? ragConfig.tokenThreshold;
+
+      // Check per-conversation override first, then global pref.
+      // If the user explicitly disabled the toggle, RAG never activates.
+      const ragEnabledOverride = options.ragEnabled;
+      const effectiveRAGEnabled =
+        ragEnabledOverride !== undefined
+          ? ragEnabledOverride
+          : ragConfig.enabled;
+
+      // Check if RAG should activate (embedding must be configured AND
+      // the user must not have disabled it). shouldActivateRAG checks
+      // always-use flag and token threshold.
+      if (
+        effectiveRAGEnabled &&
+        embeddingService.isConfigured() &&
+        shouldActivateRAG(estimatedTokens, modelRagAlwaysUse, modelRagThreshold)
+      ) {
+        try {
+          Zotero.debug(
+            `[seerai] RAG activating: estimated ${estimatedTokens} tokens, ` +
+              `threshold=${modelRagThreshold}, alwaysUse=${modelRagAlwaysUse}`,
+          );
+
+          // Expand non-paper context items (tags, collections, authors → paper IDs)
+          // and collect passthrough content (tables, files, topics)
+          const { expandedItems, passthroughContext } =
+            await Assistant.expandContextItemsForRAG(contextItems);
+
+          Zotero.debug(
+            `[seerai] RAG expanded: ${contextItems.length} context items → ${expandedItems.length} papers, ` +
+              `${passthroughContext.length > 0 ? "with" : "no"} passthrough content`,
+          );
+
+          const ragResult = await retrieveContext(
+            text,
+            expandedItems,
+            Assistant.extractContentForRAG,
+            {
+              topK: ragConfig.topK,
+              maxTokens: ragConfig.tokenThreshold || estimatedTokens,
+              minScore: ragConfig.minScore,
+              passthroughContext,
+            },
+          );
+
+          if (
+            ragResult.context &&
+            (ragResult.chunks.length > 0 || passthroughContext.length > 0)
+          ) {
+            // Replace full-text context with RAG-retrieved passages + passthrough
+            context = ragResult.context;
+            ragActive = true;
+            ragStats = {
+              chunksRetrieved: ragResult.stats.chunksRetrieved,
+              tokensUsed: ragResult.stats.tokensUsed,
+              queryTimeMs: ragResult.stats.queryTimeMs,
+            };
+            Zotero.debug(
+              `[seerai] RAG replaced context: ${ragResult.stats.chunksRetrieved} chunks, ` +
+                `${ragResult.stats.tokensUsed} tokens (was ${estimatedTokens}), ` +
+                `${ragResult.stats.queryTimeMs}ms`,
+            );
+          } else {
+            Zotero.debug(
+              "[seerai] RAG returned no results, keeping full-text context",
+            );
+          }
+        } catch (e) {
+          Zotero.debug(`[seerai] RAG failed, falling back to full-text: ${e}`);
+          // Keep original context on failure
+        }
+      }
+
       // Web Search Context
       let webContext = "";
       if (options.webSearchEnabled && isActiveProviderConfigured()) {
@@ -24579,6 +25048,172 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
         );
       }
     } catch (error) {
+      // ── Strategy C: Error recovery — retry with RAG on context length errors ──
+      const errStr = String(error);
+      const isContextLengthError =
+        /context.?length|maximum.?context|token.?limit|too.?many.?tokens|max_tokens|context_length_exceeded/i.test(
+          errStr,
+        );
+
+      if (
+        isContextLengthError &&
+        !ragActive &&
+        embeddingService.isConfigured()
+      ) {
+        Zotero.debug(
+          `[seerai] Context length error detected, retrying with RAG: ${errStr}`,
+        );
+        try {
+          const retryContextItems = ChatContextManager.getInstance().getItems();
+          // Expand context items for RAG (resolve tags/collections/authors, collect passthrough)
+          const {
+            expandedItems: retryExpanded,
+            passthroughContext: retryPassthrough,
+          } = await Assistant.expandContextItemsForRAG(retryContextItems);
+          const ragResult = await retrieveContext(
+            text,
+            retryExpanded,
+            Assistant.extractContentForRAG,
+            {
+              topK: ragConfig.topK,
+              maxTokens: ragConfig.tokenThreshold || 8000,
+              minScore: ragConfig.minScore,
+              passthroughContext: retryPassthrough,
+            },
+          );
+
+          if (
+            ragResult.context &&
+            (ragResult.chunks.length > 0 || retryPassthrough.length > 0)
+          ) {
+            // Rebuild system prompt with RAG context
+            const scopePref = this.getScopePref();
+            const scopeLabel = this.getScopeLabel(scopePref);
+            const ragSystemPrompt = `You are a helpful research assistant for Zotero. You help users understand and analyze their academic papers, notes, and research data tables.
+
+Current Library/Folder Scope: ${scopeLabel} (Tools will only find items within this scope).
+
+${ragResult.context}
+
+Be concise, accurate, and helpful. When referencing papers, cite them by title or author.
+Note: Context was automatically reduced using semantic search due to size constraints.`;
+
+            const retryMessages: (OpenAIMessage | VisionMessage)[] = [
+              { role: "system", content: ragSystemPrompt },
+              ...conversationMessages
+                .filter((m) => m.role !== "system" && m.role !== "error")
+                .map((m) => ({
+                  role: m.role as "user" | "assistant",
+                  content: m.content,
+                })),
+            ];
+
+            const retryActiveModel = getActiveModelConfig();
+            const retryChatOptions = getChatStateManager().getOptions();
+            const retryConfigOverride = retryActiveModel
+              ? {
+                  apiURL: retryActiveModel.apiURL,
+                  apiKey: retryActiveModel.apiKey,
+                  model: retryActiveModel.model,
+                  temperature: retryChatOptions.temperature,
+                  max_tokens: retryChatOptions.maxTokens,
+                }
+              : undefined;
+
+            Zotero.debug(
+              `[seerai] RAG retry: ${ragResult.stats.chunksRetrieved} chunks, ${ragResult.stats.tokensUsed} tokens`,
+            );
+
+            const retryAgenticEnabled = isAgenticModeEnabled();
+            if (retryAgenticEnabled) {
+              await handleAgenticChat(
+                text,
+                ragSystemPrompt,
+                conversationMessages.slice(0, -1),
+                {
+                  enableTools: true,
+                  includeImages: false,
+                  pastedImages: [],
+                  permissionHandler: Assistant.handleInlinePermissionRequest,
+                  temperature: retryChatOptions.temperature,
+                  maxTokens: retryChatOptions.maxTokens,
+                },
+                observer,
+              );
+            } else {
+              let retryFullResponse = "";
+              let retryIsFirstToken = true;
+              await openAIService.chatCompletionStream(
+                retryMessages,
+                {
+                  onToken: (token) => {
+                    if (!this.isStreaming) return;
+                    retryFullResponse += token;
+                    if (contentDiv) {
+                      const { displayContent } =
+                        processStreamingContent(retryFullResponse);
+                      if (retryIsFirstToken && displayContent) {
+                        contentDiv.querySelector(".typing-indicator")?.remove();
+                        retryIsFirstToken = false;
+                      }
+                      if (displayContent) {
+                        let mdContainer = contentDiv.querySelector(
+                          ".markdown-content",
+                        ) as HTMLElement;
+                        if (!mdContainer) {
+                          mdContainer =
+                            contentDiv.ownerDocument!.createElement("div");
+                          mdContainer.className = "markdown-content";
+                          contentDiv.appendChild(mdContainer);
+                        }
+                        this.smartRender(mdContainer, displayContent);
+                        messagesArea.scrollTop = messagesArea.scrollHeight;
+                      }
+                    }
+                  },
+                  onComplete: async (content) => {
+                    const cleanedContent = stripThinkTags(content);
+                    const assistantMsg: ChatMessage = {
+                      id: Date.now().toString(),
+                      role: "assistant",
+                      content: cleanedContent,
+                      timestamp: new Date(),
+                    };
+                    conversationMessages.push(assistantMsg);
+                    try {
+                      await getMessageStore().appendMessage(assistantMsg);
+                    } catch (e) {
+                      Zotero.debug(
+                        `[seerai] Error saving retry assistant message: ${e}`,
+                      );
+                    }
+                    if (contentDiv) {
+                      contentDiv.setAttribute("data-raw", cleanedContent);
+                      try {
+                        contentDiv.innerHTML = parseMarkdown(cleanedContent);
+                      } catch (e) {
+                        contentDiv.textContent = cleanedContent;
+                      }
+                    }
+                    clearImages();
+                  },
+                  onError: (retryError) => {
+                    if (contentDiv) {
+                      contentDiv.innerHTML = `<span style="color: #c62828;">Error (after RAG retry): ${retryError.message}</span>`;
+                    }
+                  },
+                },
+                retryConfigOverride,
+              );
+            }
+            // RAG retry succeeded
+            return;
+          }
+        } catch (retryErr) {
+          Zotero.debug(`[seerai] RAG retry also failed: ${retryErr}`);
+        }
+      }
+
       const errMsg =
         error instanceof Error && error.message === "Request was cancelled"
           ? "Generation stopped"

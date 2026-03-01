@@ -285,6 +285,32 @@ function bindPrefEvents() {
     "semanticScholarApiKey",
   );
 
+  // NanoGPT Web Search settings
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-nanogptWebApiKey`,
+    "nanogptWebApiKey",
+  );
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-nanogptWebSearchLimit`,
+    "nanogptWebSearchLimit",
+  );
+
+  // NanoGPT search depth menulist
+  const nanogptDepthSelect = doc?.querySelector(
+    `#zotero-prefpane-${config.addonRef}-nanogptWebSearchDepth`,
+  ) as XUL.MenuList;
+  if (nanogptDepthSelect) {
+    nanogptDepthSelect.value =
+      (Zotero.Prefs.get(`${prefPrefix}.nanogptWebSearchDepth`) as string) ||
+      "standard";
+    nanogptDepthSelect.addEventListener("command", () => {
+      Zotero.Prefs.set(
+        `${prefPrefix}.nanogptWebSearchDepth`,
+        nanogptDepthSelect.value,
+      );
+    });
+  }
+
   // Firecrawl settings
   bindInput(
     `zotero-prefpane-${config.addonRef}-firecrawlApiKey`,
@@ -324,6 +350,9 @@ function bindPrefEvents() {
 
   // Web Search Provider selection with show/hide logic
   function updateWebSearchProviderVisibility(provider: string) {
+    const nanogptWebSettings = doc?.querySelector(
+      `#zotero-prefpane-${config.addonRef}-nanogptWebSettings`,
+    ) as HTMLElement;
     const firecrawlSettings = doc?.querySelector(
       `#zotero-prefpane-${config.addonRef}-firecrawlSettings`,
     ) as HTMLElement;
@@ -331,6 +360,9 @@ function bindPrefEvents() {
       `#zotero-prefpane-${config.addonRef}-tavilySettings`,
     ) as HTMLElement;
 
+    if (nanogptWebSettings) {
+      nanogptWebSettings.style.display = provider === "nanogpt" ? "" : "none";
+    }
     if (firecrawlSettings) {
       firecrawlSettings.style.display = provider === "firecrawl" ? "" : "none";
     }
@@ -787,17 +819,57 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       model: HTMLInputElement;
       endpoint: HTMLInputElement;
       voice?: HTMLInputElement;
+      dimensions?: HTMLInputElement;
+      maxTokens?: HTMLInputElement;
     }
   > = {};
 
-  // Provider presets
-  const providerPresets = [
+  // Provider presets — rich type supports pre-filling all config fields
+  interface ProviderPreset {
+    name: string;
+    apiURL: string;
+    model: string;
+    placeholder: string;
+    // Optional rich fields for fully pre-configured presets
+    rateLimit?: { type: "tpm" | "rpm" | "concurrency"; value: number };
+    reasoningEffort?: "low" | "medium" | "high" | "";
+    ttsConfig?: { model: string; endpoint?: string; voice?: string };
+    sttConfig?: { model: string; endpoint?: string };
+    embeddingConfig?: {
+      model: string;
+      endpoint?: string;
+      dimensions?: number;
+      maxTokens?: number;
+    };
+    imageConfig?: { model: string; endpoint?: string };
+    videoConfig?: { model: string; endpoint?: string };
+    ragTokenThreshold?: number;
+    ragAlwaysUse?: boolean;
+  }
+
+  const providerPresets: ProviderPreset[] = [
     { name: "— Select a preset —", apiURL: "", model: "", placeholder: "" },
     {
       name: "NanoGPT",
       apiURL: "https://nano-gpt.com/api/v1",
       model: "",
       placeholder: "nano-...",
+    },
+    {
+      name: "NanoGPT-preset",
+      apiURL: "https://nano-gpt.com/api/v1",
+      model: "claude-haiku-4-5-20251001",
+      placeholder: "nano-...",
+      rateLimit: { type: "rpm", value: 500 },
+      ttsConfig: { model: "Kokoro-82m", voice: "am_onyx" },
+      sttConfig: { model: "Whisper-Large-V3" },
+      embeddingConfig: {
+        model: "text-embedding-3-large",
+        dimensions: 3072,
+        maxTokens: 8191,
+      },
+      imageConfig: { model: "nano-banana-2" },
+      videoConfig: { model: "veo3-1-video" },
     },
     {
       name: "OpenAI",
@@ -919,6 +991,13 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   let allNanoModels: string[] = [];
   // Track whether current provider is NanoGPT (for TTS searchable dropdown)
   let isCurrentProviderNanoGpt = !isEdit; // defaults to NanoGPT for new configs
+
+  // Hoisted form element references for the preset change handler (assigned after creation)
+  let rlTypeSelect: HTMLSelectElement;
+  let rlValueInput: HTMLInputElement;
+  let reSelect: HTMLSelectElement;
+  let ragThresholdInput: HTMLInputElement;
+  let ragAlwaysCheckbox: HTMLInputElement;
 
   if (!isEdit) {
     const presetLabel = doc.createElementNS(HTML_NS, "label") as HTMLElement;
@@ -1248,18 +1327,93 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
           }
         }
 
-        // For NanoGPT, name is set dynamically on model select; set placeholder for now
-        const isNanoGpt = preset.name === "NanoGPT";
-        if (isNanoGpt) {
-          if (inputs.name && !inputs.name.value) inputs.name.value = "NanoGPT";
+        // For NanoGPT variants, name is set dynamically on model select; set placeholder
+        const isNanoGptVariant =
+          preset.name === "NanoGPT" || preset.name === "NanoGPT-preset";
+        if (isNanoGptVariant) {
+          // NanoGPT-preset gets a fixed name; plain NanoGPT uses dynamic naming
+          if (preset.name === "NanoGPT-preset") {
+            if (inputs.name) inputs.name.value = "Seerai";
+          } else {
+            if (inputs.name && !inputs.name.value)
+              inputs.name.value = "NanoGPT";
+          }
         } else {
           if (inputs.name && !inputs.name.value)
             inputs.name.value = preset.name;
         }
+
+        // ── Populate rich preset fields (capability endpoints, rate limit, RAG) ──
+        // Rate limit
+        if (preset.rateLimit) {
+          rlTypeSelect.value = preset.rateLimit.type;
+          rlValueInput.value = String(preset.rateLimit.value);
+        }
+        // Reasoning effort
+        if (preset.reasoningEffort !== undefined) {
+          reSelect.value = preset.reasoningEffort;
+        }
+        // TTS
+        if (preset.ttsConfig && endpointInputs.tts) {
+          endpointInputs.tts.model.value = preset.ttsConfig.model;
+          if (preset.ttsConfig.endpoint)
+            endpointInputs.tts.endpoint.value = preset.ttsConfig.endpoint;
+          if (preset.ttsConfig.voice && endpointInputs.tts.voice)
+            endpointInputs.tts.voice.value = preset.ttsConfig.voice;
+        }
+        // STT
+        if (preset.sttConfig && endpointInputs.stt) {
+          endpointInputs.stt.model.value = preset.sttConfig.model;
+          if (preset.sttConfig.endpoint)
+            endpointInputs.stt.endpoint.value = preset.sttConfig.endpoint;
+        }
+        // Embedding
+        if (preset.embeddingConfig && endpointInputs.embedding) {
+          endpointInputs.embedding.model.value = preset.embeddingConfig.model;
+          if (preset.embeddingConfig.endpoint)
+            endpointInputs.embedding.endpoint.value =
+              preset.embeddingConfig.endpoint;
+          if (
+            preset.embeddingConfig.dimensions &&
+            endpointInputs.embedding.dimensions
+          )
+            endpointInputs.embedding.dimensions.value = String(
+              preset.embeddingConfig.dimensions,
+            );
+          if (
+            preset.embeddingConfig.maxTokens &&
+            endpointInputs.embedding.maxTokens
+          )
+            endpointInputs.embedding.maxTokens.value = String(
+              preset.embeddingConfig.maxTokens,
+            );
+        }
+        // Image
+        if (preset.imageConfig && endpointInputs.image) {
+          endpointInputs.image.model.value = preset.imageConfig.model;
+          if (preset.imageConfig.endpoint)
+            endpointInputs.image.endpoint.value = preset.imageConfig.endpoint;
+        }
+        // Video
+        if (preset.videoConfig && endpointInputs.video) {
+          endpointInputs.video.model.value = preset.videoConfig.model;
+          if (preset.videoConfig.endpoint)
+            endpointInputs.video.endpoint.value = preset.videoConfig.endpoint;
+        }
+        // RAG settings
+        if (preset.ragTokenThreshold !== undefined) {
+          ragThresholdInput.value = String(preset.ragTokenThreshold);
+        }
+        if (preset.ragAlwaysUse !== undefined) {
+          ragAlwaysCheckbox.checked = preset.ragAlwaysUse;
+          ragThresholdInput.disabled = preset.ragAlwaysUse;
+          ragThresholdInput.style.opacity = preset.ragAlwaysUse ? "0.5" : "1";
+        }
       }
 
-      // NanoGPT-specific behavior
-      const isNanoGpt = preset?.name === "NanoGPT";
+      // NanoGPT-specific behavior (both NanoGPT and NanoGPT-preset use NanoGPT API)
+      const isNanoGpt =
+        preset?.name === "NanoGPT" || preset?.name === "NanoGPT-preset";
       isCurrentProviderNanoGpt = isNanoGpt;
 
       if (isNanoGpt) {
@@ -1388,10 +1542,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   `;
 
   // Type Selector
-  const rlTypeSelect = doc.createElementNS(
-    HTML_NS,
-    "select",
-  ) as HTMLSelectElement;
+  rlTypeSelect = doc.createElementNS(HTML_NS, "select") as HTMLSelectElement;
   rlTypeSelect.style.cssText = selectStyle;
   rlTypeSelect.style.marginBottom = "0";
   rlTypeSelect.style.flex = "1";
@@ -1414,10 +1565,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   rlContainer.appendChild(rlTypeSelect);
 
   // Value Input
-  const rlValueInput = doc.createElementNS(
-    HTML_NS,
-    "input",
-  ) as HTMLInputElement;
+  rlValueInput = doc.createElementNS(HTML_NS, "input") as HTMLInputElement;
   rlValueInput.type = "number";
   rlValueInput.min = "1";
   rlValueInput.placeholder = "Limit";
@@ -1450,7 +1598,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   reLabel.style.cssText = labelStyle;
   reasoningSection.appendChild(reLabel);
 
-  const reSelect = doc.createElementNS(HTML_NS, "select") as HTMLSelectElement;
+  reSelect = doc.createElementNS(HTML_NS, "select") as HTMLSelectElement;
   reSelect.style.cssText = selectStyle;
 
   const reOptions = [
@@ -1536,6 +1684,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   // Chat NanoGPT searchable dropdown elements (hoisted for visibility toggling)
   let chatNanoSearchContainer: HTMLElement | null = null;
   let chatPlainModelInput: HTMLInputElement | null = null;
+  let chatNanoSearchInput: HTMLInputElement | null = null;
 
   // Called when preset changes to show/hide chat NanoGPT search
   function updateChatModelDropdownVisibility(isNanoGpt: boolean) {
@@ -1543,6 +1692,11 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       if (isNanoGpt && allNanoModels.length > 0) {
         chatNanoSearchContainer.style.display = "";
         chatPlainModelInput.style.display = "none";
+        // Sync the current model value into the search input so the preset
+        // model name is visible (not blank) when the dropdown is shown
+        if (chatNanoSearchInput && chatPlainModelInput.value) {
+          chatNanoSearchInput.value = chatPlainModelInput.value;
+        }
       } else {
         chatNanoSearchContainer.style.display = "none";
         chatPlainModelInput.style.display = "";
@@ -1584,7 +1738,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     row.style.cssText = `
       padding: 10px 14px;
       border-bottom: ${isLast ? "none" : `1px solid ${isDark ? "#333" : "#eee"}`};
-      background: ${isDark ? "#252525" : "#fafafa"};
+      background: ${typeColor}${isDark ? "15" : "0a"};
     `;
 
     // Row header with icon + label
@@ -1685,6 +1839,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
         HTML_NS,
         "input",
       ) as HTMLInputElement;
+      chatNanoSearchInput = chatSearchInput;
       chatSearchInput.type = "text";
       chatSearchInput.placeholder = "Search models...";
       chatSearchInput.value = existing?.model || "";
@@ -1913,6 +2068,83 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       fieldRow.appendChild(voiceInput);
     }
 
+    // Dimensions + Max Tokens inputs (embedding only)
+    let dimensionsInput: HTMLInputElement | undefined;
+    let maxTokensInput: HTMLInputElement | undefined;
+    if (cap.type === "embedding") {
+      dimensionsInput = doc.createElementNS(
+        HTML_NS,
+        "input",
+      ) as HTMLInputElement;
+      dimensionsInput.type = "number";
+      dimensionsInput.placeholder = "Dimensions";
+      dimensionsInput.value = existing?.dimensions
+        ? String(existing.dimensions)
+        : "";
+      dimensionsInput.min = "1";
+      dimensionsInput.style.cssText = `
+        flex: 0.5;
+        padding: 7px 10px;
+        border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
+        border-radius: 5px;
+        font-size: 12px;
+        box-sizing: border-box;
+        background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
+        color: ${dimensionsInput.value ? inputText || defaultTitleColor : isDark ? "#999" : "#777"};
+        font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+        transition: border-color 0.2s;
+      `;
+      dimensionsInput.addEventListener("focus", () => {
+        dimensionsInput!.style.borderColor = inputFocusBorder;
+        dimensionsInput!.style.outline = "none";
+        dimensionsInput!.style.color = inputText || defaultTitleColor;
+      });
+      dimensionsInput.addEventListener("blur", () => {
+        dimensionsInput!.style.borderColor =
+          inputBorder || (isDark ? "#444" : "#ccc");
+        if (!dimensionsInput!.value) {
+          dimensionsInput!.style.color = isDark ? "#999" : "#777";
+        }
+      });
+      fieldRow.appendChild(dimensionsInput);
+
+      maxTokensInput = doc.createElementNS(
+        HTML_NS,
+        "input",
+      ) as HTMLInputElement;
+      maxTokensInput.type = "number";
+      maxTokensInput.placeholder = "Max tokens";
+      maxTokensInput.value = existing?.maxTokens
+        ? String(existing.maxTokens)
+        : "";
+      maxTokensInput.min = "1";
+      maxTokensInput.style.cssText = `
+        flex: 0.5;
+        padding: 7px 10px;
+        border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
+        border-radius: 5px;
+        font-size: 12px;
+        box-sizing: border-box;
+        background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
+        color: ${maxTokensInput.value ? inputText || defaultTitleColor : isDark ? "#999" : "#777"};
+        font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+        transition: border-color 0.2s;
+      `;
+      maxTokensInput.addEventListener("focus", () => {
+        maxTokensInput!.style.borderColor = inputFocusBorder;
+        maxTokensInput!.style.outline = "none";
+        maxTokensInput!.style.color = inputText || defaultTitleColor;
+      });
+      maxTokensInput.addEventListener("blur", () => {
+        maxTokensInput!.style.borderColor =
+          inputBorder || (isDark ? "#444" : "#ccc");
+        if (!maxTokensInput!.value) {
+          maxTokensInput!.style.color = isDark ? "#999" : "#777";
+        }
+      });
+      fieldRow.appendChild(maxTokensInput);
+    }
+
     row.appendChild(fieldRow);
     endpointSection.appendChild(row);
 
@@ -1920,10 +2152,142 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       model: modelInput,
       endpoint: endpointInput,
       ...(voiceInput && { voice: voiceInput }),
+      ...(dimensionsInput && { dimensions: dimensionsInput }),
+      ...(maxTokensInput && { maxTokens: maxTokensInput }),
     };
   });
 
   modal.appendChild(endpointSection);
+
+  // ── RAG Settings section (Token Threshold + Always Use) ──────────────────
+  const ragSettingsSection = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  ragSettingsSection.style.cssText = `
+    margin-bottom: 16px;
+    padding: 10px 12px;
+    border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
+    border-radius: 6px;
+    background: ${isDark ? "#232323" : "#fafafa"};
+  `;
+
+  const ragSettingsLabel = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  ragSettingsLabel.style.cssText = `
+    font-size: 11px;
+    font-weight: 600;
+    color: ${isDark ? "#aaa" : "#888"};
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  `;
+  ragSettingsLabel.textContent = "RAG / Semantic Search";
+  ragSettingsSection.appendChild(ragSettingsLabel);
+
+  // Token Threshold
+  const ragThresholdRow = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  ragThresholdRow.style.cssText = `
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  `;
+
+  const ragThresholdLabel = doc.createElementNS(
+    HTML_NS,
+    "label",
+  ) as HTMLElement;
+  ragThresholdLabel.style.cssText = `
+    font-size: 12px;
+    color: ${defaultTitleColor};
+    flex: 1;
+  `;
+  ragThresholdLabel.textContent = "Token Threshold";
+  ragThresholdLabel.title =
+    "RAG activates when context exceeds this token count. Set to your model's context window limit or lower.";
+
+  ragThresholdInput = doc.createElementNS(HTML_NS, "input") as HTMLInputElement;
+  ragThresholdInput.type = "number";
+  ragThresholdInput.min = "1000";
+  ragThresholdInput.max = "2000000";
+  ragThresholdInput.step = "1000";
+  ragThresholdInput.placeholder = "64000";
+  ragThresholdInput.value = existingConfig?.ragTokenThreshold
+    ? String(existingConfig.ragTokenThreshold)
+    : "";
+  ragThresholdInput.style.cssText = `
+    width: 100px;
+    padding: 6px 10px;
+    border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
+    border-radius: 5px;
+    font-size: 12px;
+    box-sizing: border-box;
+    background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
+    color: ${ragThresholdInput.value ? inputText || defaultTitleColor : isDark ? "#999" : "#777"};
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    text-align: right;
+    transition: border-color 0.2s;
+  `;
+  ragThresholdInput.addEventListener("focus", () => {
+    ragThresholdInput.style.borderColor = inputFocusBorder;
+    ragThresholdInput.style.outline = "none";
+    ragThresholdInput.style.color = inputText || defaultTitleColor;
+  });
+  ragThresholdInput.addEventListener("blur", () => {
+    ragThresholdInput.style.borderColor =
+      inputBorder || (isDark ? "#444" : "#ccc");
+    if (!ragThresholdInput.value) {
+      ragThresholdInput.style.color = isDark ? "#999" : "#777";
+    }
+  });
+
+  ragThresholdRow.appendChild(ragThresholdLabel);
+  ragThresholdRow.appendChild(ragThresholdInput);
+  ragSettingsSection.appendChild(ragThresholdRow);
+
+  // Always Use RAG checkbox
+  const ragAlwaysRow = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  ragAlwaysRow.style.cssText = `
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  `;
+
+  ragAlwaysCheckbox = doc.createElementNS(HTML_NS, "input") as HTMLInputElement;
+  ragAlwaysCheckbox.type = "checkbox";
+  ragAlwaysCheckbox.checked = existingConfig?.ragAlwaysUse ?? false;
+  ragAlwaysCheckbox.style.cssText = `
+    margin: 0;
+    cursor: pointer;
+  `;
+
+  const ragAlwaysLabel = doc.createElementNS(HTML_NS, "label") as HTMLElement;
+  ragAlwaysLabel.style.cssText = `
+    font-size: 12px;
+    color: ${defaultTitleColor};
+    cursor: pointer;
+  `;
+  ragAlwaysLabel.textContent = "Always use RAG (bypass threshold)";
+  ragAlwaysLabel.title =
+    "When checked, semantic search is always used regardless of context size";
+  ragAlwaysLabel.addEventListener("click", () => {
+    ragAlwaysCheckbox.checked = !ragAlwaysCheckbox.checked;
+    ragThresholdInput.disabled = ragAlwaysCheckbox.checked;
+    ragThresholdInput.style.opacity = ragAlwaysCheckbox.checked ? "0.5" : "1";
+  });
+  ragAlwaysCheckbox.addEventListener("change", () => {
+    ragThresholdInput.disabled = ragAlwaysCheckbox.checked;
+    ragThresholdInput.style.opacity = ragAlwaysCheckbox.checked ? "0.5" : "1";
+  });
+
+  // Set initial disabled state
+  if (ragAlwaysCheckbox.checked) {
+    ragThresholdInput.disabled = true;
+    ragThresholdInput.style.opacity = "0.5";
+  }
+
+  ragAlwaysRow.appendChild(ragAlwaysCheckbox);
+  ragAlwaysRow.appendChild(ragAlwaysLabel);
+  ragSettingsSection.appendChild(ragAlwaysRow);
+
+  modal.appendChild(ragSettingsSection);
 
   // Error message container
   const errorBg = getCssVar("--modal-error-bg");
@@ -2048,6 +2412,16 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
           ...(endpointInputs.embedding.endpoint.value.trim() && {
             endpoint: endpointInputs.embedding.endpoint.value.trim(),
           }),
+          ...(endpointInputs.embedding.dimensions?.value.trim() && {
+            dimensions:
+              parseInt(endpointInputs.embedding.dimensions.value.trim(), 10) ||
+              undefined,
+          }),
+          ...(endpointInputs.embedding.maxTokens?.value.trim() && {
+            maxTokens:
+              parseInt(endpointInputs.embedding.maxTokens.value.trim(), 10) ||
+              undefined,
+          }),
         },
       }),
       ...(endpointInputs.image?.model.value.trim() && {
@@ -2066,6 +2440,12 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
           }),
         },
       }),
+      // RAG settings (per model config)
+      ...(ragThresholdInput.value.trim() && {
+        ragTokenThreshold:
+          parseInt(ragThresholdInput.value.trim(), 10) || undefined,
+      }),
+      ragAlwaysUse: ragAlwaysCheckbox.checked,
     };
 
     // Validate

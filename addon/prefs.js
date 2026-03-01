@@ -23,6 +23,16 @@ pref(
 );
 pref("firecrawlSearchLimit", 3);
 pref("firecrawlMaxConcurrent", 3);
+// Web search provider selection
+pref("webSearchProvider", "nanogpt"); // "nanogpt", "firecrawl", or "tavily"
+// NanoGPT web search preferences
+pref("nanogptWebApiKey", ""); // Dedicated key, or falls back to active model config's NanoGPT key
+pref("nanogptWebSearchLimit", 5);
+pref("nanogptWebSearchDepth", "standard"); // "standard" or "deep"
+// Tavily direct preferences
+pref("tavilyApiKey", "");
+pref("tavilySearchLimit", 5);
+pref("tavilySearchDepth", "basic");
 // Agentic mode preferences
 pref("agenticMode", true);
 pref("libraryScope", "all"); // "user", "all", "group:ID", or "collection:libID:colID"
@@ -38,3 +48,10 @@ pref(
 );
 pref("searchAiInsightsResponseLength", 500);
 pref("searchAiInsightsCitationStyle", "numbered");
+// RAG / Semantic Search preferences
+pref("ragEnabled", true);
+pref("ragTokenThreshold", 64000);
+pref("ragTopK", 20);
+pref("ragMinScore", 30);
+pref("ragChunkSize", 512);
+pref("ragChunkOverlap", 64);

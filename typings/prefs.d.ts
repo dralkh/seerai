@@ -29,6 +29,13 @@ declare namespace _ZoteroTypes {
       "firecrawlApiUrl": string;
       "firecrawlSearchLimit": number;
       "firecrawlMaxConcurrent": number;
+      "webSearchProvider": string;
+      "nanogptWebApiKey": string;
+      "nanogptWebSearchLimit": number;
+      "nanogptWebSearchDepth": string;
+      "tavilyApiKey": string;
+      "tavilySearchLimit": number;
+      "tavilySearchDepth": string;
       "agenticMode": boolean;
       "libraryScope": string;
       "agentMaxResults": number;
@@ -40,6 +47,12 @@ declare namespace _ZoteroTypes {
       "searchAiInsightsPrompt": string;
       "searchAiInsightsResponseLength": number;
       "searchAiInsightsCitationStyle": string;
+      "ragEnabled": boolean;
+      "ragTokenThreshold": number;
+      "ragTopK": number;
+      "ragMinScore": number;
+      "ragChunkSize": number;
+      "ragChunkOverlap": number;
     };
   }
 }

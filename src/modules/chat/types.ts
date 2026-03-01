@@ -186,6 +186,8 @@ export interface ModelEndpointConfig {
   model: string; // Model identifier for this capability
   endpoint?: string; // Full override URL; if empty, uses apiURL + default path
   voice?: string; // Voice identifier for TTS (e.g. "af_bella", "nova")
+  dimensions?: number; // Output embedding dimensions (embedding models only)
+  maxTokens?: number; // Max input tokens per request (embedding models only)
 }
 
 // AI Model Configuration - user-defined model settings
@@ -208,6 +210,8 @@ export interface AIModelConfig {
   embeddingConfig?: ModelEndpointConfig; // Embeddings
   imageConfig?: ModelEndpointConfig; // Image Generation
   videoConfig?: ModelEndpointConfig; // Video Generation
+  ragTokenThreshold?: number; // Token count threshold to activate RAG (default: 64000)
+  ragAlwaysUse?: boolean; // Always use RAG regardless of threshold
   createdAt?: string; // ISO date string
   updatedAt?: string; // ISO date string
 }
@@ -256,6 +260,8 @@ export interface ChatOptions {
   maxTokens?: number;
   temperature?: number; // 0.0 - 2.0, undefined = provider default
   model?: string;
+  ragEnabled?: boolean; // Enable semantic search (RAG) for large context
+  ragTokenThreshold?: number; // Token count threshold to auto-activate RAG
 }
 
 export const defaultChatOptions: ChatOptions = {
@@ -268,6 +274,8 @@ export const defaultChatOptions: ChatOptions = {
   includeNotesOnly: false,
   disableSameTitleNoteSkip: false,
   autoPlayTts: false,
+  ragEnabled: undefined, // undefined = inherit from global pref
+  ragTokenThreshold: undefined, // undefined = inherit from global pref
 };
 
 // Selection chip display config
