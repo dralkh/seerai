@@ -1247,15 +1247,14 @@ export class Assistant {
           });
         }
       } else if (item.type === "tag") {
-        // Expand tag → all papers with this tag
+        // Expand tag → all papers with this tag (search all libraries)
         try {
           const tagName = item.displayName;
-          const libraryID = Zotero.Libraries.userLibraryID;
-          const s = new Zotero.Search({ libraryID });
-          s.addCondition("tag", "is", tagName);
-          s.addCondition("itemType", "isNot", "attachment");
-          s.addCondition("itemType", "isNot", "note");
-          const itemIDs = await s.search();
+          const itemIDs = await Assistant.searchAllLibraries(
+            "tag",
+            "is",
+            tagName,
+          );
 
           for (const itemID of itemIDs) {
             if (seenPaperIds.has(itemID)) continue;
@@ -1306,15 +1305,14 @@ export class Assistant {
           );
         }
       } else if (item.type === "author") {
-        // Expand author → all papers by this author
+        // Expand author → all papers by this author (search all libraries)
         try {
           const authorName = item.displayName;
-          const libraryID = Zotero.Libraries.userLibraryID;
-          const s = new Zotero.Search({ libraryID });
-          s.addCondition("creator", "contains", authorName);
-          s.addCondition("itemType", "isNot", "attachment");
-          s.addCondition("itemType", "isNot", "note");
-          const itemIDs = await s.search();
+          const itemIDs = await Assistant.searchAllLibraries(
+            "creator",
+            "contains",
+            authorName,
+          );
 
           for (const itemID of itemIDs) {
             if (seenPaperIds.has(itemID)) continue;
@@ -1804,7 +1802,11 @@ export class Assistant {
    * Remove an item and its associated notes
    */
   /**
-   * Fast estimation of tokens for context items without heavy PDF extraction
+   * Estimate tokens for context items.
+   *
+   * For small selections (≤50 items total after expansion) we extract actual
+   * content so the number shown matches what the model will see.  For large
+   * selections we fall back to a per-item heuristic to keep the UI responsive.
    */
   private static async estimateContextTokens(
     items: ContextItem[],
@@ -1812,10 +1814,6 @@ export class Assistant {
     const stateManager = getChatStateManager();
     const options = stateManager.getOptions();
     let total = 0;
-
-    // Fast heuristic to avoid DB bottleneck with 1000+ items
-    const totalSelectedItems = items.length;
-    const isLargeSelection = totalSelectedItems > 50;
 
     for (const item of items) {
       // 1. Base item metadata (title/id)
@@ -1833,30 +1831,71 @@ export class Assistant {
           if (abstract) total += ChatStateManager.countTokens(abstract);
         }
 
-        // Content tokens - use heuristic for large selections to keep UI snappy
-        if (isLargeSelection) {
-          total += options.includeNotesOnly ? 150 : 1500; // Average note/PDF size
-        } else {
-          try {
-            const content = await Assistant.getPdfTextForItem(
-              zoteroItem,
-              0,
-              false,
-              true,
-            );
-            if (content) total += ChatStateManager.countTokens(content);
-          } catch (e) {
-            /* ignore */
-          }
+        // Content tokens
+        try {
+          const content = await Assistant.getPdfTextForItem(
+            zoteroItem,
+            0,
+            false,
+            true,
+          );
+          if (content) total += ChatStateManager.countTokens(content);
+        } catch (e) {
+          total += options.includeNotesOnly ? 150 : 1500;
         }
       } else if (item.type === "table") {
+        // Count actual table content: generated data + metadata per paper
         const storedTables = await getTableStore().getAllTables();
         const tableConfig = storedTables.find((t) => t.id === item.id);
         if (tableConfig) {
-          total += 100; // Header
-          total +=
-            tableConfig.addedPaperIds.length *
-            (options.includeNotesOnly ? 200 : 1000);
+          // Header + column definitions
+          const columnNames = tableConfig.columns
+            .map((c: any) => c.name || c.title || c.id)
+            .join(", ");
+          total += ChatStateManager.countTokens(
+            `Table: ${tableConfig.name}\nColumns: ${columnNames}\nTotal papers: ${tableConfig.addedPaperIds.length}`,
+          );
+
+          // Actual generated data
+          const generatedData = tableConfig.generatedData || {};
+          for (const paperId of tableConfig.addedPaperIds) {
+            const zoteroItem = Zotero.Items.get(paperId);
+            if (!zoteroItem) continue;
+
+            // Paper metadata
+            const title = (zoteroItem.getField("title") as string) || "";
+            const creators = zoteroItem.getCreators();
+            const authorStr =
+              creators.length > 0
+                ? creators
+                    .map((c: any) => c.lastName || c.name)
+                    .slice(0, 3)
+                    .join(", ") + (creators.length > 3 ? " et al." : "")
+                : "";
+            const year =
+              (zoteroItem.getField("year") as string) ||
+              (zoteroItem.getField("date") as string)?.substring(0, 4) ||
+              "";
+
+            total += ChatStateManager.countTokens(
+              `Paper: ${title}\nAuthors: ${authorStr} (${year})`,
+            );
+
+            // Generated column values
+            const paperData = generatedData[paperId];
+            if (paperData) {
+              for (const column of tableConfig.columns) {
+                if (["title", "author", "year", "sources"].includes(column.id))
+                  continue;
+                const value = paperData[column.id];
+                if (value) {
+                  total += ChatStateManager.countTokens(
+                    `${column.name || column.id}: ${value}`,
+                  );
+                }
+              }
+            }
+          }
         }
       } else if (item.type === "file") {
         // Uploaded file — token estimate was computed at upload time and stored in metadata
@@ -1864,40 +1903,54 @@ export class Assistant {
         if (fileTokens && fileTokens > 0) {
           total += fileTokens;
         }
-      } else if (item.type === "collection" || item.type === "tag") {
+      } else if (
+        item.type === "collection" ||
+        item.type === "tag" ||
+        item.type === "author"
+      ) {
+        // Resolve to actual paper IDs, then count real content
         try {
-          const libraryIDs = item.metadata?.libraryID
-            ? [item.metadata.libraryID]
-            : Zotero.Libraries.getAll().map((lib) => lib.libraryID);
+          const resolvedIds = await Assistant.resolveContextItemToIds(item);
 
-          let totalItems = 0;
-          for (const libID of libraryIDs) {
-            const s = new Zotero.Search({ libraryID: libID });
-            if (item.type === "tag") {
-              s.addCondition("tag", "is", item.displayName);
-            } else {
-              const collectionId = typeof item.id === "number" ? item.id : null;
-              const collectionKey =
-                item.metadata?.key || item.metadata?.collectionKey;
+          if (resolvedIds.length === 0) continue;
 
-              if (collectionId) {
-                s.addCondition("collection", "is", collectionId);
-              } else if (collectionKey) {
-                s.addCondition("collection", "is", collectionKey);
-              } else {
-                s.addCondition("collection", "is", item.displayName);
+          // For ≤50 items, count actual content for accuracy
+          if (resolvedIds.length <= 50) {
+            for (const itemID of resolvedIds) {
+              const zoteroItem = Zotero.Items.get(itemID);
+              if (!zoteroItem || !zoteroItem.isRegularItem()) continue;
+
+              // Metadata
+              total += 50;
+              const title = zoteroItem.getField("title") as string;
+              if (title) total += ChatStateManager.countTokens(title);
+
+              if (options.includeAbstracts) {
+                const abstract = zoteroItem.getField("abstractNote");
+                if (abstract) total += ChatStateManager.countTokens(abstract);
+              }
+
+              // Content
+              try {
+                const content = await Assistant.getPdfTextForItem(
+                  zoteroItem,
+                  0,
+                  false,
+                  true,
+                );
+                if (content) total += ChatStateManager.countTokens(content);
+              } catch (e) {
+                total += options.includeNotesOnly ? 150 : 1500;
               }
             }
-            s.addCondition("itemType", "isNot", "attachment");
-            s.addCondition("itemType", "isNot", "note");
-            const ids = await s.search();
-            totalItems += ids.length;
+          } else {
+            // Large selection — use heuristic
+            total +=
+              resolvedIds.length * (options.includeNotesOnly ? 250 : 1800);
           }
 
-          // Expand each item under the tag/collection with a heuristic
-          total += totalItems * (options.includeNotesOnly ? 250 : 1800);
           Zotero.debug(
-            `[seerai] Expanded ${item.type} "${item.displayName}": found ${totalItems} items`,
+            `[seerai] Expanded ${item.type} "${item.displayName}": ${resolvedIds.length} items`,
           );
         } catch (e) {
           Zotero.debug(`[seerai] Expansion failed for ${item.type}: ${e}`);
@@ -1907,6 +1960,90 @@ export class Assistant {
     }
 
     return total;
+  }
+
+  /**
+   * Search across all Zotero libraries for items matching a condition.
+   * Returns deduplicated item IDs. Used for tags/authors which may span
+   * group libraries, not just the user library.
+   */
+  private static async searchAllLibraries(
+    conditionName: string,
+    conditionOperator: string,
+    conditionValue: string,
+  ): Promise<number[]> {
+    const allIds = new Set<number>();
+    const libraries = Zotero.Libraries.getAll();
+
+    for (const library of libraries) {
+      try {
+        const s = new Zotero.Search({ libraryID: library.libraryID });
+        (s as any).addCondition(
+          conditionName,
+          conditionOperator,
+          conditionValue,
+        );
+        s.addCondition("itemType", "isNot", "attachment");
+        s.addCondition("itemType", "isNot", "note");
+        const ids = await s.search();
+        for (const id of ids) {
+          allIds.add(id);
+        }
+      } catch (e) {
+        Zotero.debug(
+          `[seerai] searchAllLibraries: error in library ${library.libraryID}: ${e}`,
+        );
+      }
+    }
+
+    return Array.from(allIds);
+  }
+
+  /**
+   * Resolve a context item (collection, tag, author) to an array of Zotero item IDs.
+   * Shared helper used by token estimation and copy.
+   */
+  public static async resolveContextItemToIds(
+    item: ContextItem,
+  ): Promise<number[]> {
+    if (item.type === "collection") {
+      const collectionId = typeof item.id === "number" ? item.id : null;
+      const collectionKey = item.metadata?.key || item.metadata?.collectionKey;
+
+      let collection: any = null;
+      if (collectionId) {
+        collection = Zotero.Collections.get(collectionId);
+      } else if (collectionKey) {
+        const libID =
+          item.metadata?.libraryID ?? Zotero.Libraries.userLibraryID;
+        collection = Zotero.Collections.getByLibraryAndKey(
+          libID,
+          collectionKey,
+        );
+      }
+
+      if (!collection) return [];
+
+      const childItems = collection.getChildItems(true); // recursive
+      const regularIds: number[] = [];
+      for (const id of childItems) {
+        const zItem = Zotero.Items.get(id);
+        if (zItem && zItem.isRegularItem()) {
+          regularIds.push(typeof id === "number" ? id : zItem.id);
+        }
+      }
+      return regularIds;
+    } else if (item.type === "tag") {
+      return await Assistant.searchAllLibraries("tag", "is", item.displayName);
+    } else if (item.type === "author") {
+      return await Assistant.searchAllLibraries(
+        "creator",
+        "contains",
+        item.displayName,
+      );
+    }
+
+    return [];
   }
 
   private static removeItemWithNotes(itemId: number) {
@@ -2966,9 +3103,6 @@ export class Assistant {
       properties: { className: "table-wrapper" },
       styles: {
         flex: "1",
-        backgroundColor: "var(--background-primary)",
-        overflowX: "auto",
-        overflowY: "auto",
         minWidth: "0",
       },
     });
@@ -10976,11 +11110,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     (btn as HTMLButtonElement).disabled = true;
     btn.style.cursor = "wait";
 
-    // Get settings for timeout (default 60s) and concurrency (default 5)
-    const timeoutMs =
-      (Zotero.Prefs.get(
-        `${addon.data.config.prefsPrefix}.pdfSearchTimeout`,
-      ) as number) || 60000;
+    // Get settings for concurrency (default 5)
     const concurrency =
       (Zotero.Prefs.get(
         `${addon.data.config.prefsPrefix}.pdfSearchConcurrency`,
@@ -11093,7 +11223,6 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     const results = await runConcurrentTasks({
       tasks,
       concurrency,
-      timeoutMs,
       maxRetries: 3,
       retryDelayMs: 2000,
 
@@ -11177,25 +11306,6 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           updateCellStatus(task.paperId, "error", error.message);
         }
       },
-
-      onTaskSkip: async (task, reason) => {
-        Zotero.debug(
-          `[seerai] Skipped PDF search for ${task.paperId}: ${reason}`,
-        );
-        updateCellStatus(task.paperId, "skipped", reason);
-
-        // Persist skip state
-        if (currentTableConfig) {
-          if (!currentTableConfig.pdfDiscoveryData)
-            currentTableConfig.pdfDiscoveryData = {};
-          currentTableConfig.pdfDiscoveryData[task.paperId] = {
-            status: "error",
-            discoveredAt: new Date().toISOString(),
-          };
-          const tableStore = getTableStore();
-          await tableStore.saveConfig(currentTableConfig);
-        }
-      },
     });
 
     // Calculate final stats
@@ -11203,13 +11313,12 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       (r) => r.status === "success" && r.result === true,
     ).length;
     const failed = results.filter((r) => r.status === "failed").length;
-    const skipped = results.filter((r) => r.status === "skipped").length;
     const notFound = results.filter(
       (r) => r.status === "success" && r.result === false,
     ).length;
 
     Zotero.debug(
-      `[seerai] PDF search complete: ${succeeded} found, ${notFound} not found, ${failed} failed, ${skipped} skipped`,
+      `[seerai] PDF search complete: ${succeeded} found, ${notFound} not found, ${failed} failed`,
     );
 
     // Update batch stats
@@ -11218,7 +11327,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       completed: tasks.length,
       succeeded,
       failed,
-      skipped,
+      skipped: 0,
     };
 
     // Clear batch active state (but keep individual states for a bit for UI restoration)
@@ -11232,7 +11341,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     }, 30000); // Keep states for 30 seconds
 
     // Restore button with summary
-    btn.innerText = `✓ ${succeeded}📄 ${failed + skipped > 0 ? `${failed}✗ ${skipped}⏭` : ""}`;
+    btn.innerText = `✓ ${succeeded}📄 ${failed > 0 ? `${failed}✗` : ""}`;
     (btn as HTMLButtonElement).disabled = false;
     btn.style.cursor = "pointer";
     setTimeout(() => {
@@ -11630,15 +11739,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     } else if (activeConfig?.rateLimit?.type === "tpm") {
       maxConcurrent = 10;
     }
-    const timeoutMs =
-      activeConfig?.rateLimit?.type === "rpm" ||
-      activeConfig?.rateLimit?.type === "tpm"
-        ? 300000 // 5 minutes if rate limited
-        : 60000;
 
-    Zotero.debug(
-      `[seerai] Table generation max concurrent: ${maxConcurrent}, timeout: ${timeoutMs}ms`,
-    );
+    Zotero.debug(`[seerai] Table generation max concurrent: ${maxConcurrent}`);
 
     // Build task list
     interface GenerationTask {
@@ -11721,7 +11823,6 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     await runConcurrentTasks<GenerationTask, string | null>({
       tasks,
       concurrency: maxConcurrent,
-      timeoutMs,
       maxRetries: 3,
       executor: async (task) => {
         return await this.generateColumnContentFromText(
@@ -21376,6 +21477,9 @@ ${tableRows}  </tbody>
         backgroundColor: "var(--image-preview-background)",
         borderRadius: "6px",
         border: "1px dashed var(--image-preview-border)",
+        minWidth: "0",
+        maxWidth: "100%",
+        boxSizing: "border-box",
       },
     });
 
@@ -21482,6 +21586,7 @@ ${tableRows}  </tbody>
         flexWrap: "wrap",
         gap: "4px",
         alignItems: "center",
+        minWidth: "0",
       },
     });
 
@@ -21491,6 +21596,7 @@ ${tableRows}  </tbody>
         flexWrap: "wrap",
         gap: "4px",
         alignItems: "center",
+        minWidth: "0",
       },
     });
 
@@ -21508,8 +21614,7 @@ ${tableRows}  </tbody>
 
     const input = ztoolkit.UI.createElement(doc, "textarea", {
       attributes: {
-        placeholder:
-          "Ask about selected items... (paste images with Cmd+V or Ctrl+Shift+V)",
+        placeholder: "",
         rows: "1",
         disabled: this.isStreaming ? "true" : undefined,
       },
@@ -23551,6 +23656,166 @@ Rules:
     videoGenContainer.appendChild(videoGenBtn);
     videoGenContainer.appendChild(videoGenDropupBtn);
 
+    // ── Combined Media Generation Button (Image + Video in one split button) ──
+    // This replaces the separate imageGen/videoGen buttons in textInputRow,
+    // freeing the text input row to just textarea + send button.
+    let mediaGenMode: "image" | "video" = "image";
+
+    const mediaGenContainer = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        display: "flex",
+        alignItems: "center",
+        position: "relative",
+      },
+    });
+
+    const mediaGenMainBtn = ztoolkit.UI.createElement(doc, "button", {
+      properties: {
+        innerText: "\u{1F3A8}",
+        title: "Generate Image from prompt",
+      },
+      styles: {
+        padding: "0 8px",
+        height: "32px",
+        fontSize: "13px",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "6px 0 0 6px",
+        backgroundColor: "var(--background-secondary)",
+        color: "var(--text-secondary)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      },
+    }) as HTMLButtonElement;
+
+    // Main button click → trigger the appropriate gen handler
+    mediaGenMainBtn.addEventListener("click", () => {
+      if (mediaGenMode === "image") {
+        imageGenBtn.click();
+      } else {
+        videoGenBtn.click();
+      }
+    });
+
+    const mediaGenDropBtn = ztoolkit.UI.createElement(doc, "button", {
+      properties: { innerText: "\u25BC", title: "Media generation options" },
+      styles: {
+        padding: "0 4px",
+        height: "32px",
+        fontSize: "8px",
+        border: "1px solid var(--border-primary)",
+        borderLeft: "none",
+        borderRadius: "0 6px 6px 0",
+        backgroundColor: "var(--background-secondary)",
+        color: "var(--text-secondary)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      },
+    }) as HTMLButtonElement;
+
+    // Dropdown menu for mode selection + settings access
+    mediaGenDropBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const existing = doc.querySelector(".seerai-media-gen-dropdown");
+      if (existing) {
+        existing.remove();
+        return;
+      }
+
+      const dropdown = doc.createElement("div");
+      dropdown.className = "seerai-media-gen-dropdown";
+      dropdown.style.cssText = `
+        position: absolute; bottom: 38px; left: 0; z-index: 1000;
+        background: var(--background-primary); border: 1px solid var(--border-primary);
+        border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        padding: 4px; min-width: 180px; font-size: 12px;
+      `;
+
+      // Helper to build a menu row
+      const makeRow = (
+        label: string,
+        isActive: boolean,
+        onClick: () => void,
+      ) => {
+        const row = doc.createElement("div");
+        row.style.cssText = `
+          padding: 6px 10px; cursor: pointer; border-radius: 4px;
+          display: flex; align-items: center; gap: 6px;
+          background: ${isActive ? "var(--accent-color, #007AFF)" : "transparent"};
+          color: ${isActive ? "#fff" : "var(--text-primary)"};
+        `;
+        row.textContent = label;
+        row.addEventListener("mouseenter", () => {
+          if (!isActive) row.style.background = "var(--background-secondary)";
+        });
+        row.addEventListener("mouseleave", () => {
+          if (!isActive) row.style.background = "transparent";
+        });
+        row.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          onClick();
+          dropdown.remove();
+        });
+        return row;
+      };
+
+      // Mode selection rows
+      dropdown.appendChild(
+        makeRow("\u{1F3A8} Image Generation", mediaGenMode === "image", () => {
+          mediaGenMode = "image";
+          (mediaGenMainBtn as HTMLElement).textContent = "\u{1F3A8}";
+          (mediaGenMainBtn as HTMLElement).title = "Generate Image from prompt";
+        }),
+      );
+      dropdown.appendChild(
+        makeRow("\u{1F3AC} Video Generation", mediaGenMode === "video", () => {
+          mediaGenMode = "video";
+          (mediaGenMainBtn as HTMLElement).textContent = "\u{1F3AC}";
+          (mediaGenMainBtn as HTMLElement).title = "Generate Video from prompt";
+        }),
+      );
+
+      // Divider
+      const divider = doc.createElement("div");
+      divider.style.cssText =
+        "height: 1px; background: var(--border-primary); margin: 4px 0;";
+      dropdown.appendChild(divider);
+
+      // Settings access rows
+      dropdown.appendChild(
+        makeRow("\u2699 Image Settings...", false, () => {
+          imageGenDropupBtn.click();
+        }),
+      );
+      dropdown.appendChild(
+        makeRow("\u2699 Video Settings...", false, () => {
+          videoGenDropupBtn.click();
+        }),
+      );
+
+      mediaGenContainer.appendChild(dropdown);
+
+      // Close on click-outside
+      const closeHandler = (ev: MouseEvent) => {
+        if (!dropdown.contains(ev.target as Node)) {
+          dropdown.remove();
+          doc.removeEventListener("mousedown", closeHandler);
+        }
+      };
+      setTimeout(() => doc.addEventListener("mousedown", closeHandler), 0);
+    });
+
+    mediaGenContainer.appendChild(mediaGenMainBtn);
+    mediaGenContainer.appendChild(mediaGenDropBtn);
+
+    // Add media gen button to toolbar (frees up textInputRow)
+    // webSearchBtn will be appended to toolbarLeft after it's created below
+    toolbarLeft.appendChild(mediaGenContainer);
+
     toolbarRow.appendChild(toolbarLeft);
 
     // History Button
@@ -23645,11 +23910,11 @@ Rules:
       (webSearchBtn as HTMLElement).title = "Web search ON - click to disable";
     }
 
-    // Text input row: textarea + [image | video | search] side by side + send button
+    // Add web search toggle to toolbar row (beside media gen button)
+    toolbarLeft.appendChild(webSearchBtn);
+
+    // Text input row: just textarea + send button (image/video/search moved to toolbar)
     textInputRow.appendChild(input);
-    textInputRow.appendChild(imageGenContainer);
-    textInputRow.appendChild(videoGenContainer);
-    textInputRow.appendChild(webSearchBtn);
     textInputRow.appendChild(sendBtn);
 
     // Assemble: toolbar row on top, text input row below
@@ -24459,14 +24724,13 @@ Rules:
           const tagName = item.displayName;
           context += `\n\n--- Tag: ${tagName} ---`;
 
-          // Fetch all papers with this tag and include their content
+          // Fetch all papers with this tag and include their content (all libraries)
           try {
-            const libraryID = Zotero.Libraries.userLibraryID;
-            const s = new Zotero.Search({ libraryID });
-            s.addCondition("tag", "is", tagName);
-            s.addCondition("itemType", "isNot", "attachment");
-            s.addCondition("itemType", "isNot", "note");
-            const itemIDs = await s.search();
+            const itemIDs = await Assistant.searchAllLibraries(
+              "tag",
+              "is",
+              tagName,
+            );
 
             if (itemIDs.length === 0) {
               context += `\n(No papers found with this tag)`;
@@ -24590,14 +24854,13 @@ Rules:
           const authorName = item.displayName;
           context += `\n\n--- Author: ${authorName} ---`;
 
-          // Fetch all papers by this author and include their content
+          // Fetch all papers by this author and include their content (all libraries)
           try {
-            const libraryID = Zotero.Libraries.userLibraryID;
-            const s = new Zotero.Search({ libraryID });
-            s.addCondition("creator", "contains", authorName);
-            s.addCondition("itemType", "isNot", "attachment");
-            s.addCondition("itemType", "isNot", "note");
-            const itemIDs = await s.search();
+            const itemIDs = await Assistant.searchAllLibraries(
+              "creator",
+              "contains",
+              authorName,
+            );
 
             if (itemIDs.length === 0) {
               context += `\n(No papers found by this author)`;

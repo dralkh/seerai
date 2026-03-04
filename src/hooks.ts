@@ -357,10 +357,6 @@ async function searchPdfsForSelectedItems() {
   pw.show();
 
   // Get settings
-  const timeoutMs =
-    (Zotero.Prefs.get(
-      `${addon.data.config.prefsPrefix}.pdfSearchTimeout`,
-    ) as number) || 60000;
   const activeConfig = getActiveModelConfig();
   let concurrency = 5;
   if (activeConfig?.rateLimit?.type === "concurrency") {
@@ -379,13 +375,6 @@ async function searchPdfsForSelectedItems() {
   const results = await runConcurrentTasks({
     tasks: itemsToSearch.map((item, index) => ({ item, index })),
     concurrency,
-    // If using strict rate limiting (RPM/TPM), we need a much larger timeout
-    // because tasks will sit in the rate limiter queue.
-    timeoutMs:
-      activeConfig?.rateLimit?.type === "rpm" ||
-      activeConfig?.rateLimit?.type === "tpm"
-        ? Math.max(timeoutMs, 300000) // 5 minutes if rate limited
-        : timeoutMs,
     maxRetries: 3,
     retryDelayMs: 2000,
 
@@ -405,10 +394,6 @@ async function searchPdfsForSelectedItems() {
         ztoolkit.log(`Search PDF: Failed ${task.item.id}: ${error.message}`);
       }
     },
-
-    onTaskSkip: (task, reason) => {
-      ztoolkit.log(`Search PDF: Skipped ${task.item.id}: ${reason}`);
-    },
   });
 
   // Calculate stats
@@ -419,17 +404,14 @@ async function searchPdfsForSelectedItems() {
     (r) => r.status === "success" && r.result === false,
   ).length;
   const failed = results.filter((r) => r.status === "failed").length;
-  const skipped = results.filter((r) => r.status === "skipped").length;
 
   ztoolkit.log(
-    `Search PDF: Done! ${succeeded} found, ${notFound} not found, ${failed} failed, ${skipped} skipped`,
+    `Search PDF: Done! ${succeeded} found, ${notFound} not found, ${failed} failed`,
   );
 
   // Show final result
   pw.changeHeadline("Search Complete");
-  pw.addDescription(
-    `✓ ${succeeded}📄 found, ${notFound + failed + skipped} not found`,
-  );
+  pw.addDescription(`✓ ${succeeded}📄 found, ${notFound + failed} not found`);
   pw.startCloseTimer(3000);
 }
 

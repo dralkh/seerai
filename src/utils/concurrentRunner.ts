@@ -1,6 +1,11 @@
 /**
- * Concurrent Task Runner with timeout, retry, and progress tracking
- * Used for batch operations like "Search all PDF" in tables
+ * Concurrent Task Runner with retry and progress tracking
+ * Used for batch operations like "Generate All" and "Search all PDF" in tables
+ *
+ * NOTE: No per-task timeout is enforced. AI responses can take minutes depending
+ * on model, context size, and provider load. Artificially killing requests wastes
+ * tokens the user has already paid for. Tasks run until the provider responds or
+ * the network layer itself errors out.
  */
 
 export interface TaskStats {
@@ -17,7 +22,6 @@ export interface ConcurrentTaskConfig<T, R> {
   tasks: T[];
   executor: (task: T, index: number) => Promise<R>;
   concurrency?: number; // default 5
-  timeoutMs?: number; // default 60000 (60s)
   maxRetries?: number; // default 3
   retryDelayMs?: number; // base delay for retry backoff, default 2000
   onProgress?: (stats: TaskStats) => void;
@@ -42,31 +46,6 @@ export interface TaskResult<T, R> {
 }
 
 /**
- * Wraps a promise with a timeout
- */
-export function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  timeoutMessage = "Operation timed out",
-): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(timeoutMessage));
-    }, timeoutMs);
-
-    promise
-      .then((result) => {
-        clearTimeout(timer);
-        resolve(result);
-      })
-      .catch((error) => {
-        clearTimeout(timer);
-        reject(error);
-      });
-  });
-}
-
-/**
  * Delay helper for retry backoff
  */
 function delay(ms: number): Promise<void> {
@@ -74,12 +53,11 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Check if error is retryable (network issues, timeouts, etc.)
+ * Check if error is retryable (network issues, rate limits, etc.)
  */
 function isRetryableError(error: Error): boolean {
   const message = error.message.toLowerCase();
   return (
-    message.includes("timeout") ||
     message.includes("network") ||
     message.includes("fetch") ||
     message.includes("econnreset") ||
@@ -93,7 +71,7 @@ function isRetryableError(error: Error): boolean {
 }
 
 /**
- * Run tasks concurrently with timeout, retry, and progress tracking
+ * Run tasks concurrently with retry and progress tracking
  */
 export async function runConcurrentTasks<T, R>(
   config: ConcurrentTaskConfig<T, R>,
@@ -102,14 +80,12 @@ export async function runConcurrentTasks<T, R>(
     tasks,
     executor,
     concurrency = 5,
-    timeoutMs = 60000,
     maxRetries = 3,
     retryDelayMs = 2000,
     onProgress,
     onTaskStart,
     onTaskComplete,
     onTaskError,
-    onTaskSkip,
   } = config;
 
   const results: TaskResult<T, R>[] = [];
@@ -150,12 +126,8 @@ export async function runConcurrentTasks<T, R>(
           onTaskStart?.(task, index);
         }
 
-        // Execute with timeout
-        const result = await withTimeout(
-          executor(task, index),
-          timeoutMs,
-          `Task ${index} timed out after ${timeoutMs}ms`,
-        );
+        // Execute task — no artificial timeout, let it run to completion
+        const result = await executor(task, index);
 
         // Success
         stats.succeeded++;
@@ -193,28 +165,14 @@ export async function runConcurrentTasks<T, R>(
     }
 
     // All retries exhausted
-    const isTimeout = lastError?.message.includes("timed out");
-
-    if (isTimeout) {
-      stats.skipped++;
-      onTaskSkip?.(task, "timeout", index);
-      return {
-        task,
-        index,
-        status: "skipped",
-        error: lastError,
-        attempts,
-      };
-    } else {
-      stats.failed++;
-      return {
-        task,
-        index,
-        status: "failed",
-        error: lastError,
-        attempts,
-      };
-    }
+    stats.failed++;
+    return {
+      task,
+      index,
+      status: "failed",
+      error: lastError,
+      attempts,
+    };
   };
 
   // Worker function that pulls from queue

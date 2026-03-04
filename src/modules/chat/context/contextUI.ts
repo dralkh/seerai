@@ -6,6 +6,7 @@ import {
   ContextItemType,
 } from "./contextTypes";
 import { Assistant } from "../../assistant";
+import { getTableStore } from "../tableStore";
 
 /**
  * Creates the unified context chips area element.
@@ -225,7 +226,9 @@ function updateChips(
 }
 
 /**
- * Copy all context items content to clipboard
+ * Copy all context items content to clipboard.
+ * Resolves collections, tags, authors, and tables into their full content
+ * (mirroring what the chat actually sends to the model).
  */
 async function copyContextItemsContent(copyBtn: HTMLElement): Promise<void> {
   const contextManager = ChatContextManager.getInstance();
@@ -239,6 +242,46 @@ async function copyContextItemsContent(copyBtn: HTMLElement): Promise<void> {
   const parts: string[] = [];
   parts.push(`# Context Items (${items.length} items)\n`);
 
+  /**
+   * Helper: format a single Zotero paper item into markdown with full content.
+   */
+  const formatPaperItem = async (zoteroItem: Zotero.Item): Promise<string> => {
+    const lines: string[] = [];
+
+    const title = zoteroItem.getField("title") as string;
+    const authors = zoteroItem
+      .getCreators()
+      .map((c) => `${c.firstName || ""} ${c.lastName || ""}`.trim())
+      .join(", ");
+    const year = zoteroItem.getField("year") as string;
+    const doi = zoteroItem.getField("DOI") as string;
+
+    if (title) lines.push(`**Title:** ${title}`);
+    if (authors) lines.push(`**Authors:** ${authors}`);
+    if (year) lines.push(`**Year:** ${year}`);
+    if (doi) lines.push(`**DOI:** ${doi}`);
+
+    const abstract = zoteroItem.getField("abstractNote") as string;
+    if (abstract) lines.push(`**Abstract:** ${abstract}`);
+
+    // Get content (notes + PDF text)
+    try {
+      const content = await Assistant.getPdfTextForItem(
+        zoteroItem,
+        0,
+        false,
+        true,
+      );
+      if (content) {
+        lines.push(`\n### Content:\n${content}`);
+      }
+    } catch (e) {
+      lines.push(`\n*Error retrieving content: ${e}*`);
+    }
+
+    return lines.join("\n");
+  };
+
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     parts.push(`\n## ${i + 1}. ${item.displayName} (${item.type})\n`);
@@ -247,38 +290,60 @@ async function copyContextItemsContent(copyBtn: HTMLElement): Promise<void> {
       if (item.type === "paper") {
         const zoteroItem = Zotero.Items.get(item.id as number);
         if (zoteroItem) {
-          // Get metadata
-          const title = zoteroItem.getField("title") as string;
-          const authors = zoteroItem
-            .getCreators()
-            .map((c) => `${c.firstName || ""} ${c.lastName || ""}`.trim())
-            .join(", ");
-          const year = zoteroItem.getField("year") as string;
-          const doi = zoteroItem.getField("DOI") as string;
-
-          if (title) parts.push(`**Title:** ${title}\n`);
-          if (authors) parts.push(`**Authors:** ${authors}\n`);
-          if (year) parts.push(`**Year:** ${year}\n`);
-          if (doi) parts.push(`**DOI:** ${doi}\n`);
-
-          // Get content (notes + PDF text)
-          const content = await Assistant.getPdfTextForItem(
-            zoteroItem,
-            0,
-            false,
-            true,
-          );
-          if (content) {
-            parts.push(`\n### Content:\n${content}\n`);
-          } else {
-            parts.push(`\n*No content available*\n`);
-          }
+          parts.push(await formatPaperItem(zoteroItem));
         }
       } else if (item.type === "table") {
-        // For tables, we'll include the table info
-        parts.push(`*Table item: ${item.displayName}*\n`);
-        if (item.metadata) {
-          parts.push(`Metadata: ${JSON.stringify(item.metadata, null, 2)}\n`);
+        // Resolve full table data — same as what chat sends
+        const storedTables = await getTableStore().getAllTables();
+        const tableConfig = storedTables.find((t) => t.id === item.id);
+        if (tableConfig) {
+          const columnNames = tableConfig.columns
+            .map((c: any) => c.name || c.title || c.id)
+            .join(", ");
+          parts.push(`**Table:** ${tableConfig.name}`);
+          parts.push(`**Columns:** ${columnNames}`);
+          parts.push(`**Total papers:** ${tableConfig.addedPaperIds.length}\n`);
+
+          const generatedData = tableConfig.generatedData || {};
+
+          for (const paperId of tableConfig.addedPaperIds) {
+            const zoteroItem = Zotero.Items.get(paperId);
+            if (!zoteroItem) continue;
+
+            const title =
+              (zoteroItem.getField("title") as string) || "Untitled";
+            const creators = zoteroItem.getCreators();
+            const authorStr =
+              creators.length > 0
+                ? creators
+                    .map((c: any) => c.lastName || c.name)
+                    .slice(0, 3)
+                    .join(", ") + (creators.length > 3 ? " et al." : "")
+                : "";
+            const year =
+              (zoteroItem.getField("year") as string) ||
+              (zoteroItem.getField("date") as string)?.substring(0, 4) ||
+              "";
+
+            parts.push(`\n### ${title}`);
+            if (authorStr) parts.push(`**Authors:** ${authorStr}`);
+            if (year) parts.push(`**Year:** ${year}`);
+
+            // Generated column values
+            const paperData = generatedData[paperId];
+            if (paperData && Object.keys(paperData).length > 0) {
+              for (const column of tableConfig.columns) {
+                if (["title", "author", "year", "sources"].includes(column.id))
+                  continue;
+                const value = paperData[column.id];
+                if (value) {
+                  parts.push(`**${column.name || column.id}:** ${value}`);
+                }
+              }
+            }
+          }
+        } else {
+          parts.push(`*Table not found*`);
         }
       } else if (item.type === "file") {
         // For files, include the pre-extracted content
@@ -299,25 +364,48 @@ async function copyContextItemsContent(copyBtn: HTMLElement): Promise<void> {
           parts.push(
             `*${typeLabel}: ${filename} (${charCount ?? extractedContent.length} chars)*\n`,
           );
-          parts.push(`\n### Content:\n${extractedContent}\n`);
+          parts.push(`### Content:\n${extractedContent}`);
         } else {
           parts.push(
-            `*File: ${filename} — ${extractionError || "no content extracted"}*\n`,
+            `*File: ${filename} — ${extractionError || "no content extracted"}*`,
           );
         }
-      } else if (item.type === "collection" || item.type === "tag") {
-        // For collections and tags, include basic info
+      } else if (
+        item.type === "collection" ||
+        item.type === "tag" ||
+        item.type === "author"
+      ) {
+        // Resolve to actual papers and include their full content
+        const resolvedIds = await Assistant.resolveContextItemToIds(item);
+
+        const typeLabel =
+          item.type === "collection"
+            ? "Collection"
+            : item.type === "tag"
+              ? "Tag"
+              : "Author";
         parts.push(
-          `*${item.type === "collection" ? "Collection" : "Tag"}: ${item.displayName}*\n`,
+          `*${typeLabel}: ${item.displayName} (${resolvedIds.length} papers)*\n`,
         );
-        if (item.metadata) {
-          parts.push(`Metadata: ${JSON.stringify(item.metadata, null, 2)}\n`);
+
+        if (resolvedIds.length === 0) {
+          parts.push(`*(No papers found)*`);
+        } else {
+          for (const itemID of resolvedIds) {
+            const zoteroItem = Zotero.Items.get(itemID);
+            if (!zoteroItem || !zoteroItem.isRegularItem()) continue;
+            parts.push(`\n---\n`);
+            parts.push(await formatPaperItem(zoteroItem));
+          }
         }
+      } else if (item.type === "topic") {
+        parts.push(
+          `*Topic: ${item.displayName}*\n\n(Focus area — no paper content)`,
+        );
       } else {
-        // For author, topic, and other types - include basic info
-        parts.push(`*${item.type}: ${item.displayName}*\n`);
+        parts.push(`*${item.type}: ${item.displayName}*`);
         if (item.metadata) {
-          parts.push(`Metadata: ${JSON.stringify(item.metadata, null, 2)}\n`);
+          parts.push(`Metadata: ${JSON.stringify(item.metadata, null, 2)}`);
         }
       }
     } catch (e) {
@@ -333,7 +421,7 @@ async function copyContextItemsContent(copyBtn: HTMLElement): Promise<void> {
     if (typeof navigator !== "undefined" && navigator.clipboard) {
       await navigator.clipboard.writeText(fullContent);
       Zotero.debug(
-        `[seerai] Copied ${items.length} context items to clipboard`,
+        `[seerai] Copied ${items.length} context items to clipboard (${fullContent.length} chars)`,
       );
 
       // Show success feedback
@@ -352,7 +440,7 @@ async function copyContextItemsContent(copyBtn: HTMLElement): Promise<void> {
       ].getService(Components.interfaces.nsIClipboardHelper);
       clipboard.copyString(fullContent);
       Zotero.debug(
-        `[seerai] Copied ${items.length} context items to clipboard (legacy)`,
+        `[seerai] Copied ${items.length} context items to clipboard (legacy, ${fullContent.length} chars)`,
       );
 
       // Show success feedback
