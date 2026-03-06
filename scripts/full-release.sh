@@ -84,3 +84,34 @@ if [ -f ".scaffold/build/update.json" ] || [ -f ".scaffold/build/update-beta.jso
     fi
   fi
 fi
+
+# Upload seerai-mcp bundle if present
+MCP_GLOB=(.scaffold/build/seerai-mcp.*)
+MCP_FILES=()
+for f in "${MCP_GLOB[@]}"; do
+  [ -e "$f" ] || continue
+  MCP_FILES+=("$f")
+done
+
+if [ ${#MCP_FILES[@]} -gt 0 ]; then
+  echo "Found MCP files: ${MCP_FILES[*]}"
+  for m in "${MCP_FILES[@]}"; do
+    echo "Uploading $m to release v$NEW_VERSION"
+    gh release upload "v$NEW_VERSION" "$m" --clobber || true
+  done
+
+  # also upload to the host 'release' so updater can fetch it from the stable release
+  if gh release view "release" >/dev/null 2>&1; then
+    for m in "${MCP_FILES[@]}"; do
+      echo "Uploading $m to release 'release'"
+      gh release upload "release" "$m" --clobber || true
+    done
+  else
+    echo "Release 'release' not found; creating it and uploading MCP files"
+    # create a minimal release and upload the MCP file(s)
+    gh release create "release" --title "update manifests" --notes "Hosting update manifests and MCP bundles for Zotero auto-updater." || true
+    for m in "${MCP_FILES[@]}"; do
+      gh release upload "release" "$m" --clobber || true
+    done
+  fi
+fi
