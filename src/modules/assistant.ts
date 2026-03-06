@@ -23507,7 +23507,7 @@ Rules:
 
 Rules:
 - Output ONLY the video prompt, nothing else. No explanations, no preamble.
-- Be specific about: scene composition, camera movement, lighting, colors, motion, subjects, and mood.
+- Be specific about: scene composition, camera movement, lighting, colors, motion, subjects, & mood.
 - The video is only ${videoGenDuration} seconds long — describe a single cohesive scene, not a multi-scene narrative.
 - If the user references a paper/document, extract the key themes and translate them into a visually compelling scene.
 - Keep the prompt under 400 characters. Shorter, more focused prompts work better.
