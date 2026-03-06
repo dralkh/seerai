@@ -212,6 +212,9 @@ export interface AIModelConfig {
   videoConfig?: ModelEndpointConfig; // Video Generation
   ragTokenThreshold?: number; // Token count threshold to activate RAG (default: 64000)
   ragAlwaysUse?: boolean; // Always use RAG regardless of threshold
+  ragTopK?: number; // Max passages to retrieve from vector search (default: 20)
+  ragMinScore?: number; // Minimum similarity score 0-100 for RAG results (default: 30)
+  contextLength?: number; // Model context window in tokens (e.g., 200000 for gemini-2.5-pro)
   createdAt?: string; // ISO date string
   updatedAt?: string; // ISO date string
 }

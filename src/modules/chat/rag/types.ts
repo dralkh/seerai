@@ -68,7 +68,13 @@ export interface EmbeddingModelsListResponse {
 // ─── Document Chunking Types ────────────────────────────────────────────────
 
 /** Source type for a document chunk */
-export type ChunkSource = "pdf" | "note" | "abstract" | "metadata";
+export type ChunkSource =
+  | "pdf"
+  | "note"
+  | "abstract"
+  | "metadata"
+  | "table"
+  | "file";
 
 /** A single chunk of text from a document, ready for embedding */
 export interface DocumentChunk {
@@ -150,6 +156,44 @@ export interface VectorSearchResult {
 
 // ─── Retrieval Types ────────────────────────────────────────────────────────
 
+/** RAG pipeline step identifiers for progress reporting */
+export type RAGProgressStep =
+  | "indexing"
+  | "embedding-query"
+  | "searching"
+  | "reranking"
+  | "assembling"
+  | "embedding-passthrough"
+  | "complete";
+
+/** Progress event emitted during RAG retrieval */
+export interface RAGProgressEvent {
+  /** Current pipeline step */
+  step: RAGProgressStep;
+  /** Human-readable status message */
+  message: string;
+  /** Optional: ranked results available so far */
+  rankedResults?: Array<{
+    title: string;
+    score: number;
+    source: string;
+    /** Preview of the chunk content (first ~300 chars) */
+    description?: string;
+  }>;
+  /** Optional: stats snapshot */
+  stats?: {
+    itemsToIndex?: number;
+    itemsIndexed?: number;
+    candidateCount?: number;
+    selectedCount?: number;
+    tokensUsed?: number;
+    tier?: 1 | 2 | 3;
+  };
+}
+
+/** Callback for receiving RAG progress updates */
+export type RAGProgressCallback = (event: RAGProgressEvent) => void;
+
 /** Options for retrieval queries */
 export interface RetrievalOptions {
   /** Maximum chunks to retrieve (default: 20) */
@@ -165,6 +209,12 @@ export interface RetrievalOptions {
    * Appended to the assembled RAG context without vector search.
    */
   passthroughContext?: string;
+  /** Computed token budget from the model's context window */
+  tokenBudget?: TokenBudget;
+  /** Enable adaptive retrieval (CAR-style relevance cliff detection) */
+  adaptiveRetrieval?: boolean;
+  /** Callback for live progress updates during retrieval */
+  onProgress?: RAGProgressCallback;
 }
 
 /** A retrieved chunk with its relevance score */
@@ -205,6 +255,8 @@ export interface RAGConfig {
   minScore: number;
   chunkSize: number;
   chunkOverlap: number;
+  adaptiveRetrieval?: boolean; // Enable CAR-style adaptive chunk selection (default: true)
+  minScoreThreshold?: number; // Floor threshold for any result (default: 0.3)
 }
 
 /** Default RAG configuration values */
@@ -215,4 +267,26 @@ export const DEFAULT_RAG_CONFIG: RAGConfig = {
   minScore: 0.3,
   chunkSize: 512,
   chunkOverlap: 64,
+  adaptiveRetrieval: true,
+  minScoreThreshold: 0.3,
 };
+
+// ─── Token Budget Types ─────────────────────────────────────────────────────
+
+/** Token budget computed from the model's context window */
+export interface TokenBudget {
+  /** Total model context window (tokens) */
+  contextLength: number;
+  /** Estimated system prompt size (tokens) */
+  systemPromptTokens: number;
+  /** All conversation history (tokens) */
+  conversationTokens: number;
+  /** Web search results (tokens) */
+  webResultTokens: number;
+  /** Reserved for model response (tokens) */
+  reservedOutputTokens: number;
+  /** Safety buffer — 5% of contextLength */
+  safetyMargin: number;
+  /** What's left for RAG chunks + passthrough content */
+  availableForContent: number;
+}

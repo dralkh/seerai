@@ -313,14 +313,16 @@ export class ChatStateManager {
   }
 
   /**
-   * Estimate token count for a given text
-   * Simple heuristic: ~4 characters per token
+   * Estimate token count for a given text.
+   *
+   * Uses ~3.2 chars/token which is conservative for mixed academic content.
+   * The naive 4 chars/token heuristic underestimates by ~20-30% on real
+   * payloads (JSON-encoded messages, tables, multi-language text) and caused
+   * context_length_exceeded errors even when pre-flight checks passed.
    */
   static countTokens(text: string): number {
     if (!text) return 0;
-    // More accurate heuristic for academic text: (words * 1.3) or (chars / 4)
-    // We'll use chars / 4 as a baseline conservative estimate
-    return Math.ceil(text.length / 4);
+    return Math.ceil(text.length / 3.2);
   }
 
   /**

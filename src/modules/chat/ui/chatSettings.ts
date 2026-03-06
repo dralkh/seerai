@@ -776,6 +776,12 @@ export function showChatSettings(
         const showThreshold = newState && !activeModelCfg?.ragAlwaysUse;
         thresholdRow.style.display = showThreshold ? "flex" : "none";
       }
+      if (topKRow) {
+        topKRow.style.display = newState ? "flex" : "none";
+      }
+      if (minScoreRow) {
+        minScoreRow.style.display = newState ? "flex" : "none";
+      }
     },
   );
 
@@ -857,7 +863,7 @@ export function showChatSettings(
   thresholdInput.step = "1000";
   thresholdInput.value = String(currentThreshold);
 
-  thresholdInput.addEventListener("change", () => {
+  thresholdInput.addEventListener("input", () => {
     const val = parseInt(thresholdInput.value, 10);
     if (!isNaN(val) && val >= 1000) {
       // Save to model config (persistent per model)
@@ -875,6 +881,111 @@ export function showChatSettings(
   thresholdRow.appendChild(thresholdLabel);
   thresholdRow.appendChild(thresholdInput);
   ragSection.appendChild(thresholdRow);
+
+  // Max Passages (topK) input — persisted on the active model config
+  const currentTopK = activeModelCfg?.ragTopK ?? ragConfig.topK;
+
+  const topKRow = doc.createElement("div");
+  Object.assign(topKRow.style, {
+    display: currentRagEnabled ? "flex" : "none",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: "4px",
+  });
+
+  const topKLabel = doc.createElement("span");
+  topKLabel.style.fontSize = "11px";
+  topKLabel.innerText = "Max Passages";
+  topKLabel.title =
+    "Maximum number of passages (chunks) to include in the prompt. Higher values give more context but use more tokens.";
+
+  const topKInput = doc.createElement("input");
+  Object.assign(topKInput.style, {
+    width: "50px",
+    fontSize: "11px",
+    padding: "2px 4px",
+    border: "1px solid var(--border-primary)",
+    borderRadius: "3px",
+    backgroundColor: "var(--background-primary)",
+    color: "var(--text-primary)",
+    textAlign: "right",
+  });
+  topKInput.type = "number";
+  topKInput.min = "5";
+  topKInput.max = "500";
+  topKInput.step = "5";
+  topKInput.value = String(currentTopK);
+
+  // Use "input" event so the value is saved immediately on every change
+  // (spinner clicks, typing, etc.) — "change" only fires on blur, which may
+  // never occur if the popover is dismissed via an outside click.
+  topKInput.addEventListener("input", () => {
+    const val = parseInt(topKInput.value, 10);
+    if (!isNaN(val) && val >= 5 && val <= 500) {
+      if (activeModelCfg) {
+        updateModelConfig(activeModelCfg.id, { ragTopK: val });
+        Zotero.debug(
+          `[seerai] RAG topK set to ${val} for model ${activeModelCfg.name}`,
+        );
+      }
+    }
+  });
+
+  topKRow.appendChild(topKLabel);
+  topKRow.appendChild(topKInput);
+  ragSection.appendChild(topKRow);
+
+  // Min Score input — persisted on the active model config
+  const currentMinScore =
+    activeModelCfg?.ragMinScore ??
+    Math.round((ragConfig.minScore || 0.3) * 100);
+
+  const minScoreRow = doc.createElement("div");
+  Object.assign(minScoreRow.style, {
+    display: currentRagEnabled ? "flex" : "none",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: "4px",
+  });
+
+  const minScoreLabel = doc.createElement("span");
+  minScoreLabel.style.fontSize = "11px";
+  minScoreLabel.innerText = "Min Score";
+  minScoreLabel.title =
+    "Minimum similarity score (0-100) for a passage to be included. Higher values are more selective.";
+
+  const minScoreInput = doc.createElement("input");
+  Object.assign(minScoreInput.style, {
+    width: "50px",
+    fontSize: "11px",
+    padding: "2px 4px",
+    border: "1px solid var(--border-primary)",
+    borderRadius: "3px",
+    backgroundColor: "var(--background-primary)",
+    color: "var(--text-primary)",
+    textAlign: "right",
+  });
+  minScoreInput.type = "number";
+  minScoreInput.min = "0";
+  minScoreInput.max = "100";
+  minScoreInput.step = "5";
+  minScoreInput.value = String(currentMinScore);
+
+  minScoreInput.addEventListener("input", () => {
+    const val = parseInt(minScoreInput.value, 10);
+    if (!isNaN(val) && val >= 0 && val <= 100) {
+      if (activeModelCfg) {
+        updateModelConfig(activeModelCfg.id, { ragMinScore: val });
+        Zotero.debug(
+          `[seerai] RAG minScore set to ${val} for model ${activeModelCfg.name}`,
+        );
+      }
+    }
+  });
+
+  minScoreRow.appendChild(minScoreLabel);
+  minScoreRow.appendChild(minScoreInput);
+  ragSection.appendChild(minScoreRow);
 
   body.appendChild(ragSection);
 

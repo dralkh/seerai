@@ -234,8 +234,8 @@ export class OpenAIService {
     // Apply Rate Limiting
     const rateLimiter = RateLimiter.getInstance();
     if (activeConfig) {
-      // Estimate tokens: simplistic count
-      const estimatedTokens = JSON.stringify(messages).length / 4;
+      // Estimate tokens: conservative count (3.2 chars/token)
+      const estimatedTokens = JSON.stringify(messages).length / 3.2;
       await rateLimiter.acquire(activeConfig, estimatedTokens);
     }
 
@@ -338,7 +338,7 @@ export class OpenAIService {
     // Apply Rate Limiting
     const rateLimiter = RateLimiter.getInstance();
     if (effectiveConfig) {
-      const estimatedTokens = JSON.stringify(messages).length / 4;
+      const estimatedTokens = JSON.stringify(messages).length / 3.2;
       await rateLimiter.acquire(effectiveConfig, estimatedTokens);
     }
 

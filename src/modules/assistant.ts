@@ -91,6 +91,7 @@ import {
   isTtsConfigured,
   autoPlayTtsResponse,
   playTts,
+  createRAGProgressUI,
 } from "./chat/ui/messageRenderer";
 import { ChatContextManager } from "./chat/context/contextManager";
 import { createContextChipsArea } from "./chat/context/contextUI";
@@ -108,8 +109,10 @@ import {
   retrieveContext,
   shouldActivateRAG,
   getRAGConfig,
+  computeTokenBudget,
 } from "./chat/rag/retrievalEngine";
 import { getEmbeddingService } from "./chat/rag/embeddingService";
+import type { RAGProgressEvent } from "./chat/rag/types";
 
 // Debounce timer for autocomplete
 const autocompleteTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1153,8 +1156,10 @@ export class Assistant {
         .map((c: any) => `${c.firstName} ${c.lastName}`.trim())
         .filter(Boolean);
 
-      // Collect notes
+      // Collect notes (with same-title note detection to avoid PDF duplication)
       const notes: string[] = [];
+      let hasSameTitleNote = false;
+      const itemTitleLower = (title || "").toLowerCase().trim();
       const noteIds = zoteroItem.getNotes();
       for (const noteId of noteIds) {
         const note = Zotero.Items.get(noteId);
@@ -1165,27 +1170,50 @@ export class Assistant {
             .replace(/\s+/g, " ")
             .trim();
           if (plainText.length > 0) {
+            // Detect same-title notes (auto-generated from PDF/OCR extraction)
+            const noteTitle = (note.getNoteTitle() || "").toLowerCase().trim();
+            if (
+              noteTitle &&
+              itemTitleLower &&
+              noteTitle.includes(
+                itemTitleLower.substring(
+                  0,
+                  Math.min(30, itemTitleLower.length),
+                ),
+              )
+            ) {
+              hasSameTitleNote = true;
+              Zotero.debug(
+                `[seerai] RAG: same-title note detected for item ${itemId}, will skip PDF text`,
+              );
+            }
             notes.push(plainText);
           }
         }
       }
 
-      // Get PDF text
+      // Get PDF text — skip if a same-title note already contains the content
       let pdfText: string | undefined;
-      const attachmentIds = zoteroItem.getAttachments();
-      for (const attId of attachmentIds) {
-        const att = Zotero.Items.get(attId);
-        if (!att || att.attachmentContentType !== "application/pdf") continue;
-        try {
-          const text = await (att as any).attachmentText;
-          if (text && text.length > 0) {
-            pdfText = text;
-            break;
+      if (hasSameTitleNote) {
+        Zotero.debug(
+          `[seerai] RAG: skipping PDF extraction for item ${itemId} — same-title note already included`,
+        );
+      } else {
+        const attachmentIds = zoteroItem.getAttachments();
+        for (const attId of attachmentIds) {
+          const att = Zotero.Items.get(attId);
+          if (!att || att.attachmentContentType !== "application/pdf") continue;
+          try {
+            const text = await (att as any).attachmentText;
+            if (text && text.length > 0) {
+              pdfText = text;
+              break;
+            }
+          } catch (e) {
+            Zotero.debug(
+              `[seerai] RAG: error extracting PDF for attachment ${attId}: ${e}`,
+            );
           }
-        } catch (e) {
-          Zotero.debug(
-            `[seerai] RAG: error extracting PDF for attachment ${attId}: ${e}`,
-          );
         }
       }
 
@@ -21728,8 +21756,10 @@ ${tableRows}  </tbody>
                 input.value =
                   val.substring(0, start) + "\n" + val.substring(end);
                 input.selectionStart = input.selectionEnd = start + 1;
-                // Trigger input event to auto-resize
-                input.dispatchEvent(new Event("input"));
+                // Trigger input event to auto-resize (XUL-compatible)
+                const resizeEvt = doc.createEvent("Event");
+                resizeEvt.initEvent("input", true, true);
+                input.dispatchEvent(resizeEvt);
               }
               // Shift+Enter falls through to default behavior (newline)
             }
@@ -21827,7 +21857,10 @@ ${tableRows}  </tbody>
     }
     if (currentDraftText) {
       setTimeout(() => {
-        input.dispatchEvent(new Event("input"));
+        // XUL-compatible: do not use `new Event()`
+        const draftEvt = doc.createEvent("Event");
+        draftEvt.initEvent("input", true, true);
+        input.dispatchEvent(draftEvt);
       }, 0);
     }
 
@@ -24978,11 +25011,21 @@ Rules:
         embeddingService.isConfigured() &&
         shouldActivateRAG(estimatedTokens, modelRagAlwaysUse, modelRagThreshold)
       ) {
+        // Declare ragProgressUI outside try so catch block can signal failure
+        let ragProgressUI: ReturnType<typeof createRAGProgressUI> | null = null;
         try {
           Zotero.debug(
             `[seerai] RAG activating: estimated ${estimatedTokens} tokens, ` +
               `threshold=${modelRagThreshold}, alwaysUse=${modelRagAlwaysUse}`,
           );
+
+          // ── Replace "Thinking..." with live RAG progress UI ──
+          if (contentDiv) {
+            const ragDoc = contentDiv.ownerDocument!;
+            contentDiv.querySelector(".typing-indicator")?.remove();
+            ragProgressUI = createRAGProgressUI(ragDoc);
+            contentDiv.appendChild(ragProgressUI.container);
+          }
 
           // Expand non-paper context items (tags, collections, authors → paper IDs)
           // and collect passthrough content (tables, files, topics)
@@ -24999,10 +25042,43 @@ Rules:
             expandedItems,
             Assistant.extractContentForRAG,
             {
-              topK: ragConfig.topK,
+              topK: activeModelForRAG?.ragTopK || ragConfig.topK,
               maxTokens: ragConfig.tokenThreshold || estimatedTokens,
-              minScore: ragConfig.minScore,
+              minScore:
+                activeModelForRAG?.ragMinScore !== undefined
+                  ? activeModelForRAG.ragMinScore / 100
+                  : ragConfig.minScore,
               passthroughContext,
+              // Compute token budget from model's context window for smart allocation
+              tokenBudget: (() => {
+                const contextLength =
+                  activeModelForRAG?.contextLength || 128000;
+                // Estimate system prompt overhead (~2k tokens for base prompt + tool instructions)
+                const systemPromptOverhead = 2000;
+                // Estimate conversation history tokens
+                const historyTokens = conversationMessages
+                  .filter(
+                    (m: ChatMessage) =>
+                      m.role !== "system" && m.role !== "error",
+                  )
+                  .reduce(
+                    (sum: number, m: ChatMessage) =>
+                      sum + ChatStateManager.countTokens(m.content),
+                    0,
+                  );
+                const reservedOutput = options.maxTokens || 4096;
+                return computeTokenBudget(
+                  contextLength,
+                  systemPromptOverhead,
+                  historyTokens,
+                  0, // webResultTokens — computed later, but RAG runs first
+                  reservedOutput,
+                );
+              })(),
+              adaptiveRetrieval: true,
+              onProgress: ragProgressUI
+                ? (event: RAGProgressEvent) => ragProgressUI!.update(event)
+                : undefined,
             },
           );
 
@@ -25030,8 +25106,33 @@ Rules:
           }
         } catch (e) {
           Zotero.debug(`[seerai] RAG failed, falling back to full-text: ${e}`);
+          // Signal failure to progress UI so it collapses cleanly
+          if (ragProgressUI) {
+            ragProgressUI.update({
+              step: "complete",
+              message: "Retrieval failed — using full context",
+            });
+          }
           // Keep original context on failure
         }
+      }
+
+      // ── Re-add "Thinking..." indicator after RAG completes ──
+      // The original indicator was removed when RAG progress UI was inserted.
+      // Re-add it so the user sees activity while web search / prompt assembly runs.
+      if (ragActive && contentDiv) {
+        const thinkDoc = contentDiv.ownerDocument!;
+        const thinkIndicator = thinkDoc.createElement("div");
+        thinkIndicator.className = "typing-indicator";
+        thinkIndicator.style.cssText =
+          "display: flex; align-items: center; gap: 4px; color: var(--text-secondary); font-style: italic; margin-top: 8px;";
+        thinkIndicator.innerHTML = `
+          <span>Thinking</span>
+          <span class="dot" style="animation: blink 1.4s infinite .2s;">.</span>
+          <span class="dot" style="animation: blink 1.4s infinite .4s;">.</span>
+          <span class="dot" style="animation: blink 1.4s infinite .6s;">.</span>
+        `;
+        contentDiv.appendChild(thinkIndicator);
       }
 
       // Web Search Context
@@ -25110,6 +25211,37 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
       // Check if we should include images (vision mode)
       let messages: (OpenAIMessage | VisionMessage)[];
 
+      // ── Conversation history budgeting ────────────────────────────────────
+      // Limit conversation history to prevent it from consuming the entire
+      // context window. Keep at most 20% of the model's context for history,
+      // always preserving the most recent messages.
+      const historyModelCtx = activeModelForRAG?.contextLength || 128000;
+      const historyBudgetTokens = Math.min(historyModelCtx * 0.2, 40000);
+      const historyMessages = conversationMessages.filter(
+        (m: ChatMessage) => m.role !== "system" && m.role !== "error",
+      );
+
+      // Walk backwards from most recent, accumulating tokens
+      let historyTokensUsed = 0;
+      let historyStartIndex = historyMessages.length;
+      for (let i = historyMessages.length - 1; i >= 0; i--) {
+        const msgTokens = ChatStateManager.countTokens(
+          historyMessages[i].content,
+        );
+        if (historyTokensUsed + msgTokens > historyBudgetTokens) break;
+        historyTokensUsed += msgTokens;
+        historyStartIndex = i;
+      }
+
+      // If we trimmed history, create a budgeted version
+      const budgetedHistory = historyMessages.slice(historyStartIndex);
+      if (budgetedHistory.length < historyMessages.length) {
+        Zotero.debug(
+          `[seerai] History budgeted: ${historyMessages.length} → ${budgetedHistory.length} messages ` +
+            `(${historyTokensUsed} tokens, budget=${historyBudgetTokens})`,
+        );
+      }
+
       if (options.includeImages || manuallyPastedParts.length > 0) {
         // Get Zotero items for image extraction (Only from selected PAPER items)
         const zoteroItems: Zotero.Item[] = [];
@@ -25143,9 +25275,8 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
           // Build messages array
           messages = [
             { role: "system", content: systemPrompt },
-            // Include history except the LAST message (which is the current one we're building with vision)
-            ...conversationMessages
-              .filter((m) => m.role !== "system" && m.role !== "error")
+            // Use budgeted history (excludes current message which we're building with vision)
+            ...budgetedHistory
               .slice(0, -1) // Remove the text-only version of current message
               .map((m) => ({
                 role: m.role as "user" | "assistant",
@@ -25157,24 +25288,20 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
           // No images found even though vision mode checked, use standard messages
           messages = [
             { role: "system", content: systemPrompt },
-            ...conversationMessages
-              .filter((m) => m.role !== "system" && m.role !== "error")
-              .map((m) => ({
-                role: m.role as "user" | "assistant",
-                content: m.content,
-              })),
+            ...budgetedHistory.map((m) => ({
+              role: m.role as "user" | "assistant",
+              content: m.content,
+            })),
           ];
         }
       } else {
         // Standard text-only messages
         messages = [
           { role: "system", content: systemPrompt },
-          ...conversationMessages
-            .filter((m) => m.role !== "system" && m.role !== "error")
-            .map((m) => ({
-              role: m.role as "user" | "assistant",
-              content: m.content,
-            })),
+          ...budgetedHistory.map((m) => ({
+            role: m.role as "user" | "assistant",
+            content: m.content,
+          })),
         ];
       }
 
@@ -25183,6 +25310,50 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
       // Get active model config for API call
       const activeModel = getActiveModelConfig();
       const chatOptions = getChatStateManager().getOptions();
+
+      // ── Pre-flight: Token budget check ──────────────────────────────────────
+      // Estimate total input tokens and verify they fit within the model's
+      // context window BEFORE making the API call.
+      // Apply a 10% safety margin because our char-based token heuristic
+      // can underestimate actual tokenizer output by 20-30%.
+      const modelContextLength = activeModel?.contextLength || 128000;
+      const reservedOutputTokens = chatOptions.maxTokens || 4096;
+      const preFlightSafetyMargin = Math.ceil(modelContextLength * 0.1);
+      const totalInputTokens = messages.reduce((sum, m) => {
+        const content =
+          typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+        return sum + ChatStateManager.countTokens(content);
+      }, 0);
+
+      if (
+        totalInputTokens + reservedOutputTokens + preFlightSafetyMargin >
+        modelContextLength
+      ) {
+        const effectiveLimit = modelContextLength - preFlightSafetyMargin;
+        const overBy = totalInputTokens + reservedOutputTokens - effectiveLimit;
+        const errMsg =
+          `Context too large: ~${totalInputTokens.toLocaleString()} input tokens + ` +
+          `${reservedOutputTokens.toLocaleString()} output reserve = ` +
+          `${(totalInputTokens + reservedOutputTokens).toLocaleString()} total, ` +
+          `exceeding model limit of ${modelContextLength.toLocaleString()} by ~${overBy.toLocaleString()} tokens. ` +
+          `Try: remove some context items, set a larger Context Window in model settings, ` +
+          `or enable RAG with a lower token threshold.`;
+        Zotero.debug(`[seerai] Pre-flight budget check failed: ${errMsg}`);
+
+        // Don't throw — show the error gracefully in the chat UI
+        if (contentDiv) {
+          contentDiv.querySelector(".typing-indicator")?.remove();
+          contentDiv.innerHTML = `<span style="color: #c62828;">${errMsg}</span>`;
+        }
+        this.isStreaming = false;
+        return;
+      }
+
+      Zotero.debug(
+        `[seerai] Pre-flight budget OK: ${totalInputTokens} input + ${reservedOutputTokens} output ` +
+          `= ${totalInputTokens + reservedOutputTokens} / ${modelContextLength} (${(((totalInputTokens + reservedOutputTokens) / modelContextLength) * 100).toFixed(1)}%)`,
+      );
+
       const configOverride = activeModel
         ? {
             apiURL: activeModel.apiURL,
@@ -25276,14 +25447,31 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
                 Zotero.debug(`[seerai] Error saving assistant message: ${e}`);
               }
 
-              // Final render with markdown
+              // Final render with markdown — update only the .markdown-content
+              // child so that the RAG progress UI (<details>) is preserved.
               if (contentDiv) {
                 contentDiv.setAttribute("data-raw", cleanedContent);
                 try {
-                  contentDiv.innerHTML = parseMarkdown(cleanedContent);
+                  let mdContainer = contentDiv.querySelector(
+                    ".markdown-content",
+                  ) as HTMLElement;
+                  if (!mdContainer) {
+                    mdContainer =
+                      contentDiv.ownerDocument!.createElement("div");
+                    mdContainer.className = "markdown-content";
+                    contentDiv.appendChild(mdContainer);
+                  }
+                  mdContainer.innerHTML = parseMarkdown(cleanedContent);
                 } catch (e) {
                   Zotero.debug(`[seerai] onComplete render failed: ${e}`);
-                  contentDiv.textContent = cleanedContent;
+                  // Fallback: only set text on markdown container if it exists
+                  const mdFallback =
+                    contentDiv.querySelector(".markdown-content");
+                  if (mdFallback) {
+                    mdFallback.textContent = cleanedContent;
+                  } else {
+                    contentDiv.textContent = cleanedContent;
+                  }
                 }
               }
 
@@ -25333,14 +25521,19 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
             expandedItems: retryExpanded,
             passthroughContext: retryPassthrough,
           } = await Assistant.expandContextItemsForRAG(retryContextItems);
+          // Fresh model config lookup (activeModelForRAG is scoped to the try block above)
+          const cActiveModel = getActiveModelConfig();
           const ragResult = await retrieveContext(
             text,
             retryExpanded,
             Assistant.extractContentForRAG,
             {
-              topK: ragConfig.topK,
+              topK: cActiveModel?.ragTopK || ragConfig.topK,
               maxTokens: ragConfig.tokenThreshold || 8000,
-              minScore: ragConfig.minScore,
+              minScore:
+                cActiveModel?.ragMinScore !== undefined
+                  ? cActiveModel.ragMinScore / 100
+                  : ragConfig.minScore,
               passthroughContext: retryPassthrough,
             },
           );
@@ -25453,9 +25646,23 @@ Note: Context was automatically reduced using semantic search due to size constr
                     if (contentDiv) {
                       contentDiv.setAttribute("data-raw", cleanedContent);
                       try {
-                        contentDiv.innerHTML = parseMarkdown(cleanedContent);
+                        let mdC = contentDiv.querySelector(
+                          ".markdown-content",
+                        ) as HTMLElement;
+                        if (!mdC) {
+                          mdC = contentDiv.ownerDocument!.createElement("div");
+                          mdC.className = "markdown-content";
+                          contentDiv.appendChild(mdC);
+                        }
+                        mdC.innerHTML = parseMarkdown(cleanedContent);
                       } catch (e) {
-                        contentDiv.textContent = cleanedContent;
+                        const mdF =
+                          contentDiv.querySelector(".markdown-content");
+                        if (mdF) {
+                          mdF.textContent = cleanedContent;
+                        } else {
+                          contentDiv.textContent = cleanedContent;
+                        }
                       }
                     }
                     clearImages();
@@ -25474,6 +25681,262 @@ Note: Context was automatically reduced using semantic search due to size constr
           }
         } catch (retryErr) {
           Zotero.debug(`[seerai] RAG retry also failed: ${retryErr}`);
+        }
+      }
+
+      // ── Strategy D: When RAG was already active but still exceeded limits ──
+      // Retry with stricter parameters: halve topK, increase score threshold,
+      // and force passthrough through RAG (Tier 3).
+      if (
+        isContextLengthError &&
+        ragActive &&
+        embeddingService.isConfigured()
+      ) {
+        Zotero.debug(
+          `[seerai] Strategy D: RAG was active but still hit context limit. ` +
+            `Retrying with stricter parameters...`,
+        );
+        try {
+          const retryContextItems = ChatContextManager.getInstance().getItems();
+          const {
+            expandedItems: retryExpanded,
+            passthroughContext: retryPassthrough,
+          } = await Assistant.expandContextItemsForRAG(retryContextItems);
+
+          // Compute a tighter token budget
+          const dActiveModel = getActiveModelConfig();
+          const dModelCtx = dActiveModel?.contextLength || 128000;
+          const dSystemOverhead = 2000;
+          const dHistoryTokens = conversationMessages
+            .filter(
+              (m: ChatMessage) => m.role !== "system" && m.role !== "error",
+            )
+            .reduce(
+              (sum: number, m: ChatMessage) =>
+                sum + ChatStateManager.countTokens(m.content),
+              0,
+            );
+          // Use at most 10% of context for history in retry to free more room
+          const dHistoryBudget = Math.min(dHistoryTokens, dModelCtx * 0.1);
+          const dChatOptions = getChatStateManager().getOptions();
+          const dReservedOutput = dChatOptions?.maxTokens || 4096;
+          const dTokenBudget = computeTokenBudget(
+            dModelCtx,
+            dSystemOverhead,
+            dHistoryBudget,
+            0,
+            dReservedOutput,
+          );
+
+          const ragResult = await retrieveContext(
+            text,
+            retryExpanded,
+            Assistant.extractContentForRAG,
+            {
+              topK: Math.max(
+                Math.floor((dActiveModel?.ragTopK || ragConfig.topK) / 2),
+                5,
+              ),
+              maxTokens: ragConfig.tokenThreshold || 8000,
+              minScore: Math.min(
+                ((dActiveModel?.ragMinScore !== undefined
+                  ? dActiveModel.ragMinScore / 100
+                  : ragConfig.minScore) || 0.3) + 0.1,
+                0.8,
+              ),
+              passthroughContext: retryPassthrough,
+              tokenBudget: dTokenBudget,
+              adaptiveRetrieval: true,
+            },
+          );
+
+          if (
+            ragResult.context &&
+            (ragResult.chunks.length > 0 || retryPassthrough.length > 0)
+          ) {
+            const scopePref = this.getScopePref();
+            const scopeLabel = this.getScopeLabel(scopePref);
+            const ragSystemPrompt = `You are a helpful research assistant for Zotero. You help users understand and analyze their academic papers, notes, and research data tables.
+
+Current Library/Folder Scope: ${scopeLabel} (Tools will only find items within this scope).
+
+${ragResult.context}
+
+Be concise, accurate, and helpful. When referencing papers, cite them by title or author.
+Note: Context was automatically reduced using stricter semantic search due to size constraints.`;
+
+            // Budget history for retry
+            const dHistoryMsgs = conversationMessages.filter(
+              (m: ChatMessage) => m.role !== "system" && m.role !== "error",
+            );
+            let dHistUsed = 0;
+            let dHistStart = dHistoryMsgs.length;
+            for (let i = dHistoryMsgs.length - 1; i >= 0; i--) {
+              const mTok = ChatStateManager.countTokens(
+                dHistoryMsgs[i].content,
+              );
+              if (dHistUsed + mTok > dHistoryBudget) break;
+              dHistUsed += mTok;
+              dHistStart = i;
+            }
+            const dBudgetedHist = dHistoryMsgs.slice(dHistStart);
+
+            const retryMessages: (OpenAIMessage | VisionMessage)[] = [
+              { role: "system", content: ragSystemPrompt },
+              ...dBudgetedHist.map((m: ChatMessage) => ({
+                role: m.role as "user" | "assistant",
+                content: m.content,
+              })),
+            ];
+
+            // Pre-flight check for Strategy D
+            const dTotalTokens = retryMessages.reduce((sum, m) => {
+              const c =
+                typeof m.content === "string"
+                  ? m.content
+                  : JSON.stringify(m.content);
+              return sum + ChatStateManager.countTokens(c);
+            }, 0);
+
+            if (
+              dTotalTokens + dReservedOutput + Math.ceil(dModelCtx * 0.1) >
+              dModelCtx
+            ) {
+              Zotero.debug(
+                `[seerai] Strategy D pre-flight failed: ${dTotalTokens} + ${dReservedOutput} > ${dModelCtx}. ` +
+                  `Giving up — context cannot be reduced enough.`,
+              );
+              if (contentDiv) {
+                contentDiv.querySelector(".typing-indicator")?.remove();
+                contentDiv.innerHTML =
+                  `<span style="color: #c62828;">` +
+                  `Context is too large even after aggressive RAG reduction ` +
+                  `(~${dTotalTokens.toLocaleString()} tokens). ` +
+                  `Try removing some context items or increasing the Context Window in model settings.` +
+                  `</span>`;
+              }
+              this.isStreaming = false;
+              return;
+            }
+
+            const retryActiveModel = getActiveModelConfig();
+            const retryChatOptions = getChatStateManager().getOptions();
+            const retryConfigOverride = retryActiveModel
+              ? {
+                  apiURL: retryActiveModel.apiURL,
+                  apiKey: retryActiveModel.apiKey,
+                  model: retryActiveModel.model,
+                  temperature: retryChatOptions.temperature,
+                  max_tokens: retryChatOptions.maxTokens,
+                }
+              : undefined;
+
+            Zotero.debug(
+              `[seerai] Strategy D retry: ${ragResult.stats.chunksRetrieved} chunks, ` +
+                `${ragResult.stats.tokensUsed} tokens, total=${dTotalTokens}`,
+            );
+
+            const retryAgenticEnabled = isAgenticModeEnabled();
+            if (retryAgenticEnabled) {
+              await handleAgenticChat(
+                text,
+                ragSystemPrompt,
+                dBudgetedHist.slice(0, -1),
+                {
+                  enableTools: true,
+                  includeImages: false,
+                  pastedImages: [],
+                  permissionHandler: Assistant.handleInlinePermissionRequest,
+                  temperature: retryChatOptions.temperature,
+                  maxTokens: retryChatOptions.maxTokens,
+                },
+                observer,
+              );
+            } else {
+              let retryFullResponse = "";
+              let retryIsFirstToken = true;
+              await openAIService.chatCompletionStream(
+                retryMessages,
+                {
+                  onToken: (token) => {
+                    if (!this.isStreaming) return;
+                    retryFullResponse += token;
+                    if (contentDiv) {
+                      const { displayContent } =
+                        processStreamingContent(retryFullResponse);
+                      if (retryIsFirstToken && displayContent) {
+                        contentDiv.querySelector(".typing-indicator")?.remove();
+                        retryIsFirstToken = false;
+                      }
+                      if (displayContent) {
+                        let mdContainer = contentDiv.querySelector(
+                          ".markdown-content",
+                        ) as HTMLElement;
+                        if (!mdContainer) {
+                          mdContainer =
+                            contentDiv.ownerDocument!.createElement("div");
+                          mdContainer.className = "markdown-content";
+                          contentDiv.appendChild(mdContainer);
+                        }
+                        this.smartRender(mdContainer, displayContent);
+                        messagesArea.scrollTop = messagesArea.scrollHeight;
+                      }
+                    }
+                  },
+                  onComplete: async (content) => {
+                    const cleanedContent = stripThinkTags(content);
+                    const assistantMsg: ChatMessage = {
+                      id: Date.now().toString(),
+                      role: "assistant",
+                      content: cleanedContent,
+                      timestamp: new Date(),
+                    };
+                    conversationMessages.push(assistantMsg);
+                    try {
+                      await getMessageStore().appendMessage(assistantMsg);
+                    } catch (e) {
+                      Zotero.debug(
+                        `[seerai] Error saving Strategy D assistant message: ${e}`,
+                      );
+                    }
+                    if (contentDiv) {
+                      contentDiv.setAttribute("data-raw", cleanedContent);
+                      try {
+                        let mdC = contentDiv.querySelector(
+                          ".markdown-content",
+                        ) as HTMLElement;
+                        if (!mdC) {
+                          mdC = contentDiv.ownerDocument!.createElement("div");
+                          mdC.className = "markdown-content";
+                          contentDiv.appendChild(mdC);
+                        }
+                        mdC.innerHTML = parseMarkdown(cleanedContent);
+                      } catch (e) {
+                        const mdF =
+                          contentDiv.querySelector(".markdown-content");
+                        if (mdF) {
+                          mdF.textContent = cleanedContent;
+                        } else {
+                          contentDiv.textContent = cleanedContent;
+                        }
+                      }
+                    }
+                    clearImages();
+                  },
+                  onError: (retryError) => {
+                    if (contentDiv) {
+                      contentDiv.innerHTML = `<span style="color: #c62828;">Error (after Strategy D retry): ${retryError.message}</span>`;
+                    }
+                  },
+                },
+                retryConfigOverride,
+              );
+            }
+            // Strategy D succeeded
+            return;
+          }
+        } catch (strategyDErr) {
+          Zotero.debug(`[seerai] Strategy D also failed: ${strategyDErr}`);
         }
       }
 

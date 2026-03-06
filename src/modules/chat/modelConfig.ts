@@ -41,6 +41,8 @@ function saveModelConfigs(configs: AIModelConfig[]): void {
   try {
     Zotero.Prefs.set(PREFS_KEY, JSON.stringify(configs));
     Zotero.debug(`[seerai] Saved ${configs.length} model configurations`);
+    // Invalidate active model cache since configs changed
+    _invalidateActiveModelCache();
   } catch (e) {
     Zotero.debug(`[seerai] Error saving model configs: ${e}`);
   }
@@ -67,9 +69,6 @@ export function getDefaultModelConfig(): AIModelConfig | undefined {
  */
 export function getActiveModelId(): string | undefined {
   const stored = Zotero.Prefs.get(ACTIVE_MODEL_KEY) as string | undefined;
-  Zotero.debug(
-    `[seerai] getActiveModelId: key=${ACTIVE_MODEL_KEY}, value="${stored}"`,
-  );
   return stored;
 }
 
@@ -81,28 +80,54 @@ export function setActiveModelId(id: string): void {
     `[seerai] setActiveModelId: key=${ACTIVE_MODEL_KEY}, value="${id}"`,
   );
   Zotero.Prefs.set(ACTIVE_MODEL_KEY, id);
+  // Invalidate the cache so the next read picks up the change
+  _invalidateActiveModelCache();
+}
+
+// ── Short-lived memoization cache for getActiveModelConfig ─────────────
+// During batch operations (e.g. embedding 700+ chunks), getActiveModelConfig
+// is called 3× per embedding request. Each call does Zotero.Prefs.get() +
+// JSON.parse(). A 200ms TTL cache eliminates redundant reads while staying
+// responsive to user config changes.
+let _activeModelCacheResult: AIModelConfig | undefined;
+let _activeModelCacheTime = 0;
+let _activeModelCacheValid = false;
+const _ACTIVE_MODEL_CACHE_TTL = 200; // ms
+
+/** Invalidate the active model config cache. */
+function _invalidateActiveModelCache(): void {
+  _activeModelCacheValid = false;
+  _activeModelCacheTime = 0;
 }
 
 /**
- * Get the active model configuration (or default if not set)
+ * Get the active model configuration (or default if not set).
+ * Results are memoized for 200ms to avoid redundant prefs reads during
+ * high-frequency call sites (embedding batches, concurrent table generation).
  */
 export function getActiveModelConfig(): AIModelConfig | undefined {
-  const activeId = getActiveModelId();
-  Zotero.debug(
-    `[seerai] getActiveModelConfig: activeId="${activeId}", type=${typeof activeId}`,
-  );
-
-  // Check for non-empty string (activeId could be undefined, null, or empty string "")
-  if (activeId && activeId.trim() !== "") {
-    const config = getModelConfig(activeId);
-    Zotero.debug(
-      `[seerai] getActiveModelConfig: found config for activeId? ${!!config}`,
-    );
-    if (config) return config;
+  const now = Date.now();
+  if (
+    _activeModelCacheValid &&
+    now - _activeModelCacheTime < _ACTIVE_MODEL_CACHE_TTL
+  ) {
+    return _activeModelCacheResult;
   }
 
-  Zotero.debug(`[seerai] getActiveModelConfig: falling back to default`);
-  return getDefaultModelConfig();
+  const activeId = getActiveModelId();
+
+  let result: AIModelConfig | undefined;
+  if (activeId && activeId.trim() !== "") {
+    result = getModelConfig(activeId);
+  }
+  if (!result) {
+    result = getDefaultModelConfig();
+  }
+
+  _activeModelCacheResult = result;
+  _activeModelCacheTime = now;
+  _activeModelCacheValid = true;
+  return result;
 }
 
 /**

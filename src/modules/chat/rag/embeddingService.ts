@@ -133,10 +133,23 @@ export class EmbeddingService {
   ): Promise<EmbeddingResponse> {
     const { endpoint, apiKey, model } = this.resolveEndpoint();
 
-    // Use explicitly passed dimensions, or fall back to the configured value
+    // Use explicitly passed dimensions, or fall back to the configured value,
+    // but ONLY if the model supports the dimensions parameter.
     const cfg = getActiveModelConfig();
-    const effectiveDimensions =
+    const candidateDimensions =
       options?.dimensions || cfg?.embeddingConfig?.dimensions || undefined;
+
+    // Check if this model supports the dimensions parameter
+    let effectiveDimensions: number | undefined;
+    if (candidateDimensions) {
+      const modelSupports = await this.modelSupportsDimensions(model);
+      effectiveDimensions = modelSupports ? candidateDimensions : undefined;
+      if (!modelSupports && candidateDimensions) {
+        Zotero.debug(
+          `[seerai] Embedding model "${model}" does not support dimensions parameter — omitting dimensions=${candidateDimensions}`,
+        );
+      }
+    }
 
     const body: EmbeddingRequest = {
       input,
@@ -244,7 +257,7 @@ export class EmbeddingService {
       let batchTokens = 0;
 
       while (batchEnd < texts.length) {
-        const itemTokens = Math.ceil(texts[batchEnd].length / 4);
+        const itemTokens = Math.ceil(texts[batchEnd].length / 3.2);
         if (
           batchEnd > batchStart &&
           (batchTokens + itemTokens > MAX_TOKENS_PER_BATCH ||
@@ -306,6 +319,27 @@ export class EmbeddingService {
     }
 
     return allEmbeddings;
+  }
+
+  /**
+   * Check if a given embedding model supports the `dimensions` parameter.
+   * Uses the cached model list from the provider (NanoGPT).
+   * For non-NanoGPT providers, conservatively returns true (user-configured).
+   */
+  async modelSupportsDimensions(model: string): Promise<boolean> {
+    const cfg = getActiveModelConfig();
+    if (!cfg) return true; // No config — can't check, allow it
+
+    const isNanoGPT = cfg.apiURL.includes("nano-gpt.com");
+    if (!isNanoGPT) return true; // Non-NanoGPT — assume user knows what they configured
+
+    const models = await this.fetchEmbeddingModels();
+    if (models.length === 0) return true; // Couldn't fetch — allow it
+
+    const modelInfo = models.find((m) => m.id === model);
+    if (!modelInfo) return true; // Unknown model — allow it (user may have typed a custom model)
+
+    return modelInfo.supports_dimensions;
   }
 
   /**

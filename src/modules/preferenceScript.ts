@@ -810,7 +810,6 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
 
   // References for conditional fields (will be set after creation)
   let rateLimitSection: HTMLElement | null = null;
-  let reasoningSection: HTMLElement | null = null;
 
   // Endpoint config inputs (populated after form fields are created)
   const endpointInputs: Record<
@@ -843,8 +842,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     };
     imageConfig?: { model: string; endpoint?: string };
     videoConfig?: { model: string; endpoint?: string };
-    ragTokenThreshold?: number;
-    ragAlwaysUse?: boolean;
+    contextLength?: number;
   }
 
   const providerPresets: ProviderPreset[] = [
@@ -870,6 +868,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       },
       imageConfig: { model: "nano-banana-2" },
       videoConfig: { model: "veo3-1-video" },
+      contextLength: 200000,
     },
     {
       name: "OpenAI",
@@ -996,8 +995,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   let rlTypeSelect: HTMLSelectElement;
   let rlValueInput: HTMLInputElement;
   let reSelect: HTMLSelectElement;
-  let ragThresholdInput: HTMLInputElement;
-  let ragAlwaysCheckbox: HTMLInputElement;
+  let contextLengthInput: HTMLInputElement;
 
   if (!isEdit) {
     const presetLabel = doc.createElementNS(HTML_NS, "label") as HTMLElement;
@@ -1401,13 +1399,8 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
             endpointInputs.video.endpoint.value = preset.videoConfig.endpoint;
         }
         // RAG settings
-        if (preset.ragTokenThreshold !== undefined) {
-          ragThresholdInput.value = String(preset.ragTokenThreshold);
-        }
-        if (preset.ragAlwaysUse !== undefined) {
-          ragAlwaysCheckbox.checked = preset.ragAlwaysUse;
-          ragThresholdInput.disabled = preset.ragAlwaysUse;
-          ragThresholdInput.style.opacity = preset.ragAlwaysUse ? "0.5" : "1";
+        if (preset.contextLength !== undefined) {
+          contextLengthInput.value = String(preset.contextLength);
         }
       }
 
@@ -1489,11 +1482,8 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     input.type = field.type;
     input.placeholder = field.placeholder;
     input.value = field.value;
-    input.style.cssText = inputStyle;
     input.id = `model-config-${field.id}`;
     inputs[field.id] = input;
-
-    modal.appendChild(input);
 
     // Add focus effect
     input.addEventListener("focus", () => {
@@ -1503,6 +1493,10 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     input.addEventListener("blur", () => {
       input.style.borderColor = inputBorder;
     });
+
+    // All fields use the same simple layout
+    input.style.cssText = inputStyle;
+    modal.appendChild(input);
   });
 
   // Auto-apply NanoGPT preset now that form fields exist
@@ -1589,23 +1583,25 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   rateLimitSection.appendChild(rlContainer);
   modal.appendChild(rateLimitSection);
 
-  // --- Reasoning Effort Section (chat models only) ---
-  reasoningSection = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-  reasoningSection.id = "model-config-reasoning-section";
-
-  const reLabel = doc.createElementNS(HTML_NS, "label") as HTMLElement;
-  reLabel.textContent = "Reasoning Effort (for o1/o3/reasoning models)";
-  reLabel.style.cssText = labelStyle;
-  reasoningSection.appendChild(reLabel);
-
+  // --- Reasoning Effort (created here, appended into the chat capability row below) ---
   reSelect = doc.createElementNS(HTML_NS, "select") as HTMLSelectElement;
-  reSelect.style.cssText = selectStyle;
+  reSelect.style.cssText = `
+    flex: 0.5;
+    padding: 7px 10px;
+    border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
+    border-radius: 5px;
+    font-size: 12px;
+    box-sizing: border-box;
+    background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
+    color: ${inputText || defaultTitleColor};
+    cursor: pointer;
+  `;
 
   const reOptions = [
-    { value: "", label: "Disabled (Use Provider Default)" },
-    { value: "low", label: "Low" },
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High" },
+    { value: "", label: "Reasoning: Default" },
+    { value: "low", label: "Reasoning: Low" },
+    { value: "medium", label: "Reasoning: Medium" },
+    { value: "high", label: "Reasoning: High" },
   ];
 
   reOptions.forEach((opt) => {
@@ -1621,10 +1617,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     reSelect.appendChild(option);
   });
 
-  reasoningSection.appendChild(reSelect);
-  modal.appendChild(reasoningSection);
-
-  // --- Model Endpoint Configuration Section ---
+  // --- Model Endpoints Section — shown BEFORE API URL ---
   const endpointSectionLabel = doc.createElementNS(
     HTML_NS,
     "label",
@@ -1637,7 +1630,6 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     color: ${labelColor || defaultTitleColor};
     margin-bottom: 8px;
   `;
-  modal.appendChild(endpointSectionLabel);
 
   const endpointSectionDesc = doc.createElementNS(
     HTML_NS,
@@ -1651,7 +1643,6 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     margin-bottom: 12px;
     line-height: 1.4;
   `;
-  modal.appendChild(endpointSectionDesc);
 
   const endpointSection = doc.createElementNS(HTML_NS, "div") as HTMLElement;
   endpointSection.style.cssText = `
@@ -1995,9 +1986,51 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       }
 
       fieldRow.appendChild(chatSearchContainer);
-    }
+      fieldRow.appendChild(modelInput);
 
-    fieldRow.appendChild(modelInput);
+      // Context Window input — placed beside the chat model selection
+      contextLengthInput = doc.createElementNS(
+        HTML_NS,
+        "input",
+      ) as HTMLInputElement;
+      contextLengthInput.type = "number";
+      contextLengthInput.placeholder = "Context (tokens)";
+      contextLengthInput.value = existingConfig?.contextLength
+        ? String(existingConfig.contextLength)
+        : "";
+      contextLengthInput.min = "4000";
+      contextLengthInput.max = "2000000";
+      contextLengthInput.style.cssText = `
+        flex: 0.8;
+        min-width: 110px;
+        padding: 7px 10px;
+        border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
+        border-radius: 5px;
+        font-size: 12px;
+        box-sizing: border-box;
+        background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
+        color: ${existingConfig?.contextLength ? inputText || defaultTitleColor : isDark ? "#999" : "#777"};
+        font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+        transition: border-color 0.2s;
+      `;
+      contextLengthInput.addEventListener("focus", () => {
+        contextLengthInput.style.borderColor = inputFocusBorder;
+        contextLengthInput.style.outline = "none";
+        contextLengthInput.style.color = inputText || defaultTitleColor;
+      });
+      contextLengthInput.addEventListener("blur", () => {
+        contextLengthInput.style.borderColor =
+          inputBorder || (isDark ? "#444" : "#ccc");
+        if (!contextLengthInput.value) {
+          contextLengthInput.style.color = isDark ? "#999" : "#777";
+        }
+      });
+      fieldRow.appendChild(contextLengthInput);
+      fieldRow.appendChild(reSelect);
+    } else {
+      // Non-chat rows: model name first
+      fieldRow.appendChild(modelInput);
+    }
 
     // Endpoint input
     const endpointInput = doc.createElementNS(
@@ -2032,7 +2065,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       }
     });
 
-    fieldRow.appendChild(endpointInput);
+    // Type-specific inputs go before endpoint (voice, dimensions, etc.)
 
     // Voice input (TTS only)
     let voiceInput: HTMLInputElement | undefined;
@@ -2145,6 +2178,9 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
       fieldRow.appendChild(maxTokensInput);
     }
 
+    // Endpoint input always last in the row
+    fieldRow.appendChild(endpointInput);
+
     row.appendChild(fieldRow);
     endpointSection.appendChild(row);
 
@@ -2157,137 +2193,12 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     };
   });
 
+  // Append the endpoint section at the end (after Rate Limit)
+  modal.appendChild(endpointSectionLabel);
+  modal.appendChild(endpointSectionDesc);
   modal.appendChild(endpointSection);
 
-  // ── RAG Settings section (Token Threshold + Always Use) ──────────────────
-  const ragSettingsSection = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-  ragSettingsSection.style.cssText = `
-    margin-bottom: 16px;
-    padding: 10px 12px;
-    border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
-    border-radius: 6px;
-    background: ${isDark ? "#232323" : "#fafafa"};
-  `;
-
-  const ragSettingsLabel = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-  ragSettingsLabel.style.cssText = `
-    font-size: 11px;
-    font-weight: 600;
-    color: ${isDark ? "#aaa" : "#888"};
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: 8px;
-  `;
-  ragSettingsLabel.textContent = "RAG / Semantic Search";
-  ragSettingsSection.appendChild(ragSettingsLabel);
-
-  // Token Threshold
-  const ragThresholdRow = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-  ragThresholdRow.style.cssText = `
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 6px;
-  `;
-
-  const ragThresholdLabel = doc.createElementNS(
-    HTML_NS,
-    "label",
-  ) as HTMLElement;
-  ragThresholdLabel.style.cssText = `
-    font-size: 12px;
-    color: ${defaultTitleColor};
-    flex: 1;
-  `;
-  ragThresholdLabel.textContent = "Token Threshold";
-  ragThresholdLabel.title =
-    "RAG activates when context exceeds this token count. Set to your model's context window limit or lower.";
-
-  ragThresholdInput = doc.createElementNS(HTML_NS, "input") as HTMLInputElement;
-  ragThresholdInput.type = "number";
-  ragThresholdInput.min = "1000";
-  ragThresholdInput.max = "2000000";
-  ragThresholdInput.step = "1000";
-  ragThresholdInput.placeholder = "64000";
-  ragThresholdInput.value = existingConfig?.ragTokenThreshold
-    ? String(existingConfig.ragTokenThreshold)
-    : "";
-  ragThresholdInput.style.cssText = `
-    width: 100px;
-    padding: 6px 10px;
-    border: 1px solid ${inputBorder || (isDark ? "#444" : "#ccc")};
-    border-radius: 5px;
-    font-size: 12px;
-    box-sizing: border-box;
-    background: ${inputBg || (isDark ? "#2d2d2d" : "#ffffff")};
-    color: ${ragThresholdInput.value ? inputText || defaultTitleColor : isDark ? "#999" : "#777"};
-    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-    text-align: right;
-    transition: border-color 0.2s;
-  `;
-  ragThresholdInput.addEventListener("focus", () => {
-    ragThresholdInput.style.borderColor = inputFocusBorder;
-    ragThresholdInput.style.outline = "none";
-    ragThresholdInput.style.color = inputText || defaultTitleColor;
-  });
-  ragThresholdInput.addEventListener("blur", () => {
-    ragThresholdInput.style.borderColor =
-      inputBorder || (isDark ? "#444" : "#ccc");
-    if (!ragThresholdInput.value) {
-      ragThresholdInput.style.color = isDark ? "#999" : "#777";
-    }
-  });
-
-  ragThresholdRow.appendChild(ragThresholdLabel);
-  ragThresholdRow.appendChild(ragThresholdInput);
-  ragSettingsSection.appendChild(ragThresholdRow);
-
-  // Always Use RAG checkbox
-  const ragAlwaysRow = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-  ragAlwaysRow.style.cssText = `
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  `;
-
-  ragAlwaysCheckbox = doc.createElementNS(HTML_NS, "input") as HTMLInputElement;
-  ragAlwaysCheckbox.type = "checkbox";
-  ragAlwaysCheckbox.checked = existingConfig?.ragAlwaysUse ?? false;
-  ragAlwaysCheckbox.style.cssText = `
-    margin: 0;
-    cursor: pointer;
-  `;
-
-  const ragAlwaysLabel = doc.createElementNS(HTML_NS, "label") as HTMLElement;
-  ragAlwaysLabel.style.cssText = `
-    font-size: 12px;
-    color: ${defaultTitleColor};
-    cursor: pointer;
-  `;
-  ragAlwaysLabel.textContent = "Always use RAG (bypass threshold)";
-  ragAlwaysLabel.title =
-    "When checked, semantic search is always used regardless of context size";
-  ragAlwaysLabel.addEventListener("click", () => {
-    ragAlwaysCheckbox.checked = !ragAlwaysCheckbox.checked;
-    ragThresholdInput.disabled = ragAlwaysCheckbox.checked;
-    ragThresholdInput.style.opacity = ragAlwaysCheckbox.checked ? "0.5" : "1";
-  });
-  ragAlwaysCheckbox.addEventListener("change", () => {
-    ragThresholdInput.disabled = ragAlwaysCheckbox.checked;
-    ragThresholdInput.style.opacity = ragAlwaysCheckbox.checked ? "0.5" : "1";
-  });
-
-  // Set initial disabled state
-  if (ragAlwaysCheckbox.checked) {
-    ragThresholdInput.disabled = true;
-    ragThresholdInput.style.opacity = "0.5";
-  }
-
-  ragAlwaysRow.appendChild(ragAlwaysCheckbox);
-  ragAlwaysRow.appendChild(ragAlwaysLabel);
-  ragSettingsSection.appendChild(ragAlwaysRow);
-
-  modal.appendChild(ragSettingsSection);
+  // contextLengthInput is now created inside the chat capability row above.
 
   // Error message container
   const errorBg = getCssVar("--modal-error-bg");
@@ -2440,12 +2351,11 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
           }),
         },
       }),
-      // RAG settings (per model config)
-      ...(ragThresholdInput.value.trim() && {
-        ragTokenThreshold:
-          parseInt(ragThresholdInput.value.trim(), 10) || undefined,
+      // Model context setting
+      ...(contextLengthInput.value.trim() && {
+        contextLength:
+          parseInt(contextLengthInput.value.trim(), 10) || undefined,
       }),
-      ragAlwaysUse: ragAlwaysCheckbox.checked,
     };
 
     // Validate

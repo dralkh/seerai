@@ -8,7 +8,7 @@
 import { config } from "../../../../package.json";
 import { ChatStateManager } from "../stateManager";
 import { getEmbeddingService } from "./embeddingService";
-import { chunkPaperContent } from "./chunker";
+import { chunkPaperContent, chunkDocument } from "./chunker";
 import { getVectorStore, VectorStore } from "./vectorStore";
 import type {
   RetrievalOptions,
@@ -16,6 +16,8 @@ import type {
   RetrievedChunk,
   RAGConfig,
   VectorSearchResult,
+  TokenBudget,
+  RAGProgressCallback,
 } from "./types";
 
 // ─── RAG Configuration from preferences ─────────────────────────────────────
@@ -93,6 +95,7 @@ export async function retrieveContext(
   const minScore = options?.minScore ?? ragConfig.minScore;
   const rerank = options?.rerank ?? true;
   const passthroughContext = options?.passthroughContext ?? "";
+  const onProgress = options?.onProgress;
 
   let itemsIndexedOnDemand = 0;
 
@@ -178,6 +181,12 @@ export async function retrieveContext(
   }
 
   if (itemsToIndex.length > 0) {
+    onProgress?.({
+      step: "indexing",
+      message: `Indexing ${itemsToIndex.length} paper${itemsToIndex.length > 1 ? "s" : ""}...`,
+      stats: { itemsToIndex: itemsToIndex.length, itemsIndexed: 0 },
+    });
+
     Zotero.debug(
       `[seerai] RAG: indexing ${itemsToIndex.length} items in parallel ` +
         `(concurrency: ${MAX_CONCURRENT_ITEM_INDEXING})`,
@@ -215,10 +224,24 @@ export async function retrieveContext(
           );
         }
       }
+
+      onProgress?.({
+        step: "indexing",
+        message: `Indexed ${itemsIndexedOnDemand}/${itemsToIndex.length} papers...`,
+        stats: {
+          itemsToIndex: itemsToIndex.length,
+          itemsIndexed: itemsIndexedOnDemand,
+        },
+      });
     }
   }
 
   // ── Step 3: Embed the user query ──────────────────────────────────────────
+  onProgress?.({
+    step: "embedding-query",
+    message: "Embedding your query...",
+  });
+
   let queryEmbedding: number[];
   try {
     queryEmbedding = await embeddingService.getEmbedding(query);
@@ -239,6 +262,11 @@ export async function retrieveContext(
   }
 
   // ── Step 4: Search vector store ───────────────────────────────────────────
+  onProgress?.({
+    step: "searching",
+    message: `Searching ${paperItemIds.length} paper${paperItemIds.length > 1 ? "s" : ""} for relevant passages...`,
+  });
+
   let searchResult = await vectorStore.searchSimilar(
     queryEmbedding,
     topK * 2, // Fetch extra for re-ranking
@@ -341,6 +369,12 @@ export async function retrieveContext(
   );
 
   // ── Step 5: Re-rank ───────────────────────────────────────────────────────
+  onProgress?.({
+    step: "reranking",
+    message: `Ranking ${rawResults.length} candidates by relevance...`,
+    stats: { candidateCount: rawResults.length },
+  });
+
   let rankedResults: RetrievedChunk[];
 
   if (rerank && rawResults.length > 0) {
@@ -349,28 +383,278 @@ export async function retrieveContext(
     rankedResults = rawResults;
   }
 
-  // ── Step 6: Assemble context within token budget ──────────────────────────
-  // Reserve token budget for passthrough content (tables, files, topics)
+  // ── Step 5b: Adaptive retrieval — detect relevance cliff ────────────────
+  const useAdaptive = options?.adaptiveRetrieval ?? true;
+  if (useAdaptive && rankedResults.length > 1) {
+    rankedResults = applyAdaptiveSelection(rankedResults);
+  }
+
+  // Hard-cap at topK after adaptive selection. We over-fetched topK*2 candidates
+  // for reranking, but the final list must respect the user's Max Passages setting.
+  if (rankedResults.length > topK) {
+    Zotero.debug(
+      `[seerai] RAG: trimming ${rankedResults.length} results to topK=${topK}`,
+    );
+    rankedResults = rankedResults.slice(0, topK);
+  }
+
+  // Emit ranked results so the UI can show live rankings
+  if (onProgress && rankedResults.length > 0) {
+    const rerankEntries: Array<{
+      title: string;
+      score: number;
+      source: string;
+      description?: string;
+    }> = rankedResults.map((r) => ({
+      title: r.sourceItem.title,
+      score: r.score,
+      source: r.chunk.source,
+      description:
+        r.chunk.text.substring(0, 300).trim() +
+        (r.chunk.text.length > 300 ? "..." : ""),
+    }));
+
+    // Include passthrough items so the user can see them during ranking
+    if (passthroughContext) {
+      rerankEntries.push(...parsePassthroughSections(passthroughContext));
+    }
+
+    onProgress({
+      step: "reranking",
+      message: `${rankedResults.length} passages ranked by relevance`,
+      rankedResults: rerankEntries,
+      stats: {
+        candidateCount: rawResults.length,
+        selectedCount: rankedResults.length,
+      },
+    });
+  }
+
+  // ── Step 6: Budget-aware context assembly with passthrough management ────
+  onProgress?.({
+    step: "assembling",
+    message: "Assembling context within token budget...",
+  });
+
+  // Determine effective token budget: prefer explicit tokenBudget from model
+  // context window, fall back to legacy maxTokens parameter.
+  const tokenBudget = options?.tokenBudget;
+  const effectiveBudget = tokenBudget
+    ? tokenBudget.availableForContent
+    : maxTokens;
+
   const passthroughTokens = passthroughContext
     ? ChatStateManager.countTokens(passthroughContext)
     : 0;
-  const ragTokenBudget = Math.max(
-    maxTokens - passthroughTokens,
-    maxTokens * 0.5,
-  );
 
-  const {
-    context: ragContext,
-    selectedChunks,
-    tokensUsed: ragTokensUsed,
-  } = assembleContext(rankedResults, ragTokenBudget, itemTitles);
+  let finalContext: string;
+  let totalTokensUsed: number;
+  let selectedChunks: RetrievedChunk[];
 
-  // Append passthrough content (tables, files, topics) after RAG passages
-  let finalContext = ragContext;
-  let totalTokensUsed = ragTokensUsed;
-  if (passthroughContext) {
-    finalContext += "\n\n" + passthroughContext;
-    totalTokensUsed += passthroughTokens;
+  if (passthroughTokens <= effectiveBudget * 0.6) {
+    // ── Tier 1: Passthrough fits comfortably — keep verbatim ──────────────
+    const ragTokenBudget = Math.max(effectiveBudget - passthroughTokens, 0);
+
+    const assembled = assembleContext(
+      rankedResults,
+      ragTokenBudget,
+      itemTitles,
+    );
+    selectedChunks = assembled.selectedChunks;
+
+    finalContext = assembled.context;
+    totalTokensUsed = assembled.tokensUsed;
+    if (passthroughContext) {
+      finalContext += "\n\n" + passthroughContext;
+      totalTokensUsed += passthroughTokens;
+    }
+
+    Zotero.debug(
+      `[seerai] RAG budget tier 1 (passthrough verbatim): ` +
+        `passthrough=${passthroughTokens}, ragBudget=${ragTokenBudget}, ` +
+        `effectiveBudget=${effectiveBudget}`,
+    );
+  } else if (passthroughTokens <= effectiveBudget * 0.85) {
+    // ── Tier 2: Passthrough is large — give RAG a minimum budget ──────────
+    const ragMinBudget = Math.max(effectiveBudget * 0.15, 8000);
+    const passthroughBudget = effectiveBudget - ragMinBudget;
+
+    const assembled = assembleContext(rankedResults, ragMinBudget, itemTitles);
+    selectedChunks = assembled.selectedChunks;
+
+    // Trim passthrough to fit its budget
+    const trimmedPassthrough = trimToTokenBudget(
+      passthroughContext,
+      passthroughBudget,
+    );
+
+    finalContext = assembled.context;
+    totalTokensUsed = assembled.tokensUsed;
+    if (trimmedPassthrough) {
+      finalContext += "\n\n" + trimmedPassthrough;
+      totalTokensUsed += ChatStateManager.countTokens(trimmedPassthrough);
+    }
+
+    Zotero.debug(
+      `[seerai] RAG budget tier 2 (passthrough trimmed): ` +
+        `passthrough=${passthroughTokens}→${ChatStateManager.countTokens(trimmedPassthrough)}, ` +
+        `ragBudget=${ragMinBudget}, effectiveBudget=${effectiveBudget}`,
+    );
+  } else {
+    // ── Tier 3: Passthrough alone exceeds budget — RAG over passthrough ───
+    // Chunk the passthrough content and create in-memory similarity search
+    Zotero.debug(
+      `[seerai] RAG budget tier 3 (passthrough→RAG): passthrough=${passthroughTokens} ` +
+        `exceeds 85% of budget=${effectiveBudget}, chunking passthrough for vector search`,
+    );
+
+    const passthroughChunks = chunkPassthroughForRAG(
+      passthroughContext,
+      ragConfig,
+    );
+
+    onProgress?.({
+      step: "embedding-passthrough",
+      message: `Chunked passthrough into ${passthroughChunks.length} segments — embedding for relevance search...`,
+      stats: { tier: 3 },
+    });
+
+    if (passthroughChunks.length > 0 && queryEmbedding) {
+      // Embed passthrough chunks
+      try {
+        const ptTexts = passthroughChunks.map((c) => c.text);
+
+        // Use single getEmbeddings call for optimal concurrency (internal batching)
+        const ptEmbeddings = await embeddingService.getEmbeddings(ptTexts);
+
+        // Score passthrough chunks against query
+        const ptResults: RetrievedChunk[] = passthroughChunks.map(
+          (chunk, i) => ({
+            chunk: {
+              ...chunk,
+              embedding: ptEmbeddings[i],
+              embeddingModel:
+                embeddingService.getConfiguredModel() || "unknown",
+            },
+            score: cosineSimilarityDirect(queryEmbedding, ptEmbeddings[i]),
+            sourceItem: {
+              title: chunk.metadata.title || "Context",
+              id: chunk.itemId,
+            },
+          }),
+        );
+
+        // Emit passthrough scoring results
+        if (onProgress) {
+          const topPt = [...ptResults].sort((a, b) => b.score - a.score);
+          onProgress({
+            step: "embedding-passthrough",
+            message: `Scored ${ptResults.length} passthrough chunks by relevance`,
+            rankedResults: topPt.map((r) => ({
+              title: r.sourceItem.title,
+              score: r.score,
+              source: r.chunk.source,
+              description:
+                r.chunk.text.substring(0, 120).trim() +
+                (r.chunk.text.length > 120 ? "..." : ""),
+            })),
+            stats: {
+              candidateCount: ptTexts.length,
+              selectedCount: ptResults.length,
+              tier: 3,
+            },
+          });
+        }
+
+        // Merge paper RAG results with passthrough RAG results, re-sort
+        const allResults = [...rankedResults, ...ptResults];
+        allResults.sort((a, b) => b.score - a.score);
+
+        // Emit post-merge ranking showing both paper and passthrough results
+        if (onProgress) {
+          onProgress({
+            step: "reranking",
+            message: `Merged ${rankedResults.length} paper + ${ptResults.length} passthrough → ${allResults.length} candidates`,
+            rankedResults: allResults.map((r) => ({
+              title: r.sourceItem.title,
+              score: r.score,
+              source: r.chunk.source,
+              description:
+                r.chunk.text.substring(0, 120).trim() +
+                (r.chunk.text.length > 120 ? "..." : ""),
+            })),
+            stats: {
+              candidateCount: allResults.length,
+              selectedCount: allResults.length,
+            },
+          });
+        }
+
+        // Apply adaptive selection to merged results
+        const adaptiveAll = useAdaptive
+          ? applyAdaptiveSelection(allResults)
+          : allResults;
+
+        onProgress?.({
+          step: "assembling",
+          message: `Selecting top ${adaptiveAll.length} passages within ${effectiveBudget.toLocaleString()}-token budget...`,
+        });
+
+        const assembled = assembleContext(
+          adaptiveAll,
+          effectiveBudget,
+          itemTitles,
+        );
+        selectedChunks = assembled.selectedChunks;
+        finalContext = assembled.context;
+        totalTokensUsed = assembled.tokensUsed;
+
+        Zotero.debug(
+          `[seerai] RAG tier 3 complete: ${ptResults.length} passthrough chunks + ` +
+            `${rankedResults.length} paper chunks → ${selectedChunks.length} selected, ` +
+            `${totalTokensUsed} tokens`,
+        );
+      } catch (e) {
+        // Embedding passthrough failed — fall back to trimmed passthrough
+        Zotero.debug(
+          `[seerai] RAG tier 3 passthrough embedding failed: ${e}, falling back to trim`,
+        );
+        onProgress?.({
+          step: "embedding-passthrough",
+          message: `Passthrough embedding failed — trimming to fit budget`,
+        });
+        const ragMinBudget = Math.max(effectiveBudget * 0.3, 8000);
+        const passthroughBudget = effectiveBudget - ragMinBudget;
+
+        const assembled = assembleContext(
+          rankedResults,
+          ragMinBudget,
+          itemTitles,
+        );
+        selectedChunks = assembled.selectedChunks;
+
+        const trimmedPassthrough = trimToTokenBudget(
+          passthroughContext,
+          passthroughBudget,
+        );
+        finalContext = assembled.context;
+        totalTokensUsed = assembled.tokensUsed;
+        if (trimmedPassthrough) {
+          finalContext += "\n\n" + trimmedPassthrough;
+          totalTokensUsed += ChatStateManager.countTokens(trimmedPassthrough);
+        }
+      }
+    } else {
+      // No passthrough chunks (empty) — just use RAG results
+      const assembled = assembleContext(
+        rankedResults,
+        effectiveBudget,
+        itemTitles,
+      );
+      selectedChunks = assembled.selectedChunks;
+      finalContext = assembled.context;
+      totalTokensUsed = assembled.tokensUsed;
+    }
   }
 
   const stats = {
@@ -383,8 +667,44 @@ export async function retrieveContext(
 
   Zotero.debug(
     `[seerai] RAG retrieval complete: ${selectedChunks.length} chunks, ` +
-      `${totalTokensUsed} tokens (${passthroughTokens} passthrough), ${stats.queryTimeMs}ms`,
+      `${totalTokensUsed} tokens (${passthroughTokens} passthrough original), ${stats.queryTimeMs}ms`,
   );
+
+  // Emit final rankings with selected chunks
+  if (onProgress) {
+    const rankedEntries: Array<{
+      title: string;
+      score: number;
+      source: string;
+      description: string;
+    }> = selectedChunks.map((r) => ({
+      title: r.sourceItem.title,
+      score: r.score,
+      source: r.chunk.source,
+      description:
+        r.chunk.text.substring(0, 300).trim() +
+        (r.chunk.text.length > 300 ? "..." : ""),
+    }));
+
+    // For Tiers 1 & 2, passthrough items were included verbatim but don't
+    // appear in the ranked list. Add them so the UI shows what was included.
+    if (passthroughContext && passthroughTokens > 0) {
+      const ptEntries = parsePassthroughSections(passthroughContext);
+      // Append verbatim entries at the end (score -1 signals verbatim)
+      rankedEntries.push(...ptEntries);
+    }
+
+    onProgress({
+      step: "complete",
+      message: `Selected ${selectedChunks.length} passages (${totalTokensUsed.toLocaleString()} tokens) in ${stats.queryTimeMs}ms`,
+      rankedResults: rankedEntries,
+      stats: {
+        candidateCount: rawResults.length,
+        selectedCount: selectedChunks.length,
+        tokensUsed: totalTokensUsed,
+      },
+    });
+  }
 
   return { context: finalContext, chunks: selectedChunks, stats };
 }
@@ -440,7 +760,10 @@ async function indexSingleItem(
   await vectorStore.indexItem(itemId, chunks, embeddings, model, contentHash);
 
   Zotero.debug(
-    `[seerai] RAG: indexed item ${itemId} — ${chunks.length} chunks embedded`,
+    `[seerai] RAG: indexed item ${itemId} — ${chunks.length} chunks embedded ` +
+      `(${chunks.filter((c) => c.source === "pdf").length} pdf, ` +
+      `${chunks.filter((c) => c.source === "note").length} note, ` +
+      `${chunks.filter((c) => c.source === "abstract").length} abstract)`,
   );
 }
 
@@ -522,7 +845,7 @@ function assembleContext(
         const remainingTokens = maxTokens - tokensUsed - attributionTokens;
         const truncatedText = result.chunk.text.substring(
           0,
-          remainingTokens * 4,
+          Math.floor(remainingTokens * 3.2),
         );
         if (truncatedText.length > 100) {
           selectedChunks.push({
@@ -569,7 +892,11 @@ function assembleContext(
             ? "Note"
             : chunk.source === "pdf"
               ? "Content"
-              : "Metadata";
+              : chunk.source === "table"
+                ? "Table"
+                : chunk.source === "file"
+                  ? "File"
+                  : "Metadata";
       parts.push(`[${sourceLabel} | relevance: ${(score * 100).toFixed(0)}%]`);
       parts.push(chunk.text);
     }
@@ -583,6 +910,315 @@ function assembleContext(
 }
 
 // ─── Utility: check if RAG should activate ──────────────────────────────────
+
+/**
+ * Compute token budget from the model's context window.
+ *
+ * Formula:
+ *   availableForContent = contextLength - systemPrompt - history - webResults
+ *                       - reservedOutput - safetyMargin
+ *
+ * @param contextLength       Model context window (tokens)
+ * @param systemPromptTokens  Estimated system prompt tokens
+ * @param conversationTokens  All conversation history tokens
+ * @param webResultTokens     Web search results tokens
+ * @param reservedOutputTokens  Reserved for model response (default: 4096)
+ * @returns TokenBudget with all allocations computed
+ */
+export function computeTokenBudget(
+  contextLength: number,
+  systemPromptTokens: number,
+  conversationTokens: number,
+  webResultTokens: number,
+  reservedOutputTokens: number = 4096,
+): TokenBudget {
+  // 12% safety margin: the char-based token heuristic can underestimate
+  // by up to 20-30%, so a generous margin prevents context_length_exceeded.
+  const safetyMargin = Math.ceil(contextLength * 0.12);
+  const availableForContent = Math.max(
+    0,
+    contextLength -
+      systemPromptTokens -
+      conversationTokens -
+      webResultTokens -
+      reservedOutputTokens -
+      safetyMargin,
+  );
+
+  return {
+    contextLength,
+    systemPromptTokens,
+    conversationTokens,
+    webResultTokens,
+    reservedOutputTokens,
+    safetyMargin,
+    availableForContent,
+  };
+}
+
+// ─── Adaptive Retrieval ─────────────────────────────────────────────────────
+
+/**
+ * CAR-inspired adaptive selection: find the "relevance cliff" where
+ * similarity scores drop sharply, and only include results above it.
+ *
+ * Algorithm:
+ * 1. Compute score gaps between consecutive results
+ * 2. Find the largest gap (the "cliff")
+ * 3. Include all results above the cliff
+ * 4. Require at least 3 results and at most the original set
+ */
+function applyAdaptiveSelection(results: RetrievedChunk[]): RetrievedChunk[] {
+  if (results.length <= 3) return results; // Too few to detect a cliff
+
+  // Compute gaps between consecutive scores
+  const gaps: { index: number; gap: number }[] = [];
+  for (let i = 0; i < results.length - 1; i++) {
+    gaps.push({
+      index: i,
+      gap: results[i].score - results[i + 1].score,
+    });
+  }
+
+  // Find the largest gap (relevance cliff)
+  // Only consider gaps after the first 2 results (always keep at least 3)
+  const candidateGaps = gaps.slice(2);
+  if (candidateGaps.length === 0) return results;
+
+  const maxGap = candidateGaps.reduce(
+    (best, g) => (g.gap > best.gap ? g : best),
+    candidateGaps[0],
+  );
+
+  // Only apply if the cliff is significant (>15% relative drop or >0.05 absolute)
+  const avgScore =
+    results.reduce((sum, r) => sum + r.score, 0) / results.length;
+  const isSignificant = maxGap.gap > avgScore * 0.15 || maxGap.gap > 0.05;
+
+  if (isSignificant) {
+    const cutoff = maxGap.index + 1; // Include up to and including the item before the cliff
+    Zotero.debug(
+      `[seerai] Adaptive retrieval: cliff at position ${cutoff} ` +
+        `(gap=${maxGap.gap.toFixed(4)}), keeping ${cutoff} of ${results.length} results`,
+    );
+    return results.slice(0, cutoff);
+  }
+
+  // No significant cliff — return all (caller will budget-constrain)
+  return results;
+}
+
+// ─── Passthrough Section Parsing (for progress UI) ──────────────────────────
+
+/**
+ * Parse passthrough content into display entries for the RAG progress UI.
+ * Passthrough items that are included verbatim (Tiers 1 & 2) don't go through
+ * the ranking pipeline, so this extracts section headers to show them in the
+ * results list with a score of -1 (signaling "included verbatim").
+ */
+function parsePassthroughSections(passthroughContent: string): Array<{
+  title: string;
+  score: number;
+  source: string;
+  description: string;
+}> {
+  const entries: Array<{
+    title: string;
+    score: number;
+    source: string;
+    description: string;
+  }> = [];
+  if (!passthroughContent) return entries;
+
+  // Match top-level section headers: --- Table: ..., --- File: ..., Focus Topic: ...
+  const sectionRe =
+    /(?:^|\n)---\s+(Table|File):\s+(.+?)\s+---|\nFocus Topic:\s+"(.+?)"/g;
+  let match;
+  while ((match = sectionRe.exec(passthroughContent)) !== null) {
+    const type = match[1]; // "Table" or "File" (or undefined for Focus Topic)
+    if (type) {
+      entries.push({
+        title: match[2],
+        score: -1,
+        source: type.toLowerCase(), // "table" or "file"
+        description: `Included verbatim (${type.toLowerCase()})`,
+      });
+    } else if (match[3]) {
+      entries.push({
+        title: `Focus: "${match[3]}"`,
+        score: -1,
+        source: "metadata",
+        description: "Focus topic included verbatim",
+      });
+    }
+  }
+
+  // If no sections were parsed but there's content, add a generic entry
+  if (entries.length === 0 && passthroughContent.trim().length > 0) {
+    const tokens = ChatStateManager.countTokens(passthroughContent);
+    entries.push({
+      title: "Additional context",
+      score: -1,
+      source: "metadata",
+      description: `${tokens.toLocaleString()} tokens included verbatim`,
+    });
+  }
+
+  return entries;
+}
+
+// ─── Passthrough Chunking (for Tier 3 budget) ───────────────────────────────
+
+/**
+ * Chunk passthrough content (tables, files, topics) for vector search.
+ * Used when passthrough is too large to include verbatim.
+ */
+function chunkPassthroughForRAG(
+  passthroughContent: string,
+  ragConfig: RAGConfig,
+): import("./types").DocumentChunk[] {
+  if (!passthroughContent || passthroughContent.trim().length === 0) return [];
+
+  // ── Parse passthrough content into sections with meaningful titles/sources ──
+  // The passthrough string uses section delimiters:
+  //   Tables:  "\n--- Table: {name} ---\n..." with sub-sections "--- Paper: {title} ---"
+  //   Files:   "\n--- File: {filename} ---\n..."
+  //   Topics:  "\nFocus Topic: \"{topic}\" - ..."
+  const sections: Array<{
+    text: string;
+    title: string;
+    source: import("./types").ChunkSource;
+  }> = [];
+
+  // Split on TOP-LEVEL section headers only (--- Table:, --- File:, Focus Topic:).
+  // Do NOT split on "--- Paper:" because those appear as sub-headers within
+  // table sections and should stay grouped with their parent table.
+  const sectionPattern = /(?:^|\n)(?=---\s+(?:Table|File):\s|Focus Topic:\s)/;
+  const rawSections = passthroughContent.split(sectionPattern).filter(Boolean);
+
+  for (const raw of rawSections) {
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+
+    // Detect section type from header
+    const tableMatch = trimmed.match(/^---\s+Table:\s+(.+?)\s+---/);
+    const fileMatch = trimmed.match(/^---\s+File:\s+(.+?)\s+---/);
+    const topicMatch = trimmed.match(/^Focus Topic:\s+"(.+?)"/);
+
+    if (tableMatch) {
+      sections.push({
+        text: trimmed,
+        title: `Table: ${tableMatch[1]}`,
+        source: "table",
+      });
+    } else if (fileMatch) {
+      sections.push({
+        text: trimmed,
+        title: `File: ${fileMatch[1]}`,
+        source: "file",
+      });
+    } else if (topicMatch) {
+      sections.push({
+        text: trimmed,
+        title: `Topic: ${topicMatch[1]}`,
+        source: "note",
+      });
+    } else {
+      sections.push({
+        text: trimmed,
+        title: "Context",
+        source: "note",
+      });
+    }
+  }
+
+  // If no sections were parsed (no recognizable headers), chunk the whole thing
+  if (sections.length === 0) {
+    return chunkDocument(
+      -1,
+      passthroughContent,
+      "note",
+      { title: "Passthrough Content" },
+      { chunkSize: ragConfig.chunkSize, chunkOverlap: ragConfig.chunkOverlap },
+    );
+  }
+
+  // Chunk each section separately, preserving its title and source.
+  // Use distinct negative IDs per section so assembleContext groups them separately.
+  const allChunks: import("./types").DocumentChunk[] = [];
+  for (let sIdx = 0; sIdx < sections.length; sIdx++) {
+    const section = sections[sIdx];
+    const sectionItemId = -(sIdx + 1); // -1, -2, -3, ...
+    const sectionChunks = chunkDocument(
+      sectionItemId,
+      section.text,
+      section.source,
+      { title: section.title },
+      { chunkSize: ragConfig.chunkSize, chunkOverlap: ragConfig.chunkOverlap },
+    );
+    // Make IDs unique across sections
+    for (const chunk of sectionChunks) {
+      chunk.id = `pt_${allChunks.length}_${chunk.id}`;
+    }
+    allChunks.push(...sectionChunks);
+  }
+
+  return allChunks;
+}
+
+/**
+ * Trim text to fit within a token budget by removing content from the end.
+ * Tries to cut at a paragraph or sentence boundary.
+ */
+function trimToTokenBudget(text: string, budgetTokens: number): string {
+  if (!text) return "";
+  const currentTokens = ChatStateManager.countTokens(text);
+  if (currentTokens <= budgetTokens) return text;
+
+  // Estimate characters to keep (3.2 chars per token, matching countTokens)
+  const targetChars = Math.floor(budgetTokens * 3.2);
+  let trimmed = text.substring(0, targetChars);
+
+  // Try to cut at a paragraph break
+  const lastParagraph = trimmed.lastIndexOf("\n\n");
+  if (lastParagraph > targetChars * 0.7) {
+    trimmed = trimmed.substring(0, lastParagraph);
+  } else {
+    // Try sentence boundary
+    const lastSentence = trimmed.lastIndexOf(". ");
+    if (lastSentence > targetChars * 0.7) {
+      trimmed = trimmed.substring(0, lastSentence + 1);
+    }
+  }
+
+  return trimmed + "\n\n[... content trimmed to fit context window budget ...]";
+}
+
+// ─── Cosine Similarity (for in-memory passthrough scoring) ──────────────────
+
+/**
+ * Compute cosine similarity between two vectors.
+ * Duplicate of vectorStore's private function — needed for in-memory
+ * passthrough chunk scoring in Tier 3 budget mode.
+ */
+function cosineSimilarityDirect(a: number[], b: number[]): number {
+  if (a.length !== b.length) return 0;
+
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+
+  for (let i = 0; i < a.length; i++) {
+    dotProduct += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+
+  const magnitude = Math.sqrt(normA) * Math.sqrt(normB);
+  if (magnitude === 0) return 0;
+
+  return dotProduct / magnitude;
+}
 
 /**
  * Determine whether RAG should be activated for the current context.
