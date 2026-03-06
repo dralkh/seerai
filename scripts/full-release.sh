@@ -16,8 +16,9 @@ echo "Bumping version ($KIND) ..."
 NEW_VERSION=$(node "$SCRIPT_DIR/release.js" "$KIND")
 echo "New version: $NEW_VERSION"
 
-echo "Building project..."
-npm run build
+echo "Building project (production)..."
+# ensure build writes update.json/update-beta.json and packs the XPI
+NODE_ENV=production npm run build
 
 XPI=".scaffold/build/$(ls .scaffold/build | grep ".xpi$" | head -n1)"
 if [ ! -f "$XPI" ]; then
@@ -52,6 +53,46 @@ gh release create "v$NEW_VERSION" "$XPI" --title "v$NEW_VERSION" --notes "$RELEA
 if [ -f ".scaffold/build/update.json" ]; then
   echo "Uploading update.json to release v$NEW_VERSION"
   gh release upload "v$NEW_VERSION" ".scaffold/build/update.json" --clobber || true
+fi
+
+# Verify uploaded assets are reachable from GitHub releases (versioned and 'release')
+origin_url=$(git remote get-url origin 2>/dev/null || true)
+if [ -n "$origin_url" ]; then
+  # Normalize to https://github.com/owner/repo
+  if [[ "$origin_url" == git@github.com:* ]]; then
+    repo_path=${origin_url#git@github.com:}
+  else
+    repo_path=${origin_url#https://github.com/}
+    repo_path=${repo_path#git+https://github.com/}
+  fi
+  repo_path=${repo_path%.git}
+  base_url="https://github.com/$repo_path/releases/download"
+
+  for manifest in update.json update-beta.json; do
+    for tag in "v$NEW_VERSION" release; do
+      url="$base_url/$tag/$manifest"
+      echo -n "Checking $url ... "
+      if curl -sSfI "$url" >/dev/null 2>&1; then
+        echo "OK"
+      else
+        echo "MISSING or unreachable"
+      fi
+    done
+  done
+
+  # check MCP files
+  for m in "${MCP_FILES[@]:-}"; do
+    filename=$(basename "$m")
+    for tag in "v$NEW_VERSION" release; do
+      url="$base_url/$tag/$filename"
+      echo -n "Checking $url ... "
+      if curl -sSfI "$url" >/dev/null 2>&1; then
+        echo "OK"
+      else
+        echo "MISSING or unreachable"
+      fi
+    done
+  done
 fi
 if [ -f ".scaffold/build/update-beta.json" ]; then
   echo "Uploading update-beta.json to release v$NEW_VERSION"
