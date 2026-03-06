@@ -11,7 +11,7 @@ export default defineConfig({
   // updater looks for a stable `release/update.json` (and update-beta.json)
   // which points to the versioned XPI links. Keep the XPI download link
   // versioned (v{{version}}) so update.json can reference the specific asset.
-  updateURL: `https://github.com/{{owner}}/{{repo}}/releases/download/release/${
+  updateURL: `https://github.com/{{owner}}/{{repo}}/releases/download/v${pkg.version}/${
     pkg.version.includes("-") ? "update-beta.json" : "update.json"
   }`,
   xpiDownloadLink:
