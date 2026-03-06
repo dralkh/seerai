@@ -7,6 +7,10 @@ export default defineConfig({
   name: pkg.config.addonName,
   id: pkg.config.addonID,
   namespace: pkg.config.addonRef,
+  // Use the rolling `release` release to host update manifests. Zotero's
+  // updater looks for a stable `release/update.json` (and update-beta.json)
+  // which points to the versioned XPI links. Keep the XPI download link
+  // versioned (v{{version}}) so update.json can reference the specific asset.
   updateURL: `https://github.com/{{owner}}/{{repo}}/releases/download/release/${
     pkg.version.includes("-") ? "update-beta.json" : "update.json"
   }`,

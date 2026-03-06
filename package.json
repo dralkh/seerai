@@ -1,7 +1,7 @@
 {
   "name": "seerai",
   "type": "module",
-  "version": "1.6.1",
+  "version": "1.6.5",
   "description": "seerai - Intelligent Research Assistant for Zotero",
   "config": {
     "addonName": "seerai",
@@ -22,7 +22,7 @@
   "license": "MIT",
   "scripts": {
     "start": "zotero-plugin serve",
-    "build": "zotero-plugin build && tsc --noEmit && cp .scaffold/build/*.xpi . && cd mcp-server && npm run bundle && cp dist/seerai-mcp.cjs .. && cp dist/seerai-mcp.cjs ../.scaffold/build/",
+    "build": "zotero-plugin build && tsc --noEmit && cd mcp-server && npm run bundle && cp dist/seerai-mcp.cjs ../.scaffold/build/",
     "lint:check": "prettier --check . && eslint .",
     "lint:fix": "prettier --write . && eslint . --fix",
     "release": "zotero-plugin release",
