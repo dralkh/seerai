@@ -134,6 +134,7 @@ let activeTab: AssistantTab = "chat";
 // Table state cache
 let currentTableConfig: TableConfig | null = null;
 let currentTableData: TableData | null = null;
+let isTableGenerating: boolean = false;
 
 // Search state
 let currentSearchState: SearchState = { ...defaultSearchState };
@@ -1470,6 +1471,44 @@ export class Assistant {
     currentSearchState = state;
   }
 
+  private static playNotificationSound(): void {
+    try {
+      const soundEnabled = Zotero.Prefs.get(
+        `${addon.data.config.prefsPrefix}.tableGenerationSound`,
+        true,
+      ) as boolean;
+      if (!soundEnabled) return;
+
+      const win = Zotero.getMainWindow();
+      if (!win) return;
+
+      const audioContext = new win.AudioContext();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(880, audioContext.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(
+        1760,
+        audioContext.currentTime + 0.1,
+      );
+
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(
+        0.01,
+        audioContext.currentTime + 0.3,
+      );
+
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    } catch (e) {
+      Zotero.debug(`[seerai] Failed to play notification sound: ${e}`);
+    }
+  }
+
   // UI state
   private static isStreaming: boolean = false;
   private static lastRenderTime: number = 0;
@@ -2224,9 +2263,13 @@ export class Assistant {
       this.lastRenderedTab === activeTab &&
       this.lastRenderedContainer === container
     ) {
-      // Optimization: avoid full re-render if the active context hasn't changed.
-      // This prevents Zotero's onRender events (from tool metadata updates)
-      // from clearing the DOM and closing user interaction elements like dropdowns.
+      return;
+    }
+
+    if (isTableGenerating && activeTab === "table") {
+      Zotero.debug(
+        "[seerai] renderInterface: Skipping render during table generation",
+      );
       return;
     }
 
@@ -3302,6 +3345,80 @@ export class Assistant {
         alignItems: "center",
       },
     });
+
+    // 3b. (📋) Copy Selected
+    const copySelectedBtn = createSideBtn(
+      "📋",
+      "Copy Selected to Clipboard",
+      async (e) => {
+        e.stopPropagation();
+        if (!currentTableData || currentTableData.selectedRowIds.size === 0)
+          return;
+        const rowsToCopy = currentTableData.rows.filter((r) =>
+          currentTableData!.selectedRowIds.has(r.paperId),
+        );
+        const cols =
+          currentTableConfig?.columns.filter((c) => c.visible) ||
+          defaultColumns.filter((c) => c.visible);
+
+        const references: string[] = [];
+        const paperDetails: string[] = [];
+
+        rowsToCopy.forEach((row, index) => {
+          const refNum = index + 1;
+          const title = row.data["title"] || "Untitled";
+          const author = row.data["author"] || "Unknown";
+          const year = row.data["year"] || "";
+          const zoteroKey = row.data["zoteroKey"] || "";
+
+          references.push(
+            `[${refNum}]${zoteroKey ? ` ${zoteroKey} —` : ""} ${author}${year ? `, ${year}` : ""} — ${title}`,
+          );
+
+          let paperSection = `### [${refNum}] ${title}\n`;
+
+          if (author) paperSection += `**Authors:** ${author}\n`;
+          if (year) paperSection += `**Year:** ${year}\n`;
+          if (row.data["zoteroKey"])
+            paperSection += `**Zotero Key:** ${row.data["zoteroKey"]}\n`;
+          if (row.data["DOI"]) paperSection += `**DOI:** ${row.data["DOI"]}\n`;
+
+          cols.forEach((col) => {
+            if (
+              ["title", "author", "year", "zoteroKey", "DOI"].includes(col.id)
+            )
+              return;
+            const value = row.data[col.id];
+            if (value) {
+              paperSection += `**${col.name}:** ${value}\n`;
+            }
+          });
+
+          paperDetails.push(paperSection);
+        });
+
+        const textContent = [
+          "## References",
+          ...references,
+          "",
+          "## Detailed Data",
+          "",
+          ...paperDetails,
+        ].join("\n");
+
+        new ztoolkit.Clipboard().addText(textContent, "text/unicode").copy();
+        const progressWindow = new Zotero.ProgressWindow({
+          closeOnClick: true,
+        });
+        progressWindow.changeHeadline("Copied");
+        progressWindow.addDescription(
+          `${rowsToCopy.length} paper(s) copied as structured markdown`,
+        );
+        progressWindow.show();
+        progressWindow.startCloseTimer(2000);
+      },
+    );
+    bulkActionsContainer.appendChild(copySelectedBtn);
 
     // 4. (💾) Save Selected
     const saveSelectedBtn = createSideBtn(
@@ -9229,6 +9346,30 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     });
     toolbar.appendChild(saveBtn);
 
+    // Copy All Data button
+    const copyAllBtn = ztoolkit.UI.createElement(doc, "button", {
+      properties: { className: "table-btn", innerText: "📋" },
+      attributes: { title: "Copy all table data to clipboard" },
+      styles: {
+        padding: "6px 10px",
+        fontSize: "11px",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "4px",
+        backgroundColor: "var(--background-primary)",
+        color: "var(--text-primary)",
+        cursor: "pointer",
+      },
+      listeners: [
+        {
+          type: "click",
+          listener: async () => {
+            await this.copyAllTableData(doc);
+          },
+        },
+      ],
+    });
+    toolbar.appendChild(copyAllBtn);
+
     // History button
     const historyBtn = ztoolkit.UI.createElement(doc, "button", {
       properties: { className: "table-btn", innerText: "📜" },
@@ -9324,7 +9465,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       ],
     }) as HTMLSelectElement;
 
-    [25, 50, 100, 200].forEach((size) => {
+    [25, 50, 100, 200, 500, 1000].forEach((size) => {
       const opt = ztoolkit.UI.createElement(doc, "option", {
         properties: {
           value: String(size),
@@ -10486,6 +10627,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     if (!currentTableConfig) return;
 
+    isTableGenerating = true;
+
     // Get visible columns and computed columns
     const columns = currentTableConfig.columns || defaultColumns;
     const visibleCols = columns.filter((col) => col.visible);
@@ -10553,12 +10696,19 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
         // Calculate correct DOM index
         // In createPapersTable:
-        // Index 0: Paper (Title + Author + Year + Sources) - Combined
+        // Index 0: Paper (Title + Author + Year + Sources + ZoteroKey + DOI) - Combined
         // Index 1..N: Other Columns (excluding core columns)
         // Index N+1: Actions
 
         // Find index of this column in "otherColumns"
-        const coreColumnIds = ["title", "author", "year", "sources"];
+        const coreColumnIds = [
+          "title",
+          "author",
+          "year",
+          "sources",
+          "zoteroKey",
+          "DOI",
+        ];
         const visibleOtherColumns = visibleCols.filter(
           (c) => !coreColumnIds.includes(c.id),
         );
@@ -10614,6 +10764,18 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       }
     };
 
+    let saveCounter = 0;
+    const SAVE_INTERVAL = 5;
+
+    const saveIncremental = async () => {
+      saveCounter++;
+      if (saveCounter % SAVE_INTERVAL === 0 && currentTableConfig) {
+        const tableStore = getTableStore();
+        await tableStore.saveConfig(currentTableConfig);
+        Zotero.debug(`[seerai] Incremental save at ${saveCounter} completions`);
+      }
+    };
+
     // Process tasks using runConcurrentTasks
     updateProgress();
     await runConcurrentTasks<GenerationTask, string | null>({
@@ -10638,12 +10800,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       onTaskComplete: (task, content) => {
         completed++;
         if (content) {
-          // Update DOM immediately
           task.td.innerHTML = parseMarkdown(content);
           task.td.style.cursor = "pointer";
-          task.td.style.backgroundColor = ""; // Remove any special bg
+          task.td.style.backgroundColor = "";
 
-          // Update Data
           const row = currentTableData?.rows.find(
             (r) => r.paperId === task.paperId,
           );
@@ -10651,7 +10811,6 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             row.data[task.col.id] = content;
           }
 
-          // Persist generated data
           if (currentTableConfig) {
             if (!currentTableConfig.generatedData) {
               currentTableConfig.generatedData = {};
@@ -10664,8 +10823,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           }
 
           generated++;
+          saveIncremental();
         } else {
-          // No content generated
           task.td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">Empty - no notes</span>`;
           task.td.title =
             "No notes found. Use '🔍 Extract with ocr' to create notes first.";
@@ -10703,6 +10862,12 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       }, 2000);
     }
 
+    isTableGenerating = false;
+
+    if (generated > 0 || tasks.length > 0) {
+      this.playNotificationSound();
+    }
+
     Zotero.debug(
       `[seerai] Generation complete: ${generated} generated, ${failed} failed`,
     );
@@ -10720,6 +10885,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     if (!currentTableConfig) return;
     if (!currentTableData || currentTableData.selectedRowIds.size === 0) return;
+
+    isTableGenerating = true;
 
     // Get visible columns and computed columns
     const columns = currentTableConfig.columns || defaultColumns;
@@ -10781,7 +10948,14 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         }
 
         // Calculate correct DOM index
-        const coreColumnIds = ["title", "author", "year", "sources"];
+        const coreColumnIds = [
+          "title",
+          "author",
+          "year",
+          "sources",
+          "zoteroKey",
+          "DOI",
+        ];
         const visibleOtherColumns = visibleCols.filter(
           (c) => !coreColumnIds.includes(c.id),
         );
@@ -10811,6 +10985,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     if (tasks.length === 0) {
       Zotero.debug("[seerai] No cells with existing content to regenerate");
+      isTableGenerating = false;
       return;
     }
 
@@ -10819,6 +10994,17 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     let completed = 0;
     let regenerated = 0;
     let failed = 0;
+    let saveCounter = 0;
+    const SAVE_INTERVAL = 5;
+
+    const saveIncremental = async () => {
+      saveCounter++;
+      if (saveCounter % SAVE_INTERVAL === 0 && currentTableConfig) {
+        const tableStore = getTableStore();
+        await tableStore.saveConfig(currentTableConfig);
+        Zotero.debug(`[seerai] Incremental save at ${saveCounter} completions`);
+      }
+    };
 
     // Process tasks using runConcurrentTasks
     await runConcurrentTasks<RegenerationTask, string | null>({
@@ -10866,6 +11052,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           }
 
           regenerated++;
+          saveIncremental();
         } else {
           task.td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">Failed to regenerate</span>`;
           task.td.style.cursor = "default";
@@ -10888,6 +11075,12 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     const tableStore = getTableStore();
     if (currentTableConfig) {
       await tableStore.saveConfig(currentTableConfig);
+    }
+
+    isTableGenerating = false;
+
+    if (regenerated > 0 || tasks.length > 0) {
+      this.playNotificationSound();
     }
 
     Zotero.debug(
@@ -12416,11 +12609,12 @@ You MUST call the generate_tags function.`;
       (win as any)?.matchMedia?.("(prefers-color-scheme: dark)").matches ??
       false;
     const isComputed = col.type === "computed";
-    const hasNotes = row.noteIds && row.noteIds.length > 0;
 
-    // Check for PDF
+    // Check for item and its notes/PDF (fresh data, not stale row data)
     const item = Zotero.Items.get(row.paperId);
     const attachments = item?.getAttachments() || [];
+    const notes = item?.getNotes() || [];
+    const hasNotes = notes.length > 0;
     const hasPDF = attachments.some((attId: number) => {
       const att = Zotero.Items.get(attId);
       return att && att.attachmentContentType === "application/pdf";
@@ -12638,8 +12832,9 @@ You MUST call the generate_tags function.`;
       },
     });
 
-    // Generate button (only for computed columns with sources)
+    // Generate/Search buttons (only for computed columns)
     if (isComputed) {
+      // Generate button if we have notes or PDF
       if (hasNotes || hasPDF) {
         const genBtn = ztoolkit.UI.createElement(doc, "button", {
           properties: {
@@ -12664,10 +12859,9 @@ You MUST call the generate_tags function.`;
                 (genBtn as HTMLButtonElement).disabled = true;
                 try {
                   const content = hasNotes
-                    ? await this.generateColumnContent(item!, col, row.noteIds)
+                    ? await this.generateColumnContent(item!, col, notes)
                     : await this.generateFromPDF(item!, col);
                   contentArea.value = content || "(No content generated)";
-                  // Also update preview area
                   previewArea.innerHTML = content
                     ? parseMarkdown(content)
                     : '<span style="color: var(--text-tertiary); font-style: italic;">No content generated</span>';
@@ -12682,16 +12876,140 @@ You MUST call the generate_tags function.`;
           ],
         });
         buttonRow.appendChild(genBtn);
-      } else {
-        const noSourceMsg = ztoolkit.UI.createElement(doc, "span", {
-          properties: { innerText: "No notes or PDFs to generate from" },
+      }
+
+      // Search PDF button if no PDF (even if notes exist)
+      if (!hasPDF) {
+        const searchPdfBtn = ztoolkit.UI.createElement(doc, "button", {
+          properties: { innerText: "🔍 Search PDF" },
+          attributes: { title: "Search for PDF to attach" },
           styles: {
-            fontSize: "12px",
-            color: "var(--text-tertiary)",
-            alignSelf: "center",
+            padding: "10px 16px",
+            border: hasNotes ? "1px solid var(--border-primary)" : "none",
+            borderRadius: "6px",
+            backgroundColor: hasNotes
+              ? "var(--background-secondary)"
+              : "var(--highlight-primary)",
+            color: hasNotes ? "var(--text-primary)" : "var(--highlight-text)",
+            cursor: "pointer",
+            fontWeight: "500",
           },
+          listeners: [
+            {
+              type: "click",
+              listener: async () => {
+                searchPdfBtn.innerText = "⏳ Searching...";
+                (searchPdfBtn as HTMLButtonElement).disabled = true;
+                try {
+                  const success = await findAndAttachPdfForItem(
+                    item!,
+                    (step) => {
+                      searchPdfBtn.innerText = `⏳ ${step}`;
+                    },
+                  );
+                  if (success) {
+                    if (!hasNotes) {
+                      searchPdfBtn.replaceWith(
+                        ztoolkit.UI.createElement(doc, "button", {
+                          properties: { innerText: "⚡ Generate from PDF" },
+                          styles: {
+                            padding: "10px 16px",
+                            border: "none",
+                            borderRadius: "6px",
+                            backgroundColor: "var(--highlight-primary)",
+                            color: "var(--highlight-text)",
+                            cursor: "pointer",
+                            fontWeight: "500",
+                          },
+                          listeners: [
+                            {
+                              type: "click",
+                              listener: async () => {
+                                const btn = buttonRow.querySelector(
+                                  "button",
+                                ) as HTMLButtonElement;
+                                btn.innerText = "⏳ Generating...";
+                                btn.disabled = true;
+                                try {
+                                  const content = await this.generateFromPDF(
+                                    item!,
+                                    col,
+                                  );
+                                  contentArea.value =
+                                    content || "(No content generated)";
+                                  previewArea.innerHTML = content
+                                    ? parseMarkdown(content)
+                                    : '<span style="color: var(--text-tertiary); font-style: italic;">No content generated</span>';
+                                } catch (e) {
+                                  contentArea.value = `Error: ${e}`;
+                                  previewArea.innerHTML = `<span style="color: #c62828;">Error: ${e}</span>`;
+                                }
+                                btn.innerText = "📄 Regenerate";
+                                btn.disabled = false;
+                              },
+                            },
+                          ],
+                        }),
+                      );
+                    } else {
+                      searchPdfBtn.innerText = "✓ PDF Attached";
+                      searchPdfBtn.style.backgroundColor =
+                        "var(--background-secondary)";
+                      searchPdfBtn.style.color = "var(--text-secondary)";
+                      searchPdfBtn.disabled = true;
+                    }
+                  } else {
+                    const doi = (item!.getField("DOI") as string) || undefined;
+                    const arxivId = extractArxivFromItem(item!);
+                    const pmid = extractPmidFromItem(item!);
+                    const itemUrl =
+                      (item!.getField("url") as string) || undefined;
+                    const sourceLink = getSourceLinkForPaper(
+                      doi,
+                      arxivId,
+                      pmid,
+                      undefined,
+                      itemUrl,
+                    );
+                    if (sourceLink) {
+                      searchPdfBtn.replaceWith(
+                        ztoolkit.UI.createElement(doc, "a", {
+                          properties: {
+                            innerText: "🔗 Open Source",
+                            href: sourceLink,
+                            target: "_blank",
+                          },
+                          styles: {
+                            padding: "10px 16px",
+                            border: "1px solid var(--border-primary)",
+                            borderRadius: "6px",
+                            backgroundColor: "var(--background-secondary)",
+                            color: "var(--highlight-primary)",
+                            textDecoration: "none",
+                            fontWeight: "500",
+                            display: "inline-block",
+                          },
+                        }),
+                      );
+                    } else {
+                      searchPdfBtn.innerText = "❌ Not found";
+                      searchPdfBtn.style.backgroundColor =
+                        "var(--background-secondary)";
+                      searchPdfBtn.style.color = "var(--text-tertiary)";
+                      searchPdfBtn.disabled = false;
+                    }
+                  }
+                } catch (e) {
+                  searchPdfBtn.innerText = `Error`;
+                  searchPdfBtn.style.backgroundColor =
+                    "var(--background-secondary)";
+                  searchPdfBtn.style.color = "#c62828";
+                }
+              },
+            },
+          ],
         });
-        buttonRow.appendChild(noSourceMsg);
+        buttonRow.appendChild(searchPdfBtn);
       }
     }
 
@@ -14080,7 +14398,14 @@ You MUST call the generate_tags function.`;
     const columns = currentTableConfig?.columns || defaultColumns;
 
     // Core columns to combine into "Paper"
-    const coreColumnIds = ["title", "author", "year", "sources"];
+    const coreColumnIds = [
+      "title",
+      "author",
+      "year",
+      "sources",
+      "zoteroKey",
+      "DOI",
+    ];
     const otherColumns = columns.filter(
       (col) => col.visible && !coreColumnIds.includes(col.id),
     );
@@ -14659,15 +14984,19 @@ You MUST call the generate_tags function.`;
 
       paperCell.appendChild(titleDiv);
 
-      // Author, Year, Sources on one line
+      // Author, Year, Sources, Zotero Key, DOI on one line
       const author = row.data["author"] || "";
       const year = row.data["year"] || "";
       const sources = row.data["sources"] || "0";
+      const zoteroKey = row.data["zoteroKey"] || "";
+      const doi = row.data["DOI"] || "";
       const metaText = [
         author
           ? `${author.length > 30 ? author.substring(0, 30) + "..." : author}`
           : "",
         year ? `(${year})` : "",
+        zoteroKey ? `[${zoteroKey}]` : "",
+        doi ? `DOI: ${doi}` : "",
         `📝 ${sources}`,
       ]
         .filter(Boolean)
@@ -14727,7 +15056,18 @@ You MUST call the generate_tags function.`;
           );
 
           if (hasNotes) {
-            td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">⚡ Generate</span>`;
+            if (hasPDFForIndicator) {
+              td.innerHTML = `<span class="generate-indexed-btn" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">⚡ Generate</span>`;
+              td.title = "Generate: uses existing notes";
+            } else {
+              td.innerHTML = `<span style="font-size: 11px;">
+                              <span class="generate-indexed-btn" style="color: var(--highlight-primary); cursor: pointer;">⚡ Generate</span>
+                              <span style="margin: 0 4px; color: var(--text-tertiary);">|</span>
+                              <span class="search-pdf-btn" style="color: var(--text-secondary); cursor: pointer;">🔍 Search PDF</span>
+                          </span>`;
+              td.title =
+                "Generate: uses notes | Search PDF: find and attach PDF";
+            }
           } else if (hasPDFForIndicator) {
             // Show both options: Generate (uses indexed PDF text) and OCR (creates refined notes)
             td.innerHTML = `<span style="font-size: 11px;">
@@ -15707,6 +16047,7 @@ You MUST call the generate_tags function.`;
 
         // Get note count for sources column
         const noteIDs = item.getNotes();
+        const doi = (item.getField("DOI") as string) || "";
 
         // Build the complete row with all data
         const rowData: Record<string, string> = {
@@ -15714,6 +16055,8 @@ You MUST call the generate_tags function.`;
           author: authorNames,
           year: year,
           sources: String(noteIDs.length),
+          zoteroKey: item.key,
+          DOI: doi,
           // Merge ALL persisted computed columns
           ...persistedData,
         };
@@ -19084,7 +19427,14 @@ You MUST call the generate_tags function.`;
     });
 
     const columns = currentTableConfig?.columns || defaultColumns;
-    const coreColumnIds = ["title", "author", "year", "sources"];
+    const coreColumnIds = [
+      "title",
+      "author",
+      "year",
+      "sources",
+      "zoteroKey",
+      "DOI",
+    ];
     columns.forEach((col) => {
       const row = ztoolkit.UI.createElement(doc, "div", {
         styles: {
@@ -19551,6 +19901,79 @@ ${lengthConstraint}`;
       progressWindow.startCloseTimer(3000);
     } catch (e) {
       Zotero.debug(`[seerai] Error exporting table: ${e}`);
+    }
+  }
+
+  /**
+   * Copy all table data to clipboard as structured markdown
+   */
+  private static async copyAllTableData(doc: Document): Promise<void> {
+    try {
+      const tableData = await this.loadTableData();
+      if (tableData.rows.length === 0) {
+        return;
+      }
+
+      const columns =
+        currentTableConfig?.columns.filter((c) => c.visible) ||
+        defaultColumns.filter((c) => c.visible);
+
+      const references: string[] = [];
+      const paperDetails: string[] = [];
+
+      tableData.rows.forEach((row, index) => {
+        const refNum = index + 1;
+        const title = row.data["title"] || "Untitled";
+        const author = row.data["author"] || "Unknown";
+        const year = row.data["year"] || "";
+        const zoteroKey = row.data["zoteroKey"] || "";
+
+        references.push(
+          `[${refNum}]${zoteroKey ? ` ${zoteroKey} —` : ""} ${author}${year ? `, ${year}` : ""} — ${title}`,
+        );
+
+        let paperSection = `### [${refNum}] ${title}\n`;
+
+        if (author) paperSection += `**Authors:** ${author}\n`;
+        if (year) paperSection += `**Year:** ${year}\n`;
+        if (row.data["zoteroKey"])
+          paperSection += `**Zotero Key:** ${row.data["zoteroKey"]}\n`;
+        if (row.data["DOI"]) paperSection += `**DOI:** ${row.data["DOI"]}\n`;
+
+        columns.forEach((col) => {
+          if (["title", "author", "year", "zoteroKey", "DOI"].includes(col.id))
+            return;
+          const value = row.data[col.id];
+          if (value) {
+            paperSection += `**${col.name}:** ${value}\n`;
+          }
+        });
+
+        paperDetails.push(paperSection);
+      });
+
+      const textContent = [
+        "## References",
+        ...references,
+        "",
+        "## Detailed Data",
+        "",
+        ...paperDetails,
+      ].join("\n");
+
+      new ztoolkit.Clipboard().addText(textContent, "text/unicode").copy();
+
+      const progressWindow = new Zotero.ProgressWindow({ closeOnClick: true });
+      progressWindow.changeHeadline("Copied to Clipboard");
+      progressWindow.addDescription(
+        `${tableData.rows.length} papers copied as structured markdown`,
+      );
+      progressWindow.show();
+      progressWindow.startCloseTimer(2000);
+
+      Zotero.debug("[seerai] Table data copied to clipboard");
+    } catch (e) {
+      Zotero.debug(`[seerai] Error copying table data: ${e}`);
     }
   }
 
@@ -22593,7 +23016,7 @@ ${tableRows}  </tbody>
                     inputStream.close();
 
                     // Parse XML and extract text from <w:t> elements
-                    let docXml = xmlBytes;
+                    const docXml = xmlBytes;
 
                     // Extract text from <w:t ...>text</w:t> tags
                     const textMatches = docXml.match(

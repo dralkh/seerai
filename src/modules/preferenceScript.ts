@@ -391,6 +391,16 @@ function bindPrefEvents() {
     });
   }
 
+  // AI & Table settings
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-aiMaxConcurrent`,
+    "aiMaxConcurrent",
+  );
+  bindCheckbox(
+    `zotero-prefpane-${config.addonRef}-tableGenerationSound`,
+    "tableGenerationSound",
+  );
+
   // Initialize MCP Integration UI
   initMcpIntegrationUI();
 

@@ -55,3 +55,4 @@ pref("ragTopK", 20);
 pref("ragMinScore", 30);
 pref("ragChunkSize", 512);
 pref("ragChunkOverlap", 64);
+pref("tableGenerationSound", true);

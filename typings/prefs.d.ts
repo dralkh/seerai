@@ -53,6 +53,7 @@ declare namespace _ZoteroTypes {
       "ragMinScore": number;
       "ragChunkSize": number;
       "ragChunkOverlap": number;
+      "tableGenerationSound": boolean;
     };
   }
 }

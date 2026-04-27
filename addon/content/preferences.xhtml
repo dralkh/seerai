@@ -369,8 +369,8 @@
       >
     </hbox>
     <label style="font-size: 11px; color: #666; margin-bottom: 8px">
-      Uses your NanoGPT API key to route web searches through Tavily.
-      Minimum NanoGPT balance: $1.00.
+      Uses your NanoGPT API key to route web searches through Tavily. Minimum
+      NanoGPT balance: $1.00.
     </label>
     <hbox align="center" style="gap: 16px">
       <html:a
@@ -563,6 +563,43 @@
     </hbox>
   </vbox>
 </groupbox>
+
+<html:hr style="margin: 16px 0" />
+
+<label>
+  <html:h3>AI &amp; Table Settings</html:h3>
+</label>
+<vbox
+  style="
+    margin-left: 20px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: 4px;
+  "
+>
+  <hbox align="center" style="margin-bottom: 8px">
+    <label style="width: 150px">Max Concurrent AI:</label>
+    <html:input
+      type="number"
+      id="zotero-prefpane-__addonRef__-aiMaxConcurrent"
+      placeholder="5"
+      min="1"
+      max="20"
+      style="width: 60px"
+    ></html:input>
+    <label style="margin-left: 8px; font-size: 11px; color: #666"
+      >Parallel AI requests (1-20)</label
+    >
+  </hbox>
+  <hbox align="center" style="margin-bottom: 8px">
+    <checkbox
+      id="zotero-prefpane-__addonRef__-tableGenerationSound"
+      label="🔔 Sound notification on table generation complete"
+      checked="true"
+    />
+  </hbox>
+</vbox>
+
 <vbox style="margin-top: 16px">
   <html:label
     data-l10n-id="pref-help"
