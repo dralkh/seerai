@@ -184,6 +184,7 @@ Choose your preferred text extraction engine:
 - **Semantic Scholar**: Add your [API Key](https://www.semanticscholar.org/product/api) for higher rate limits and faster searches.
 - **Firecrawl**: Add [API Key](https://firecrawl.dev) to enable deep web search capabilities - local instance with ([GitHub](https://github.com/firecrawl/firecrawl)).
 - **Tavily**: Add [API Key](https://tavily.com/) for optimized search results tailored for AI agents.
+- **You.com Search API**: Add [YDC API Key](https://you.com/platform) to enable an additional web search provider (`https://api.you.com/v1/agents/search`) with optional contents extraction support.
 
 ### 4. MCP Server & API
 

@@ -306,6 +306,13 @@ function bindPrefEvents() {
     "tavilySearchLimit",
   );
 
+  // You.com settings
+  bindInput(`zotero-prefpane-${config.addonRef}-youApiKey`, "youApiKey");
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-youSearchLimit`,
+    "youSearchLimit",
+  );
+
   // Tavily search depth menulist
   const tavilyDepthSelect = doc?.querySelector(
     `#zotero-prefpane-${config.addonRef}-tavilySearchDepth`,
@@ -330,12 +337,18 @@ function bindPrefEvents() {
     const tavilySettings = doc?.querySelector(
       `#zotero-prefpane-${config.addonRef}-tavilySettings`,
     ) as HTMLElement;
+    const youSettings = doc?.querySelector(
+      `#zotero-prefpane-${config.addonRef}-youSettings`,
+    ) as HTMLElement;
 
     if (firecrawlSettings) {
       firecrawlSettings.style.display = provider === "firecrawl" ? "" : "none";
     }
     if (tavilySettings) {
       tavilySettings.style.display = provider === "tavily" ? "" : "none";
+    }
+    if (youSettings) {
+      youSettings.style.display = provider === "you" ? "" : "none";
     }
   }
 

@@ -13,10 +13,11 @@ import {
 } from "./firecrawl";
 import { tavilyService, WebSearchResult as TavilyResult } from "./tavily";
 import { nanogptWebService } from "./nanogptWeb";
+import { youSearchService } from "./youSearch";
 
 // ==================== Types ====================
 
-export type WebSearchProviderType = "firecrawl" | "tavily" | "nanogpt";
+export type WebSearchProviderType = "firecrawl" | "tavily" | "nanogpt" | "you";
 
 export interface WebSearchResult {
   url: string;
@@ -271,6 +272,43 @@ const firecrawlProvider = new FirecrawlProviderWrapper();
 const tavilyProvider = new TavilyProviderWrapper();
 const nanogptProvider = new NanogptProviderWrapper();
 
+class YouProviderWrapper implements WebSearchProvider {
+  isConfigured(): boolean {
+    return youSearchService.isConfigured();
+  }
+
+  async webSearch(query: string, limit?: number): Promise<WebSearchResult[]> {
+    return await youSearchService.webSearch(query, limit);
+  }
+
+  async scrapeUrl(url: string): Promise<WebSearchResult | null> {
+    return await youSearchService.scrapeUrl(url);
+  }
+
+  async researchSearch(): Promise<PdfDiscoveryResult | null> {
+    return null;
+  }
+
+  async searchForPdf(): Promise<PdfDiscoveryResult> {
+    return { source: "you", status: "not_found" };
+  }
+
+  getCachedPdfResult(): PdfDiscoveryResult | null | undefined {
+    return null;
+  }
+
+  setCachedPdfResult(): void {}
+  clearCache(): void {}
+  clearPdfCache(): void {}
+  clearPdfCacheForPaper(): void {}
+
+  getSearchLimit(): number {
+    return youSearchService.getSearchLimit();
+  }
+}
+
+const youProvider = new YouProviderWrapper();
+
 // ==================== Provider Selection ====================
 
 /**
@@ -283,6 +321,7 @@ export function getActiveProviderType(): WebSearchProviderType {
   ) as string;
   if (provider === "nanogpt") return "nanogpt";
   if (provider === "tavily") return "tavily";
+  if (provider === "you") return "you";
   return "firecrawl";
 }
 
@@ -293,6 +332,7 @@ export function getActiveProvider(): WebSearchProvider {
   const providerType = getActiveProviderType();
   if (providerType === "nanogpt") return nanogptProvider;
   if (providerType === "tavily") return tavilyProvider;
+  if (providerType === "you") return youProvider;
   return firecrawlProvider;
 }
 
@@ -302,6 +342,7 @@ export function getActiveProvider(): WebSearchProvider {
 export function getProvider(type: WebSearchProviderType): WebSearchProvider {
   if (type === "nanogpt") return nanogptProvider;
   if (type === "tavily") return tavilyProvider;
+  if (type === "you") return youProvider;
   return firecrawlProvider;
 }
 
@@ -312,7 +353,8 @@ export function isAnyProviderConfigured(): boolean {
   return (
     nanogptProvider.isConfigured() ||
     firecrawlProvider.isConfigured() ||
-    tavilyProvider.isConfigured()
+    tavilyProvider.isConfigured() ||
+    youProvider.isConfigured()
   );
 }
 
@@ -331,6 +373,7 @@ export function getConfiguredProviders(): WebSearchProviderType[] {
   if (nanogptProvider.isConfigured()) providers.push("nanogpt");
   if (firecrawlProvider.isConfigured()) providers.push("firecrawl");
   if (tavilyProvider.isConfigured()) providers.push("tavily");
+  if (youProvider.isConfigured()) providers.push("you");
   return providers;
 }
 
@@ -345,6 +388,8 @@ export function getProviderDisplayName(type: WebSearchProviderType): string {
       return "Firecrawl";
     case "tavily":
       return "Tavily";
+    case "you":
+      return "You.com";
     default:
       return type;
   }

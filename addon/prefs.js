@@ -33,6 +33,9 @@ pref("nanogptWebSearchDepth", "standard"); // "standard" or "deep"
 pref("tavilyApiKey", "");
 pref("tavilySearchLimit", 5);
 pref("tavilySearchDepth", "basic");
+// You.com Search preferences
+pref("youApiKey", "");
+pref("youSearchLimit", 5);
 // Agentic mode preferences
 pref("agenticMode", true);
 pref("libraryScope", "all"); // "user", "all", "group:ID", or "collection:libID:colID"
