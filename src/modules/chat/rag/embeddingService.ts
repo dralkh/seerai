@@ -104,15 +104,14 @@ export class EmbeddingService {
    * Always includes:
    *  - Content-Type
    *  - Authorization: Bearer (OpenAI standard)
-   *  - x-api-key (NanoGPT / alternative providers)
-   *  - x-seer-ai: 1 (SeerAI marker — required on all embedding requests)
+*  - x-api-key (NanoGPT / alternative providers)
    */
   private buildHeaders(apiKey: string): Record<string, string> {
     return {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
       "x-api-key": apiKey,
-      "x-seer-ai": "1",
+      
     };
   }
 
@@ -375,7 +374,7 @@ export class EmbeddingService {
         headers: {
           Authorization: `Bearer ${cfg.apiKey}`,
           "x-api-key": cfg.apiKey,
-          "x-seer-ai": "1",
+          
         },
       });
 

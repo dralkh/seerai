@@ -265,7 +265,7 @@ export class OpenAIService {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
-          "x-seer-ai": "1",
+          
         },
         body: JSON.stringify(requestBody),
         ...(signal ? { signal } : {}),
@@ -392,7 +392,7 @@ export class OpenAIService {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
-          "x-seer-ai": "1",
+          
         },
         body: JSON.stringify(requestBody),
         ...(signal ? { signal } : {}),
@@ -582,7 +582,7 @@ export class OpenAIService {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
         "x-api-key": apiKey,
-        "x-seer-ai": "1",
+        
       },
       // Send both "input" (OpenAI standard) and "text" (NanoGPT) fields.
       // Each provider uses the field it recognizes.
@@ -635,9 +635,7 @@ export class OpenAIService {
         throw new Error("TTS response missing audioUrl");
       }
       // Fetch the actual audio binary from the returned URL
-      const audioResponse = await fetch(json.audioUrl as string, {
-        headers: { "x-seer-ai": "1" },
-      });
+      const audioResponse = await fetch(json.audioUrl as string);
       if (!audioResponse.ok) {
         throw new Error(
           `Failed to fetch TTS audio from ${json.audioUrl}: ${audioResponse.status}`,
@@ -676,7 +674,7 @@ export class OpenAIService {
         headers: {
           "x-api-key": apiKey,
           Authorization: `Bearer ${apiKey}`,
-          "x-seer-ai": "1",
+          
         },
       });
 
@@ -693,9 +691,7 @@ export class OpenAIService {
       );
 
       if (data.status === "completed" && data.audioUrl) {
-        const audioRes = await fetch(data.audioUrl as string, {
-          headers: { "x-seer-ai": "1" },
-        });
+        const audioRes = await fetch(data.audioUrl as string);
         if (!audioRes.ok) {
           throw new Error(
             `Failed to fetch async TTS audio: ${audioRes.status}`,
@@ -782,7 +778,7 @@ export class OpenAIService {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
           "x-api-key": apiKey,
-          "x-seer-ai": "1",
+          
         },
         body: JSON.stringify({
           model: sttModel,
@@ -897,7 +893,7 @@ export class OpenAIService {
             "Content-Type": `multipart/form-data; boundary=${boundary}`,
             Authorization: `Bearer ${apiKey}`,
             "x-api-key": apiKey,
-            "x-seer-ai": "1",
+            
           },
           body: body,
           responseType: "json",
@@ -1047,7 +1043,7 @@ export class OpenAIService {
           "Content-Type": "application/json",
           "x-api-key": apiKey,
           Authorization: `Bearer ${apiKey}`,
-          "x-seer-ai": "1",
+          
         },
         body: JSON.stringify({ runId, model }),
       });
@@ -1168,7 +1164,7 @@ export class OpenAIService {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
         "x-api-key": apiKey,
-        "x-seer-ai": "1",
+        
       },
       body: JSON.stringify(body),
     });
@@ -1305,7 +1301,7 @@ export class OpenAIService {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
         "x-api-key": apiKey,
-        "x-seer-ai": "1",
+        
       },
       body: JSON.stringify(body),
     });
@@ -1386,7 +1382,7 @@ export class OpenAIService {
           headers: {
             "x-api-key": apiKey,
             Authorization: `Bearer ${apiKey}`,
-            "x-seer-ai": "1",
+            
           },
         });
 

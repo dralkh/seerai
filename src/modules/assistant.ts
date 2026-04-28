@@ -298,7 +298,7 @@ async function findPdfViaArxiv(arxivId?: string): Promise<string | null> {
   try {
     Zotero.debug(`[seerai] arXiv: Checking ${pdfUrl}`);
     const response = await Zotero.HTTP.request("HEAD", pdfUrl, {
-      headers: { "x-seer-ai": "1" },
+      
       timeout: 5000,
     });
     if (response.status === 200) {
@@ -324,7 +324,7 @@ async function findPdfViaPmc(pmid?: string): Promise<string | null> {
     Zotero.debug(`[seerai] PMC: Looking up PMCID for PMID ${pmid}`);
 
     const resp = await Zotero.HTTP.request("GET", idUrl, {
-      headers: { "x-seer-ai": "1" },
+      
       responseType: "json",
       timeout: 10000,
     });
@@ -358,7 +358,7 @@ async function findPdfViaBiorxiv(doi?: string): Promise<string | null> {
   try {
     Zotero.debug(`[seerai] bioRxiv: Checking ${biorxivUrl}`);
     const response = await Zotero.HTTP.request("HEAD", biorxivUrl, {
-      headers: { "x-seer-ai": "1" },
+      
       timeout: 5000,
     });
     if (response.status === 200) {
@@ -374,7 +374,7 @@ async function findPdfViaBiorxiv(doi?: string): Promise<string | null> {
   try {
     Zotero.debug(`[seerai] medRxiv: Checking ${medrxivUrl}`);
     const response = await Zotero.HTTP.request("HEAD", medrxivUrl, {
-      headers: { "x-seer-ai": "1" },
+      
       timeout: 5000,
     });
     if (response.status === 200) {
@@ -403,7 +403,7 @@ async function findPdfViaEuropePmc(
     Zotero.debug(`[seerai] EuropePMC: Searching with query ${query}`);
 
     const resp = await Zotero.HTTP.request("GET", url, {
-      headers: { "x-seer-ai": "1" },
+      
       responseType: "json",
       timeout: 10000,
     });
@@ -23541,7 +23541,7 @@ Rules:
                 if (img.url) {
                   // Download from URL
                   const resp = await fetch(img.url, {
-                    headers: { "x-seer-ai": "1" },
+                    
                   });
                   const arrayBuf = await resp.arrayBuffer();
                   await IOUtils.write(fp.file, new Uint8Array(arrayBuf));
@@ -24045,7 +24045,7 @@ Rules:
               const res = await fp.show();
               if (res === fp.returnOK || res === fp.returnReplace) {
                 const resp = await fetch(result.videoUrl!, {
-                  headers: { "x-seer-ai": "1" },
+                  
                 });
                 const arrayBuf = await resp.arrayBuffer();
                 await IOUtils.write(fp.file, new Uint8Array(arrayBuf));

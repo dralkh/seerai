@@ -28,16 +28,6 @@
 </p>
 
 <p align="center">
-  <a href="https://nano-gpt.com/r/RwCEN6fR">
-    <img src="https://ik.imagekit.io/nanogpt/og-image.png?tr=w-600" alt="Powered by NanoGPT" width="600" />
-  </a>
-</p>
-
-<p align="center">
-  <b>Powered by <a href="https://nano-gpt.com/r/RwCEN6fR">NanoGPT</a></b> — Access 300+ AI models with flexible pay-as-you-go or subscription plans.
-</p>
-
-<p align="center">
   <a href="https://github.com/dralkh/seerai/releases/latest/download/seerai.xpi">
     <img src="https://img.shields.io/badge/Install-Download%20.xpi-brightgreen?style=for-the-badge&logo=zotero" alt="Download seerai.xpi" />
   </a>
@@ -124,7 +114,6 @@
 
 - **Persistent API Keys**: API keys are saved and persisted across all configured providers.
 - **Model Presets**: Pre-configured settings for popular providers:
-  - [NanoGPT](https://nano-gpt.com/r/RwCEN6fR) (300+ models, pay-as-you-go or subscription)
   - OpenAI (GPT-5, o3)
   - Anthropic (Claude Sonnet 4.5)
   - Google (Gemini 3 Pro)
@@ -134,6 +123,7 @@
     - 24-32g Vram - gpt-oss-20b
     - 48-64g Vram - QwQ-32B
     - 96-128g Vram - Qwen3-Next-80B-A3B-Instruct
+
 - **Smart Rate Limiting**: Per-model configuration for concurrency, RPM, and TPM to prevent provider errors.
 - **Per-Conversation Models**: Switch models dynamically based on the task complexity.
 
@@ -175,7 +165,6 @@ Go to **Zotero → Settings → seerai** to configure your AI providers and serv
 
 Use the **Add Configuration** button to set up your AI models.
 
-- **[NanoGPT](https://nano-gpt.com/r/RwCEN6fR)** (Default): Pre-selected when adding a new model. Access 300+ AI models with flexible pricing — pay-as-you-go or subscription plans. Supports Apple Pay, Google Pay, credit card, and crypto. The model list is fetched automatically.
 - **Presets**: Select from built-in presets (OpenAI, Anthropic, Ollama, etc.) for quick setup.
 - **Custom**: Manually configure API URL, Key, and Model ID for any OpenAI-compatible provider.
 - **Default**: Set a preferred model as your default for new conversations.
@@ -280,7 +269,7 @@ seerai/
 │   │   │   └── rag/       # RAG pipeline (chunker, embeddings, retrieval, vector store)
 │   │   ├── assistant.ts   # Main assistant logic
 │   │   ├── firecrawl.ts   # Firecrawl integration
-│   │   ├── nanogptWeb.ts  # NanoGPT web integration
+│   │   ├── tavily.ts      # Tavily search integration
 │   │   ├── ocr.ts         # OCR implementation
 │   │   ├── openai.ts      # LLM & multimodal client
 │   │   ├── semanticScholar.ts # Semantic Scholar integration
@@ -318,7 +307,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-- [NanoGPT](https://nano-gpt.com/r/RwCEN6fR) — Partner
 - [Zotero](https://www.zotero.org)
 - [Mistral AI](https://mistral.ai)
 - [Semantic Scholar](https://www.semanticscholar.org)

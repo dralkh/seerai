@@ -24,7 +24,7 @@ pref(
 pref("firecrawlSearchLimit", 3);
 pref("firecrawlMaxConcurrent", 3);
 // Web search provider selection
-pref("webSearchProvider", "nanogpt"); // "nanogpt", "firecrawl", or "tavily"
+pref("webSearchProvider", "firecrawl"); // "firecrawl", or "tavily"
 // NanoGPT web search preferences
 pref("nanogptWebApiKey", ""); // Dedicated key, or falls back to active model config's NanoGPT key
 pref("nanogptWebSearchLimit", 5);
