@@ -126,7 +126,7 @@ class TavilyService {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        
+
         ...(options.headers || {}),
       },
     });

@@ -298,7 +298,6 @@ async function findPdfViaArxiv(arxivId?: string): Promise<string | null> {
   try {
     Zotero.debug(`[seerai] arXiv: Checking ${pdfUrl}`);
     const response = await Zotero.HTTP.request("HEAD", pdfUrl, {
-      
       timeout: 5000,
     });
     if (response.status === 200) {
@@ -324,7 +323,6 @@ async function findPdfViaPmc(pmid?: string): Promise<string | null> {
     Zotero.debug(`[seerai] PMC: Looking up PMCID for PMID ${pmid}`);
 
     const resp = await Zotero.HTTP.request("GET", idUrl, {
-      
       responseType: "json",
       timeout: 10000,
     });
@@ -358,7 +356,6 @@ async function findPdfViaBiorxiv(doi?: string): Promise<string | null> {
   try {
     Zotero.debug(`[seerai] bioRxiv: Checking ${biorxivUrl}`);
     const response = await Zotero.HTTP.request("HEAD", biorxivUrl, {
-      
       timeout: 5000,
     });
     if (response.status === 200) {
@@ -374,7 +371,6 @@ async function findPdfViaBiorxiv(doi?: string): Promise<string | null> {
   try {
     Zotero.debug(`[seerai] medRxiv: Checking ${medrxivUrl}`);
     const response = await Zotero.HTTP.request("HEAD", medrxivUrl, {
-      
       timeout: 5000,
     });
     if (response.status === 200) {
@@ -403,7 +399,6 @@ async function findPdfViaEuropePmc(
     Zotero.debug(`[seerai] EuropePMC: Searching with query ${query}`);
 
     const resp = await Zotero.HTTP.request("GET", url, {
-      
       responseType: "json",
       timeout: 10000,
     });
@@ -14208,28 +14203,8 @@ You MUST call the generate_tags function.`;
     item: Zotero.Item,
   ): Promise<void> {
     try {
-      // Reset to default config with a new ID
       const tableStore = getTableStore();
-      const now = new Date().toISOString();
-      currentTableConfig = {
-        id: `table_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name: "Default Table",
-        columns: [...defaultColumns],
-        sortBy: "title",
-        sortOrder: "asc",
-        filterQuery: "",
-        responseLength: undefined, // Default to provider default
-        filterLibraryId: null,
-        filterCollectionId: null,
-        pageSize: 25,
-        currentPage: 1,
-        addedPaperIds: [],
-        createdAt: now,
-        updatedAt: now,
-      };
-      await tableStore.saveConfig(currentTableConfig);
-
-      // Re-render
+      currentTableConfig = await tableStore.createFreshConfig();
       if (currentContainer && currentItem) {
         this.renderInterface(currentContainer, currentItem);
       }
@@ -23540,9 +23515,7 @@ Rules:
               if (res === fp.returnOK || res === fp.returnReplace) {
                 if (img.url) {
                   // Download from URL
-                  const resp = await fetch(img.url, {
-                    
-                  });
+                  const resp = await fetch(img.url, {});
                   const arrayBuf = await resp.arrayBuffer();
                   await IOUtils.write(fp.file, new Uint8Array(arrayBuf));
                 } else if (img.b64_json) {
@@ -24044,9 +24017,7 @@ Rules:
               fp.appendFilter("WebM Video", "*.webm");
               const res = await fp.show();
               if (res === fp.returnOK || res === fp.returnReplace) {
-                const resp = await fetch(result.videoUrl!, {
-                  
-                });
+                const resp = await fetch(result.videoUrl!, {});
                 const arrayBuf = await resp.arrayBuffer();
                 await IOUtils.write(fp.file, new Uint8Array(arrayBuf));
                 Zotero.debug(`[seerai] Video saved to: ${fp.file}`);
@@ -27079,8 +27050,13 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
    * Add items to the currently active table (if any)
    */
   static async addItemsToCurrentTable(items: Zotero.Item[]): Promise<void> {
+    // Reload from disk to ensure we have the latest config
+    // (tools may have modified the config on disk bypassing the in-memory variable)
+    const tableStore = getTableStore();
+    currentTableConfig = await tableStore.loadConfig();
+
     if (!currentTableConfig) {
-      new ztoolkit.ProgressWindow("DataLab")
+      new ztoolkit.ProgressWindow("SeerAI")
         .createLine({
           text: "No active table found. Please open the Assistant Table tab first.",
           progress: 100,
@@ -27096,9 +27072,18 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
       .filter((id) => !currentTableConfig!.addedPaperIds.includes(id));
 
     if (newIds.length === 0) {
-      new ztoolkit.ProgressWindow("DataLab")
+      const totalItems = currentTableConfig!.addedPaperIds.length;
+      const pageSize = currentTableConfig!.pageSize || 25;
+      const totalPages = Math.ceil(totalItems / pageSize);
+      Zotero.debug(
+        `[seerai] addItemsToCurrentTable: All ${items.length} selected already in table (${totalItems} total, ${totalPages} page(s))`,
+      );
+      new ztoolkit.ProgressWindow("SeerAI")
         .createLine({
-          text: "Selected items are already in the table.",
+          text:
+            totalItems > pageSize
+              ? `Selected items are already in the table. Navigate to page ${totalPages} or check filtering.`
+              : "Selected items are already in the table.",
           progress: 100,
         })
         .show();
@@ -27106,7 +27091,6 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
     }
 
     currentTableConfig.addedPaperIds.push(...newIds);
-    const tableStore = getTableStore();
     await tableStore.saveConfig(currentTableConfig);
 
     // Force immediate refresh if table tab is visible
@@ -27114,7 +27098,7 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
       await this.forceRefreshTable();
     }
 
-    new ztoolkit.ProgressWindow("DataLab")
+    new ztoolkit.ProgressWindow("SeerAI")
       .createLine({
         text: `Added ${newIds.length} items to table`,
         progress: 100,
@@ -27128,6 +27112,9 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
   static async removeItemsFromCurrentTable(
     items: Zotero.Item[],
   ): Promise<void> {
+    const tableStore = getTableStore();
+    currentTableConfig = await tableStore.loadConfig();
+
     if (!currentTableConfig) return;
 
     const idsToRemove = items.map((item) => item.id);
@@ -27138,7 +27125,7 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
     );
 
     if (currentTableConfig.addedPaperIds.length === initialLength) {
-      new ztoolkit.ProgressWindow("DataLab")
+      new ztoolkit.ProgressWindow("SeerAI")
         .createLine({
           text: "Selected items are not in the table.",
           progress: 100,
@@ -27154,7 +27141,6 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
       }
     });
 
-    const tableStore = getTableStore();
     await tableStore.saveConfig(currentTableConfig);
 
     // Force immediate refresh if table tab is visible
@@ -27162,7 +27148,7 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
       await this.forceRefreshTable();
     }
 
-    new ztoolkit.ProgressWindow("DataLab")
+    new ztoolkit.ProgressWindow("SeerAI")
       .createLine({
         text: `Removed items from table`,
         progress: 100,

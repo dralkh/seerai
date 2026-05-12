@@ -265,7 +265,6 @@ export class OpenAIService {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
-          
         },
         body: JSON.stringify(requestBody),
         ...(signal ? { signal } : {}),
@@ -392,7 +391,6 @@ export class OpenAIService {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
-          
         },
         body: JSON.stringify(requestBody),
         ...(signal ? { signal } : {}),
@@ -582,7 +580,6 @@ export class OpenAIService {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
         "x-api-key": apiKey,
-        
       },
       // Send both "input" (OpenAI standard) and "text" (NanoGPT) fields.
       // Each provider uses the field it recognizes.
@@ -674,7 +671,6 @@ export class OpenAIService {
         headers: {
           "x-api-key": apiKey,
           Authorization: `Bearer ${apiKey}`,
-          
         },
       });
 
@@ -778,7 +774,6 @@ export class OpenAIService {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
           "x-api-key": apiKey,
-          
         },
         body: JSON.stringify({
           model: sttModel,
@@ -893,7 +888,6 @@ export class OpenAIService {
             "Content-Type": `multipart/form-data; boundary=${boundary}`,
             Authorization: `Bearer ${apiKey}`,
             "x-api-key": apiKey,
-            
           },
           body: body,
           responseType: "json",
@@ -1043,7 +1037,6 @@ export class OpenAIService {
           "Content-Type": "application/json",
           "x-api-key": apiKey,
           Authorization: `Bearer ${apiKey}`,
-          
         },
         body: JSON.stringify({ runId, model }),
       });
@@ -1164,7 +1157,6 @@ export class OpenAIService {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
         "x-api-key": apiKey,
-        
       },
       body: JSON.stringify(body),
     });
@@ -1301,7 +1293,6 @@ export class OpenAIService {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
         "x-api-key": apiKey,
-        
       },
       body: JSON.stringify(body),
     });
@@ -1382,7 +1373,6 @@ export class OpenAIService {
           headers: {
             "x-api-key": apiKey,
             Authorization: `Bearer ${apiKey}`,
-            
           },
         });
 

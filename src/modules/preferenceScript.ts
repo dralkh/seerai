@@ -990,8 +990,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
         if (inputs.model) inputs.model.value = preset.model;
         if (inputs.apiKey)
           inputs.apiKey.placeholder = preset.placeholder || "API Key";
-        if (inputs.name && !inputs.name.value)
-          inputs.name.value = preset.name;
+        if (inputs.name && !inputs.name.value) inputs.name.value = preset.name;
       }
     });
 

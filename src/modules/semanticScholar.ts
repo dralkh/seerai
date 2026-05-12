@@ -173,7 +173,7 @@ class SemanticScholarService {
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      
+
       ...((options.headers as Record<string, string>) || {}),
     };
 
@@ -204,9 +204,7 @@ class SemanticScholarService {
     this.lastAutocompleteTime = Date.now();
 
     const apiKey = this.getApiKey();
-    const headers: Record<string, string> = {
-      
-    };
+    const headers: Record<string, string> = {};
 
     if (apiKey) {
       headers["x-api-key"] = apiKey;

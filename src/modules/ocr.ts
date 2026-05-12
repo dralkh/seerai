@@ -31,7 +31,6 @@ export class OcrService {
   private getAuthHeaders(): Record<string, string> {
     return {
       "X-Api-Key": this.apiKey,
-      
     };
   }
 
@@ -347,7 +346,6 @@ export class OcrService {
           {
             headers: {
               "Content-Type": "application/json",
-              
             },
             body: JSON.stringify(jsonBody),
             responseType: "json",
@@ -441,7 +439,6 @@ export class OcrService {
             headers: {
               Authorization: `Bearer ${mistralApiKey}`,
               "Content-Type": `multipart/form-data; boundary=${uploadBoundary}`,
-              
             },
             body: uploadBody,
             responseType: "json",
@@ -473,7 +470,6 @@ export class OcrService {
             headers: {
               Authorization: `Bearer ${mistralApiKey}`,
               Accept: "application/json",
-              
             },
             responseType: "json",
           },
@@ -504,7 +500,6 @@ export class OcrService {
             headers: {
               Authorization: `Bearer ${mistralApiKey}`,
               "Content-Type": "application/json",
-              
             },
             body: JSON.stringify({
               model: "mistral-ocr-latest",
@@ -570,7 +565,6 @@ export class OcrService {
             {
               headers: {
                 Authorization: `Bearer ${mistralApiKey}`,
-                
               },
             },
           );
@@ -628,7 +622,6 @@ export class OcrService {
             headers: {
               "X-Api-Key": this.apiKey,
               "Content-Type": contentType,
-              
             },
             body: body,
             responseType: "json",

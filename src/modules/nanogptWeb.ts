@@ -175,7 +175,6 @@ class NanogptWebService {
         "Content-Type": "application/json",
         "x-api-key": apiKey,
         Authorization: `Bearer ${apiKey}`,
-        
       },
       body: JSON.stringify(body),
     });
