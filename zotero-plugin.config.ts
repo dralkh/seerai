@@ -1,5 +1,13 @@
 import { defineConfig } from "zotero-plugin-scaffold";
 import pkg from "./package.json";
+import path from "path";
+
+const ISOGIT_ESM = path.resolve(
+  __dirname,
+  "node_modules",
+  "isomorphic-git",
+  "index.js",
+);
 
 export default defineConfig({
   source: ["src", "addon"],
@@ -35,6 +43,16 @@ export default defineConfig({
         bundle: true,
         target: "firefox128",
         outfile: `.scaffold/build/addon/content/scripts/${pkg.config.addonRef}.js`,
+        plugins: [
+          {
+            name: "isomorphic-git-esm",
+            setup(build) {
+              build.onResolve({ filter: /^isomorphic-git$/ }, () => ({
+                path: ISOGIT_ESM,
+              }));
+            },
+          },
+        ],
       },
     ],
   },

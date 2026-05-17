@@ -4,11 +4,14 @@
  */
 
 import { ToolDefinition, TOOL_NAMES } from "./toolTypes";
+import { workspaceToolDefinitions } from "../workspace/tools";
 
 /**
  * All available tools for the agent
  */
 export const agentTools: ToolDefinition[] = [
+  ...workspaceToolDefinitions,
+
   // ==================== Search & Discovery ====================
   {
     type: "function",
@@ -480,4 +483,29 @@ export const agentTools: ToolDefinition[] = [
  */
 export function getToolByName(name: string): ToolDefinition | undefined {
   return agentTools.find((t) => t.function.name === name);
+}
+
+/**
+ * Get agent tools filtered by permission settings.
+ * Tools with "deny" permission are excluded so the LLM never sees them.
+ * This prevents wasted turns where the LLM calls a denied tool and gets an error.
+ */
+export function getFilteredAgentTools(): ToolDefinition[] {
+  let permissions: Record<string, string> = {};
+  try {
+    const prefStr = Zotero.Prefs.get(
+      "extensions.seerai.tool_permissions",
+    ) as string;
+    if (prefStr) {
+      permissions = JSON.parse(prefStr);
+    }
+  } catch {
+    // If prefs can't be read, allow all
+  }
+
+  return agentTools.filter((tool) => {
+    const name = tool.function.name;
+    const perm = permissions[name] || permissions["*"] || "allow";
+    return perm !== "deny";
+  });
 }

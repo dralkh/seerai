@@ -59,13 +59,12 @@ async function executeAddToContext(
       let displayName: string;
 
       switch (item.type) {
-        case "paper":
+        case "paper": {
           if (!item.id) {
             Zotero.debug(`[seerai] add_to_context: paper requires id`);
             continue;
           }
           id = item.id;
-          // Get title from Zotero
           const zItem = Zotero.Items.get(item.id as number);
           if (!zItem) {
             Zotero.debug(`[seerai] add_to_context: item ${item.id} not found`);
@@ -74,6 +73,7 @@ async function executeAddToContext(
           displayName = (zItem.getField("title") ||
             `Paper ${item.id}`) as string;
           break;
+        }
 
         case "tag":
         case "author":

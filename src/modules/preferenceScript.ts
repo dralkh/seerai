@@ -447,7 +447,7 @@ function initAdvancedDataManagementUI() {
   if (!exportBtn || !importBtn) return;
 
   // Use the API exposed in index.ts
-  // @ts-ignore
+  // @ts-expect-error - Zotero.SeerAI.api not in types
   const { exportAllData, importAllData } = Zotero.SeerAI.api.ConfigManager;
 
   exportBtn.addEventListener("command", async () => {
@@ -468,7 +468,6 @@ function initAdvancedDataManagementUI() {
 
       const res = await new Promise((resolve) => fp.open(resolve));
       if (res !== Ci.nsIFilePicker.returnCancel && fp.file) {
-        // @ts-ignore
         await IOUtils.writeUTF8(fp.file.path, json);
         Zotero.debug(`[seerai] Exported config to ${fp.file.path}`);
       }
@@ -492,7 +491,6 @@ function initAdvancedDataManagementUI() {
 
       const res = await new Promise((resolve) => fp.open(resolve));
       if (res !== Ci.nsIFilePicker.returnCancel && fp.file) {
-        // @ts-ignore
         const json = await IOUtils.readUTF8(fp.file.path);
         const data = JSON.parse(json);
 
@@ -953,9 +951,6 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   const isCurrentProviderNanoGpt = !isEdit; // defaults to NanoGPT for new configs
 
   // Hoisted form element references for the preset change handler (assigned after creation)
-  let rlTypeSelect: HTMLSelectElement;
-  let rlValueInput: HTMLInputElement;
-  let reSelect: HTMLSelectElement;
   let contextLengthInput: HTMLInputElement;
 
   if (!isEdit) {
@@ -1088,7 +1083,10 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   `;
 
   // Type Selector
-  rlTypeSelect = doc.createElementNS(HTML_NS, "select") as HTMLSelectElement;
+  const rlTypeSelect = doc.createElementNS(
+    HTML_NS,
+    "select",
+  ) as HTMLSelectElement;
   rlTypeSelect.style.cssText = selectStyle;
   rlTypeSelect.style.marginBottom = "0";
   rlTypeSelect.style.flex = "1";
@@ -1111,7 +1109,10 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   rlContainer.appendChild(rlTypeSelect);
 
   // Value Input
-  rlValueInput = doc.createElementNS(HTML_NS, "input") as HTMLInputElement;
+  const rlValueInput = doc.createElementNS(
+    HTML_NS,
+    "input",
+  ) as HTMLInputElement;
   rlValueInput.type = "number";
   rlValueInput.min = "1";
   rlValueInput.placeholder = "Limit";
@@ -1136,7 +1137,7 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
   modal.appendChild(rateLimitSection);
 
   // --- Reasoning Effort (created here, appended into the chat capability row below) ---
-  reSelect = doc.createElementNS(HTML_NS, "select") as HTMLSelectElement;
+  const reSelect = doc.createElementNS(HTML_NS, "select") as HTMLSelectElement;
   reSelect.style.cssText = `
     flex: 0.5;
     padding: 7px 10px;

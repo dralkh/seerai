@@ -250,9 +250,160 @@ const webParams = z.discriminatedUnion("action", [
   }),
 ]);
 
+// ==================== Workspace Tool Parameter Schemas ====================
+
+const workspaceReadFileParams = z.object({
+  path: z.string().describe("File path relative to workspace root"),
+  offset: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Start reading at line (1-indexed)"),
+  limit: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Maximum lines to read"),
+});
+
+const workspaceWriteFileParams = z.object({
+  path: z.string().describe("File path relative to workspace root"),
+  content: z.string().describe("Full content to write"),
+  message: z.string().optional().describe("Description of the change"),
+});
+
+const workspaceEditFileParams = z.object({
+  path: z.string().describe("File path relative to workspace root"),
+  oldString: z.string().describe("Exact text to replace"),
+  newString: z.string().describe("Text to replace with"),
+  replaceAll: z
+    .boolean()
+    .default(false)
+    .optional()
+    .describe("Replace all occurrences"),
+  message: z.string().optional().describe("Description of the change"),
+});
+
+const workspaceGlobParams = z.object({
+  pattern: z.string().describe("Glob pattern (e.g. '**/*.ts', '*.json')"),
+  path: z.string().optional().describe("Directory to search within"),
+});
+
+const workspaceGrepParams = z.object({
+  pattern: z.string().describe("Regex pattern to search for"),
+  include: z.string().optional().describe("File pattern filter (e.g. '*.ts')"),
+  path: z.string().optional().describe("Directory to search within"),
+});
+
+const workspaceQuestionParams = z.object({
+  questions: z
+    .array(
+      z.object({
+        question: z.string().describe("The complete question text"),
+        header: z.string().max(30).describe("Very short label (max 30 chars)"),
+        options: z
+          .array(
+            z.object({
+              label: z.string().describe("Display text (1-5 words, concise)"),
+              description: z.string().describe("Explanation of choice"),
+            }),
+          )
+          .describe("Available choices"),
+        multiple: z
+          .boolean()
+          .default(false)
+          .optional()
+          .describe("Allow selecting multiple choices"),
+      }),
+    )
+    .describe("Questions to ask the user"),
+});
+
+const workspaceBashParams = z.object({
+  command: z.string().describe("The bash command to execute"),
+  workdir: z
+    .string()
+    .optional()
+    .describe("Working directory relative to workspace root"),
+  description: z
+    .string()
+    .describe("Clear, concise description of what this command does"),
+});
+
+const workspaceDiffParams = z.object({
+  path: z.string().describe("File path relative to workspace root"),
+  previous: z
+    .boolean()
+    .default(true)
+    .optional()
+    .describe("Compare with previous version"),
+  versionId: z.string().optional().describe("Specific version ID to compare"),
+});
+
+const workspaceLogParams = z.object({
+  path: z.string().describe("File path relative to workspace root"),
+  limit: z
+    .number()
+    .int()
+    .positive()
+    .default(20)
+    .optional()
+    .describe("Max history entries"),
+});
+
+// ==================== TODO Tool Parameter Schemas ====================
+
+const todoWriteParams = z.object({
+  todos: z
+    .array(
+      z.object({
+        id: z.string().describe("Unique identifier for this todo item"),
+        content: z.string().describe("Brief description of the task"),
+        status: z
+          .enum(["pending", "in_progress", "completed", "cancelled"])
+          .describe("Current status of the task"),
+        priority: z
+          .enum(["high", "medium", "low"])
+          .describe("Priority level of the task"),
+      }),
+    )
+    .describe("The complete todo list"),
+});
+
+const todoReadParams = z.object({});
+
+const taskCompleteParams = z.object({
+  summary: z.string().describe("Brief summary of what was accomplished"),
+});
+
 // ==================== Tool Definitions ====================
 
 export const TOOL_DEFINITIONS = [
+  // ==================== TODO Tools ====================
+  {
+    name: "todowrite",
+    description:
+      "Create or update a structured task list (TODO list) for the current session. " +
+      "Use this at the start of multi-step tasks to plan your work, then update statuses as you progress. " +
+      "Do NOT call 'task_complete' until ALL todos are either completed or cancelled.",
+    inputSchema: todoWriteParams,
+  },
+  {
+    name: "todoread",
+    description:
+      "Read the current TODO list for this session. Call this when you lose track of what remains to be done or after context compaction to recover your task state.",
+    inputSchema: todoReadParams,
+  },
+  {
+    name: "task_complete",
+    description:
+      "Signal that the current task is fully complete. Call this ONLY when ALL requested work has been DONE. " +
+      "You MUST call this tool before producing final answer text. If any work remains, do NOT call this tool.",
+    inputSchema: taskCompleteParams,
+  },
+
   // ==================== Consolidated Tools ====================
   {
     name: "context",
@@ -326,6 +477,60 @@ export const TOOL_DEFINITIONS = [
     inputSchema: z.object({
       item_id: z.number().describe("Zotero item ID to generate tags for"),
     }),
+  },
+
+  // ==================== Workspace Tools ====================
+  {
+    name: "workspace_read_file",
+    description:
+      "Read a file from the workspace. Returns the file content and metadata.",
+    inputSchema: workspaceReadFileParams,
+  },
+  {
+    name: "workspace_write_file",
+    description:
+      "Write a file to the workspace. Creates the file if it does not exist, overwrites if it does.",
+    inputSchema: workspaceWriteFileParams,
+  },
+  {
+    name: "workspace_edit_file",
+    description:
+      "Edit a file in the workspace by replacing an exact string match with new content.",
+    inputSchema: workspaceEditFileParams,
+  },
+  {
+    name: "workspace_glob",
+    description:
+      "Find files in the workspace matching a glob pattern (e.g. '**/*.ts', '*.json').",
+    inputSchema: workspaceGlobParams,
+  },
+  {
+    name: "workspace_grep",
+    description: "Search for a regex pattern across files in the workspace.",
+    inputSchema: workspaceGrepParams,
+  },
+  {
+    name: "workspace_question",
+    description:
+      "Ask the user one or more questions during execution. Returns the user's selected answers. Use when you need clarification, decisions, or preferences to proceed with the task.",
+    inputSchema: workspaceQuestionParams,
+  },
+  {
+    name: "workspace_bash",
+    description:
+      "Request execution of a bash command. In the Zotero context, bash commands cannot be executed directly - this tool records the command and prompts the user to run it manually. Use sparingly and prefer workspace file tools for file operations.",
+    inputSchema: workspaceBashParams,
+  },
+  {
+    name: "workspace_diff",
+    description:
+      "Show the diff (changes) for a workspace file between versions.",
+    inputSchema: workspaceDiffParams,
+  },
+  {
+    name: "workspace_log",
+    description: "Show version history for a workspace file.",
+    inputSchema: workspaceLogParams,
   },
 ];
 

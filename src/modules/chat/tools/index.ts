@@ -17,7 +17,11 @@ export {
 } from "./schemas";
 
 // Tool definitions
-export { agentTools, getToolByName } from "./toolDefinitions";
+export {
+  agentTools,
+  getToolByName,
+  getFilteredAgentTools,
+} from "./toolDefinitions";
 
 // Tool executor
 export {
@@ -42,3 +46,8 @@ export { executeCollection } from "./collectionTool";
 export { executeWeb } from "./webTool";
 export { executeRelatedPapers } from "./citationTool";
 export { executeGenerateItemTags } from "./tagTool";
+export { executeTodoWrite, executeTodoRead, detectPlanNeed } from "./todoTool";
+export {
+  executeWorkspaceTool,
+  workspaceToolDefinitions,
+} from "../workspace/tools";

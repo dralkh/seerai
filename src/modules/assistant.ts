@@ -7,6 +7,8 @@ import {
   ToolDefinition,
 } from "./openai";
 import { config } from "../../package.json";
+
+const HTML_NS = "http://www.w3.org/1999/xhtml";
 import {
   getChatStateManager,
   resetChatStateManager,
@@ -77,7 +79,12 @@ import {
   TaskStats,
 } from "../utils/concurrentRunner";
 // Prompt Library & Placeholder System imports
-import { PromptTemplate, loadPrompts } from "./chat/promptLibrary";
+import {
+  PromptTemplate,
+  loadPrompts,
+  getPromptsByCategory,
+  addPrompt,
+} from "./chat/promptLibrary";
 import { showPromptPicker } from "./chat/ui/promptPicker";
 import {
   initPlaceholderAutocomplete,
@@ -102,8 +109,11 @@ import {
   AgentUIObserver,
   createToolExecutionUI,
   createToolProcessUI,
+  createQuestionPanel,
 } from "./chat/agenticChat";
 import { ToolResult } from "./chat/tools/toolTypes";
+import { getFilteredAgentTools } from "./chat/tools/toolDefinitions";
+import { getAgentConfigFromPrefs } from "./chat/tools";
 import { DetachedWindowManager } from "./ui/windowManager";
 import {
   retrieveContext,
@@ -113,6 +123,14 @@ import {
 } from "./chat/rag/retrievalEngine";
 import { getEmbeddingService } from "./chat/rag/embeddingService";
 import type { RAGProgressEvent } from "./chat/rag/types";
+import {
+  createWorkspaceSidebar,
+  refreshWorkspaceSidebar,
+  WorkspaceEditorManager,
+  createIconButton,
+} from "./chat/workspace";
+import { getWorkspaceStore } from "./chat/workspace/store";
+import { WORKSPACE_SYSTEM_PROMPT } from "./chat/workspace/tools";
 
 // Debounce timer for autocomplete
 const autocompleteTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -158,6 +176,9 @@ interface AgentSession {
   contentDiv: HTMLElement | null;
   toolContainer: HTMLElement | null; // Keeps track of the tool list container for direct access
   isToolDetailsOpen: boolean; // Persist open/closed state of tool details
+  currentTextBlock: HTMLElement | null; // Text block for current turn (interleaved with tool cards)
+  turnTextSoFar: string; // Accumulated text for the current turn block
+  previousTurnsTextLength: number; // Total text length rendered in previous turns
   toolProcessState?: {
     container: HTMLElement;
     setThinking: () => void;
@@ -165,15 +186,175 @@ interface AgentSession {
     setCompleted: (count: number, toolCount?: number) => void;
     updateProgress: (count: number, toolCount?: number) => void;
     setFailed: (error: string) => void;
+    updateStats: (stats: {
+      turns: number;
+      totalTools: number;
+      estimatedTokens: number;
+      completedTodos: number;
+      totalTodos: number;
+      lastToolName: string;
+      lastToolSummary: string;
+      isThinking: boolean;
+    }) => void;
   };
+  completedTodos: number;
+  totalTodos: number;
+  lastToolName: string;
+  lastToolSummary: string;
+  cumulativeTokens: number;
 }
 
 let activeAgentSession: AgentSession | null = null;
+
+/**
+ * Build tool usage instruction sections for the system prompt,
+ * conditionally excluding sections whose tools are denied.
+ */
+function buildToolPromptSections(): string {
+  const availableTools = new Set(
+    getFilteredAgentTools().map((t) => t.function.name),
+  );
+
+  const has = (name: string) => availableTools.has(name);
+  const sections: string[] = [];
+
+  if (has("table")) {
+    sections.push(`Table Management (use the 'table' tool with the 'action' parameter):
+- table({ action: "list" }) — list all existing tables
+- table({ action: "create", name: "...", paper_ids: [...] }) — create a new analysis table with optional papers
+- table({ action: "add_papers", table_id: "...", paper_ids: [...] }) — add papers to an existing table
+- table({ action: "add_column", table_id: "...", column_name: "...", ai_prompt: "..." }) — add an AI-powered analysis column (e.g., "Methodology", "Result Summary")
+- table({ action: "generate", table_id: "...", column_id?: "..." }) — trigger AI generation of column data. Only call AFTER adding all desired columns.
+- table({ action: "read", table_id: "...", include_data: true }) — read table contents with generated data`);
+  }
+
+  if (has("collection")) {
+    sections.push(`Collection Management (use the 'collection' tool with the 'action' parameter):
+- collection({ action: "find", name: "..." }) — find collections by name
+- collection({ action: "create", name: "...", parent_id?: ... }) — create a new collection/subfolder
+- collection({ action: "list", collection_id: ... }) — browse contents of a collection
+- collection({ action: "add_item", collection_id: ..., item_ids: [...] }) — add items to a collection
+- collection({ action: "remove_item", collection_id: ..., item_ids: [...] }) — remove items from a collection`);
+  }
+
+  if (has("note")) {
+    sections.push(`Notes (use the 'note' tool with the 'action' parameter):
+- note({ action: "create", title: "...", content: "...", parent_item_id?: ..., collection_id?: ... }) — create a new note
+- note({ action: "edit", note_id: ..., operations: [...] }) — edit an existing note`);
+  }
+
+  const libraryTools = [
+    has("search_library"),
+    has("search_external"),
+    has("import_paper"),
+    has("get_item_metadata"),
+    has("read_item_content"),
+    has("generate_item_tags"),
+  ];
+  if (libraryTools.some(Boolean)) {
+    const lines: string[] = ["Research & Paper Discovery:"];
+    if (has("search_library"))
+      lines.push(
+        "1. Use 'search_library' to find papers already in the user's Zotero library.",
+      );
+    if (has("search_external"))
+      lines.push(
+        "2. Use 'search_external' to find new papers on Semantic Scholar.",
+      );
+    if (has("import_paper"))
+      lines.push(
+        "3. Use 'import_paper' to bring a paper into Zotero. Set 'trigger_ocr: true' for immediate PDF text extraction.",
+      );
+    if (has("get_item_metadata"))
+      lines.push(
+        "4. Use 'get_item_metadata' to get detailed bibliographic info for a specific item.",
+      );
+    if (has("read_item_content"))
+      lines.push(
+        "5. Use 'read_item_content' with 'trigger_ocr: true' to extract text from PDFs for quantitative analysis.",
+      );
+    if (has("generate_item_tags"))
+      lines.push(
+        "6. Use 'generate_item_tags' to auto-tag items based on their content.",
+      );
+    sections.push(lines.join("\n"));
+  }
+
+  return sections.length > 0 ? "\n" + sections.join("\n\n") : "";
+}
+
+/**
+ * Build a tree-formatted listing of workspace files for the system prompt.
+ * This lets the agent know what files already exist without calling workspace_glob.
+ */
+async function buildWorkspaceTreePrompt(): Promise<string> {
+  try {
+    const store = getWorkspaceStore();
+    let entries = await store.listFileTree();
+    if (!entries || entries.length === 0) {
+      const flat = await store.listFiles();
+      entries = flat
+        .filter((f) => !f.path.includes("\0"))
+        .map((f) => ({
+          path: f.path,
+          name: f.name,
+          isDirectory: f.isDirectory,
+          extension: f.extension,
+          status: f.status,
+        }));
+    }
+
+    if (!entries || entries.length === 0) return "";
+
+    const SKIP_DIRS = new Set([".git", ".agent"]);
+    const filtered = entries.filter((e) => !SKIP_DIRS.has(e.name));
+
+    if (filtered.length === 0) return "";
+
+    function formatTree(
+      items: typeof entries,
+      prefix: string,
+      isLast: boolean[],
+    ): string {
+      let result = "";
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const last = i === items.length - 1;
+        const connector = last ? "\u2514\u2500\u2500 " : "\u251C\u2500\u2500 ";
+        const name = item.isDirectory ? `${item.name}/` : item.name;
+
+        result += prefix + connector + name + "\n";
+
+        if (item.isDirectory && item.children && item.children.length > 0) {
+          const childPrefix = prefix + (last ? "    " : "\u2502   ");
+          const childLast: boolean[] = [...isLast, last];
+          result += formatTree(item.children, childPrefix, childLast);
+        }
+      }
+      return result;
+    }
+
+    const tree = ".\n" + formatTree(filtered, "", []);
+    return (
+      "\n## Workspace Files\n" +
+      "The following files already exist in your workspace:\n" +
+      "```\n" +
+      tree +
+      "```\n" +
+      "Read existing files with workspace_read_file before modifying them.\n"
+    );
+  } catch (e) {
+    Zotero.debug(`[seerai] buildWorkspaceTreePrompt failed: ${e}`);
+    return "";
+  }
+}
 let currentDraftText = "";
 const currentPastedImages: { id: string; image: string; mimeType: string }[] =
   [];
 let totalSearchResults: number = 0; // Total count from API
 let isSearching = false;
+let renderGeneration = 0;
+let renderLock: Promise<void> = Promise.resolve();
 
 // Cache for Unpaywall PDF URLs (paperId -> pdfUrl)
 const unpaywallPdfCache = new Map<string, string>();
@@ -218,7 +399,10 @@ let searchColumnConfigFilePath: string | null = null;
 
 // Chat History State
 let conversationHistory: ConversationMetadata[] = [];
-const isHistorySidebarVisible: boolean = true;
+let isHistorySidebarVisible = true;
+let systemPromptExpanded = false;
+const selectedChatIds: Set<string> = new Set();
+let lastClickedChatId: string | null = null;
 
 /**
  * Use Zotero's Find Full Text resolver to fetch PDF for a paper.
@@ -668,7 +852,7 @@ export async function findAndAttachPdfForItem(
 
   // Step 7.5: Local Resolver
   try {
-    // @ts-ignore
+    // @ts-expect-error - import.meta.glob not in types
     const extraResolvers = import.meta.glob("../../doc/localResolver.ts", {
       eager: true,
     });
@@ -1586,7 +1770,6 @@ export class Assistant {
    */
   private static renderDetachedPlaceholder(container: HTMLElement): void {
     const doc = container.ownerDocument!;
-    container.innerHTML = "";
 
     const placeholder = ztoolkit.UI.createElement(doc, "div", {
       styles: {
@@ -1619,6 +1802,7 @@ export class Assistant {
     });
 
     const focusBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Focus Window" },
       styles: {
         padding: "8px 16px",
@@ -1641,6 +1825,7 @@ export class Assistant {
     });
 
     const attachBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Bring Back to Sidebar" },
       styles: {
         padding: "8px 16px",
@@ -1677,11 +1862,10 @@ export class Assistant {
     placeholder.appendChild(focusBtn);
     placeholder.appendChild(attachBtn);
     placeholder.appendChild(shortcutHint);
-    container.appendChild(placeholder);
+    container.replaceChildren(placeholder);
   }
 
   /**
-   * Public method to render the UI to a given container
    * Used by the detached window to render the full interface
    */
   public static async renderToContainer(
@@ -2141,6 +2325,11 @@ export class Assistant {
     const store = getMessageStore();
     const newId = `chat_${Date.now()}`;
 
+    const history = await store.getHistory();
+    const currentId = store.getConversationId();
+    const currentConv = history.find((h) => h.id === currentId);
+    const folder = currentConv?.folder || null;
+
     // Save current state if any before switching
     if (conversationMessages.length > 0) {
       const stateManager = getChatStateManager();
@@ -2151,8 +2340,10 @@ export class Assistant {
     }
 
     store.setConversationId(newId);
+    getWorkspaceStore().switchChatContext(newId, folder);
     conversationMessages = [];
     resetChatStateManager();
+    await store.setContinuation(undefined);
 
     // Initial history entry for the new chat
     await store.updateConversationMetadata({
@@ -2161,6 +2352,10 @@ export class Assistant {
       messageCount: 0,
       preview: "Start a new conversation...",
     });
+
+    if (folder) {
+      await store.moveConversationToFolder(newId, folder);
+    }
 
     await this.loadHistory();
 
@@ -2182,6 +2377,9 @@ export class Assistant {
     }
 
     store.setConversationId(id);
+    const history = await store.getHistory();
+    const conv = history.find((h) => h.id === id);
+    getWorkspaceStore().switchChatContext(id, conv?.folder || null);
 
     // Load messages
     conversationMessages = await store.loadMessages();
@@ -2199,23 +2397,80 @@ export class Assistant {
     }
   }
 
+  public static async createNewChatInFolder(folder: string) {
+    const store = getMessageStore();
+    const newId = `chat_${Date.now()}`;
+
+    if (conversationMessages.length > 0) {
+      const stateManager = getChatStateManager();
+      await store.saveConversationState(
+        stateManager.getStates(),
+        stateManager.getOptions(),
+      );
+    }
+
+    store.setConversationId(newId);
+    getWorkspaceStore().switchChatContext(newId, folder);
+    conversationMessages = [];
+    resetChatStateManager();
+    await store.setContinuation(undefined);
+
+    await store.updateConversationMetadata({
+      id: newId,
+      title: "New Chat",
+      messageCount: 0,
+      preview: "Start a new conversation...",
+    });
+
+    await store.moveConversationToFolder(newId, folder);
+
+    await this.loadHistory();
+
+    if (currentContainer && currentItem) {
+      this.renderInterface(currentContainer, currentItem);
+    }
+  }
+
   public static async deleteChat(id: string) {
     const store = getMessageStore();
+
+    const wasCurrentChat = store.getConversationId() === id;
+
     await store.deleteConversation(id);
 
-    // If the deleted chat was the current one, create a new one or load the most recent
-    if (store.getConversationId() === id) {
-      const history = await store.getHistory();
-      if (history.length > 0) {
-        await this.loadChat(history[0].id);
+    await this.loadHistory();
+
+    if (wasCurrentChat) {
+      if (conversationHistory.length > 0) {
+        await this.loadChat(conversationHistory[0].id);
       } else {
         await this.createNewChat();
       }
-    } else {
-      await this.loadHistory();
-      if (currentContainer && currentItem) {
-        this.renderInterface(currentContainer, currentItem);
+    } else if (currentContainer && currentItem) {
+      this.renderInterface(currentContainer, currentItem);
+    }
+  }
+
+  public static async deleteChats(ids: string[]) {
+    if (ids.length === 0) return;
+    const store = getMessageStore();
+    const currentId = store.getConversationId();
+    const includesCurrent = ids.includes(currentId);
+
+    for (const id of ids) {
+      await store.deleteConversation(id);
+    }
+
+    await this.loadHistory();
+
+    if (includesCurrent) {
+      if (conversationHistory.length > 0) {
+        await this.loadChat(conversationHistory[0].id);
+      } else {
+        await this.createNewChat();
       }
+    } else if (currentContainer && currentItem) {
+      this.renderInterface(currentContainer, currentItem);
     }
   }
 
@@ -2252,222 +2507,238 @@ export class Assistant {
     item: Zotero.Item,
     skipIfSame: boolean = false,
   ) {
-    if (
-      skipIfSame &&
-      this.lastRenderedItemId === item.id &&
-      this.lastRenderedTab === activeTab &&
-      this.lastRenderedContainer === container
-    ) {
-      return;
-    }
+    const myGeneration = ++renderGeneration;
 
-    if (isTableGenerating && activeTab === "table") {
-      Zotero.debug(
-        "[seerai] renderInterface: Skipping render during table generation",
-      );
-      return;
-    }
-
-    this.lastRenderedItemId = item.id;
-    this.lastRenderedTab = activeTab;
-    this.lastRenderedContainer = container;
-
-    // Check if we are in a detached window or the Zotero pane
-    // Using a more robust window-level check
-    const isDetachedWindow = !!container.ownerDocument?.getElementById(
-      "seerai-detached-window",
-    );
-
-    // Force height and overflow on root container
-    // In Pane: use 100vh for ALL tabs for consistent sidebar height and width containment
-    // In Detached: force 100% height and hidden overflow to maintain window bounds
-    if (!isDetachedWindow) {
-      // Sidepanel (all tabs): Use calc(100vh - 20px) to prevent the chat from
-      // taking the full viewport height and leaving no breathing room.
-      // Using 100vh instead of 100% because sidebar parent container often grows with content relative to the parent provided by Zotero.
-      // Table tab previously used height:auto which broke width containment.
-      container.style.height = "calc(100vh - 150px)";
-      container.style.overflow = "hidden";
-    } else {
-      // Detached Window: 100% works correctly here as window is constrained
-      container.style.height = "100%";
-      container.style.overflow = "hidden";
-    }
-
-    // Ensure root container constrains width properly
-    container.style.width = "100%";
-    container.style.maxWidth = "100%";
-    container.style.boxSizing = "border-box";
-    container.style.minWidth = "0";
-
-    container.innerHTML = "";
-
-    // Debug visual
-    const debugLoading = container.ownerDocument!.createElement("div");
-    debugLoading.textContent = "SeerAI: Rendering interface...";
-    debugLoading.style.cssText =
-      "padding: 20px; color: gray; text-align: center;";
-    debugLoading.id = "seerai-debug-loading";
-    container.appendChild(debugLoading);
-
-    try {
-      const doc = container.ownerDocument!;
-      Zotero.debug(
-        "[seerai] renderInterface: Starting render for item " + item.id,
-      );
-
-      // Ensure stylesheet is loaded
-      const styleId = "seerai-stylesheet";
-      if (!doc.getElementById(styleId)) {
-        const link = ztoolkit.UI.createElement(doc, "link", {
-          properties: {
-            id: styleId,
-            type: "text/css",
-            rel: "stylesheet",
-            href: `chrome://${config.addonRef}/content/zoteroPane.css`,
-          },
-        });
-        doc.documentElement?.appendChild(link);
-      }
-
-      const stateManager = getChatStateManager();
-
-      // Load history and persisted messages if not already loaded
-      if (conversationHistory.length === 0) {
-        await this.loadHistory();
-      }
-
-      if (conversationMessages.length === 0) {
-        try {
-          const store = getMessageStore();
-          // If history exists, load the most recent one if no ID is set
-          if (
-            conversationHistory.length > 0 &&
-            store.getConversationId() === "default"
-          ) {
-            store.setConversationId(conversationHistory[0].id);
-          }
-          conversationMessages = await store.loadMessages();
-
-          // Also load state for this chat
-          const savedState = await store.getConversationState();
-          if (savedState) {
-            stateManager.fromJSON(savedState);
-          }
-
-          Zotero.debug(
-            `[seerai] Loaded ${conversationMessages.length} messages for session ${store.getConversationId()}`,
-          );
-        } catch (e) {
-          Zotero.debug(`[seerai] Error loading messages: ${e}`);
-        }
-      }
-
-      // Load table config - ALWAYS reload from disk when viewing table tab to get latest changes from tools
-      if (!currentTableConfig || activeTab === "table") {
-        try {
-          const tableStore = getTableStore();
-          currentTableConfig = await tableStore.loadConfig();
-          Zotero.debug(
-            `[seerai] Loaded table config: ${currentTableConfig.id} (activeTab=${activeTab})`,
-          );
-        } catch (e) {
-          Zotero.debug(`[seerai] Error loading table config: ${e}`);
-        }
-      }
-
-      // Auto-add current item with its notes based on selection mode
-      const options = stateManager.getOptions();
-      const mode = options.selectionMode;
-
-      if (mode === "explore") {
-        // Explore mode: add items without clearing (multi-add)
-        if (!stateManager.isSelected("items", item.id)) {
-          this.addItemWithNotes(item);
-        }
-      } else if (mode === "default") {
-        // Default mode: switch to single item (clear others, focus on this one)
-        if (!stateManager.isSelected("items", item.id)) {
-          stateManager.clearAll();
-          this.addItemWithNotes(item);
-        }
-      }
-      // Lock mode: do nothing - don't add any items automatically
-      // Main Container with tabs
-      const mainContainer = ztoolkit.UI.createElement(doc, "div", {
-        styles: {
-          display: "flex",
-          flexDirection: "column",
-          height: "100%",
-          width: "100%",
-          minWidth: "0",
-          maxWidth: "100%",
-          overflow: "hidden",
-          boxSizing: "border-box",
-          fontFamily: "system-ui, -apple-system, sans-serif",
-        },
-      });
-
+    const doRender = async () => {
       try {
-        // === TAB BAR ===
-        const tabBar = this.createTabBar(doc, container, item);
-        mainContainer.appendChild(tabBar);
+        if (
+          skipIfSame &&
+          this.lastRenderedItemId === item.id &&
+          this.lastRenderedTab === activeTab &&
+          this.lastRenderedContainer === container
+        ) {
+          return;
+        }
 
-        // === TAB CONTENT CONTAINER ===
-        const tabContent = ztoolkit.UI.createElement(doc, "div", {
-          properties: { id: "tab-content" },
+        if (isTableGenerating && activeTab === "table") {
+          Zotero.debug(
+            "[seerai] renderInterface: Skipping render during table generation",
+          );
+          return;
+        }
+
+        this.lastRenderedItemId = item.id;
+        this.lastRenderedTab = activeTab;
+        this.lastRenderedContainer = container;
+
+        const isDetachedWindow = !!container.ownerDocument?.getElementById(
+          "seerai-detached-window",
+        );
+
+        container.style.width = "100%";
+        container.style.maxWidth = "100%";
+        container.style.boxSizing = "border-box";
+        container.style.minWidth = "0";
+
+        if (!isDetachedWindow) {
+          container.style.height = "calc(100vh - 150px)";
+          container.style.overflow = "hidden";
+        } else {
+          container.style.height = "100%";
+          container.style.overflow = "hidden";
+        }
+
+        // Save current scroll position for chat tab
+        const messagesScrollContainer =
+          container.querySelector("#messages-area");
+        const savedScrollTop = messagesScrollContainer?.scrollTop ?? 0;
+
+        // Build entire UI off-screen before swapping
+        const doc = container.ownerDocument!;
+        Zotero.debug(
+          `[seerai] renderInterface: Starting render for item ${item.id} (gen=${myGeneration})`,
+        );
+
+        // Ensure stylesheet is loaded
+        const styleId = "seerai-stylesheet";
+        if (!doc.getElementById(styleId)) {
+          const link = ztoolkit.UI.createElement(doc, "link", {
+            properties: {
+              id: styleId,
+              type: "text/css",
+              rel: "stylesheet",
+              href: `chrome://${config.addonRef}/content/zoteroPane.css`,
+            },
+          });
+          doc.documentElement?.appendChild(link);
+        }
+
+        const stateManager = getChatStateManager();
+
+        if (conversationHistory.length === 0) {
+          await this.loadHistory();
+        }
+
+        if (conversationMessages.length === 0) {
+          try {
+            const store = getMessageStore();
+            if (
+              conversationHistory.length > 0 &&
+              store.getConversationId() === "default"
+            ) {
+              store.setConversationId(conversationHistory[0].id);
+            }
+            conversationMessages = await store.loadMessages();
+
+            const savedState = await store.getConversationState();
+            if (savedState) {
+              stateManager.fromJSON(savedState);
+            }
+
+            Zotero.debug(
+              `[seerai] Loaded ${conversationMessages.length} messages for session ${store.getConversationId()}`,
+            );
+          } catch (e) {
+            Zotero.debug(`[seerai] Error loading messages: ${e}`);
+          }
+        }
+
+        if (!currentTableConfig || activeTab === "table") {
+          try {
+            const tableStore = getTableStore();
+            currentTableConfig = await tableStore.loadConfig();
+            Zotero.debug(
+              `[seerai] Loaded table config: ${currentTableConfig.id} (activeTab=${activeTab})`,
+            );
+          } catch (e) {
+            Zotero.debug(`[seerai] Error loading table config: ${e}`);
+          }
+        }
+
+        // Abandon this render if a newer one started
+        if (renderGeneration !== myGeneration) {
+          Zotero.debug(
+            `[seerai] renderInterface: Stale render (gen=${myGeneration}), abandoning`,
+          );
+          return;
+        }
+
+        // Auto-add current item with its notes based on selection mode
+        const options = stateManager.getOptions();
+        const mode = options.selectionMode;
+
+        if (mode === "explore") {
+          if (!stateManager.isSelected("items", item.id)) {
+            this.addItemWithNotes(item);
+          }
+        } else if (mode === "default") {
+          if (!stateManager.isSelected("items", item.id)) {
+            stateManager.clearAll();
+            this.addItemWithNotes(item);
+          }
+        }
+
+        // Main Container with tabs
+        const mainContainer = ztoolkit.UI.createElement(doc, "div", {
           styles: {
-            flex: "1 1 0",
             display: "flex",
             flexDirection: "column",
+            height: "100%",
             width: "100%",
             minWidth: "0",
             maxWidth: "100%",
-            minHeight: "0",
-            boxSizing: "border-box",
             overflow: "hidden",
+            boxSizing: "border-box",
+            fontFamily: "system-ui, -apple-system, sans-serif",
           },
         });
 
-        // Render active tab content
-        if (activeTab === "chat") {
-          const chatTabContent = await this.createChatTabContent(
-            doc,
-            item,
-            stateManager,
-          );
-          tabContent.appendChild(chatTabContent);
-        } else if (activeTab === "table") {
-          const tableTabContent = await this.createTableTabContent(doc, item);
-          tabContent.appendChild(tableTabContent);
-        } else if (activeTab === "search") {
-          const searchTabContent = await this.createSearchTabContent(doc, item);
-          tabContent.appendChild(searchTabContent);
+        try {
+          // === TAB BAR ===
+          const tabBar = this.createTabBar(doc, container, item);
+          mainContainer.appendChild(tabBar);
+
+          // === TAB CONTENT CONTAINER ===
+          const tabContent = ztoolkit.UI.createElement(doc, "div", {
+            properties: { id: "tab-content" },
+            styles: {
+              flex: "1 1 0",
+              display: "flex",
+              flexDirection: "column",
+              width: "100%",
+              minWidth: "0",
+              maxWidth: "100%",
+              minHeight: "0",
+              boxSizing: "border-box",
+              overflow: "hidden",
+            },
+          });
+
+          if (activeTab === "chat") {
+            const chatTabContent = await this.createChatTabContent(
+              doc,
+              item,
+              stateManager,
+            );
+            tabContent.appendChild(chatTabContent);
+          } else if (activeTab === "table") {
+            const tableTabContent = await this.createTableTabContent(doc, item);
+            tabContent.appendChild(tableTabContent);
+          } else if (activeTab === "search") {
+            const searchTabContent = await this.createSearchTabContent(
+              doc,
+              item,
+            );
+            tabContent.appendChild(searchTabContent);
+          }
+
+          // Final stale check before committing DOM
+          if (renderGeneration !== myGeneration) {
+            Zotero.debug(
+              `[seerai] renderInterface: Stale render before commit (gen=${myGeneration}), abandoning`,
+            );
+            return;
+          }
+
+          mainContainer.appendChild(tabContent);
+
+          // Atomic swap: replace container contents in a single operation
+          // This prevents the flash of empty content between clearing and rebuilding
+          container.replaceChildren(mainContainer);
+
+          // Restore scroll position for chat tab
+          if (activeTab === "chat" && savedScrollTop > 0) {
+            setTimeout(() => {
+              const newMessagesArea = container.querySelector("#messages-area");
+              if (newMessagesArea) {
+                (newMessagesArea as HTMLElement).scrollTop = savedScrollTop;
+              }
+            }, 0);
+          }
+
+          Zotero.debug("[seerai] renderInterface: Render complete");
+        } catch (error) {
+          Zotero.debug(`[seerai] Error building UI components: ${error}`);
+
+          // Show error in container
+          try {
+            const errorDiv = container.ownerDocument!.createElement("div");
+            errorDiv.style.cssText =
+              "padding: 20px; color: red; overflow: auto; height: 100%;";
+            errorDiv.textContent = `Error rendering interface: ${error}\n\nStack: ${(error as Error).stack || "N/A"}`;
+            container.replaceChildren(errorDiv);
+          } catch {
+            // Last resort
+          }
         }
-
-        // Remove loading indicator
-        const loading = doc.getElementById("seerai-debug-loading");
-        if (loading) loading.remove();
-
-        mainContainer.appendChild(tabContent);
-        container.appendChild(mainContainer);
-        Zotero.debug("[seerai] renderInterface: Render complete");
       } catch (error) {
-        Zotero.debug(`[seerai] Error building UI components: ${error}`);
-        throw error; // Re-throw to be caught by outer block
+        Zotero.debug(`[seerai] Error rendering interface (outer): ${error}`);
       }
-    } catch (error) {
-      Zotero.debug(`[seerai] Error rendering interface (outer): ${error}`);
+    };
 
-      // Ensure we have a clean container for the error
-      container.innerHTML = "";
-
-      const errorDiv = container.ownerDocument!.createElement("div");
-      errorDiv.style.cssText =
-        "padding: 20px; color: red; overflow: auto; height: 100%;";
-      errorDiv.textContent = `Error rendering interface: ${error}\n\nStack: ${(error as Error).stack || "N/A"}`;
-      container.appendChild(errorDiv);
-    }
+    const renderPromise = doRender();
+    renderLock = renderLock.then(() => renderPromise);
+    return renderPromise;
   }
 
   /**
@@ -2499,6 +2770,7 @@ export class Assistant {
 
     tabs.forEach((tab) => {
       const tabItem = ztoolkit.UI.createElement(doc, "button", {
+        namespace: "html",
         properties: {
           className: `tab-item ${activeTab === tab.id ? "active" : ""}`,
           innerText: `${tab.icon} ${tab.label}`,
@@ -2540,6 +2812,7 @@ export class Assistant {
 
     // Add detach button at the end
     const detachBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: {
         className: "detach-btn",
         title: "Pop out to window (Ctrl+Shift+S)",
@@ -2587,15 +2860,22 @@ export class Assistant {
   }
 
   /**
-   * Create the History Sidebar
+   * Create the History Sidebar with folder/space organization.
    */
-  private static createHistorySidebar(doc: Document): HTMLElement {
+  private static async createHistorySidebar(
+    doc: Document,
+  ): Promise<HTMLElement> {
+    const store = getMessageStore();
+    const history = conversationHistory;
+    const folders = await store.getFolders();
+    const currentId = store.getConversationId();
+
     const sidebar = doc.createElement("div");
     sidebar.className = "history-sidebar";
     sidebar.style.cssText = `
       width: ${isHistorySidebarVisible ? "clamp(120px, 40%, 250px)" : "0px"};
-      min-width: ${isHistorySidebarVisible ? "0" : "0px"};
-      flex-shrink: ${isHistorySidebarVisible ? "1" : "0"};
+      min-width: ${isHistorySidebarVisible ? "120px" : "20px"};
+      flex-shrink: ${isHistorySidebarVisible ? "0" : "0"};
       display: flex;
       flex-direction: column;
       border-right: 1px solid var(--border-primary);
@@ -2606,124 +2886,1352 @@ export class Assistant {
       box-sizing: border-box;
     `;
 
-    // Header with New Chat button
+    // Header — matches workspace (ARTIFACTS) sidebar style
     const header = doc.createElement("div");
-    header.style.cssText =
-      "padding: 12px; border-bottom: 1px solid var(--border-primary); display: flex; flex-direction: column; gap: 8px;";
+    header.style.cssText = `
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border-primary);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    `;
 
-    const newChatBtn = doc.createElement("button");
-    newChatBtn.className = "new-chat-btn";
-    newChatBtn.innerHTML = "➕ New Chat";
+    const headerTitle = doc.createElement("span");
+    headerTitle.textContent = "Chats";
+    headerTitle.style.cssText = `
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-primary);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    `;
+    header.appendChild(headerTitle);
+
+    // Collapse with ◀ to hide sidebar (it's on left side, collapses leftward)
+    const collapseHistoryBtn = createIconButton(
+      doc,
+      "\u25C0",
+      "Hide sidebar",
+      () => {
+        isHistorySidebarVisible = false;
+        sidebar.style.width = "20px";
+        sidebar.style.minWidth = "20px";
+        sidebar.style.borderRight = "1px solid var(--border-primary)";
+        collapseHistoryBtn.textContent = "\u25B6";
+        collapseHistoryBtn.title = "Show sidebar";
+        header.style.display = "none";
+        newChatBar.style.display = "none";
+        if (list) list.style.display = "none";
+        const historyHandle = sidebar.nextElementSibling as HTMLElement | null;
+        if (historyHandle?.classList.contains("seerai-resize-handle")) {
+          historyHandle.style.display = "none";
+        }
+        const narrowToggle = sidebar.querySelector(
+          ".narrow-toggle",
+        ) as HTMLElement | null;
+        if (!narrowToggle) {
+          const strip = doc.createElement("div");
+          strip.className = "narrow-toggle";
+          strip.style.cssText =
+            "display: flex; flex-direction: column; align-items: center; padding: 8px 0; gap: 8px;";
+          const expandBtn = createIconButton(
+            doc,
+            "\u25B6",
+            "Show sidebar",
+            () => {
+              isHistorySidebarVisible = true;
+              sidebar.style.width = "clamp(120px, 40%, 250px)";
+              sidebar.style.minWidth = "120px";
+              sidebar.style.borderRight = "1px solid var(--border-primary)";
+              collapseHistoryBtn.textContent = "\u25C0";
+              collapseHistoryBtn.title = "Hide sidebar";
+              header.style.display = "flex";
+              newChatBar.style.display = "flex";
+              if (list) list.style.display = "";
+              const hHandle = sidebar.nextElementSibling as HTMLElement | null;
+              if (hHandle?.classList.contains("seerai-resize-handle")) {
+                hHandle.style.display = "";
+              }
+              strip.remove();
+            },
+          );
+          strip.appendChild(expandBtn);
+          const label = doc.createElement("span");
+          label.textContent = "C";
+          label.style.cssText =
+            "writing-mode: vertical-lr; font-size: 9px; font-weight: 700; color: var(--text-tertiary); letter-spacing: 2px;";
+          strip.appendChild(label);
+          sidebar.appendChild(strip);
+        }
+      },
+    );
+    header.appendChild(collapseHistoryBtn);
+
+    sidebar.appendChild(header);
+
+    // New chat / folder action bar below header
+    const newChatBar = doc.createElement("div");
+    newChatBar.style.cssText = `
+      display: flex;
+      gap: 4px;
+      padding: 6px 8px;
+      border-bottom: 1px solid var(--border-primary);
+      flex-shrink: 0;
+    `;
+
+    const newChatBtn = doc.createElementNS(
+      HTML_NS,
+      "button",
+    ) as HTMLButtonElement;
+    newChatBtn.textContent = "+ New Chat";
     newChatBtn.style.cssText = `
-      width: 100%;
-      padding: 8px;
-      border-radius: 6px;
+      flex: 1;
+      padding: 5px 8px;
+      border-radius: 4px;
       background: var(--highlight-primary);
       color: white;
       border: none;
       cursor: pointer;
+      font-size: 11px;
       font-weight: 500;
       transition: opacity 0.2s;
     `;
     newChatBtn.onclick = () => this.createNewChat();
-    header.appendChild(newChatBtn);
-    sidebar.appendChild(header);
+    newChatBar.appendChild(newChatBtn);
 
-    // List of conversations
+    const newFolderBtn = doc.createElementNS(
+      HTML_NS,
+      "button",
+    ) as HTMLButtonElement;
+    newFolderBtn.textContent = "+ Folder";
+    newFolderBtn.style.cssText = `
+      flex: 1;
+      padding: 5px 8px;
+      border-radius: 4px;
+      background: var(--background-primary);
+      color: var(--text-secondary);
+      border: 1px solid var(--border-primary);
+      cursor: pointer;
+      font-size: 11px;
+      transition: all 0.2s;
+    `;
+    newFolderBtn.onclick = async () => {
+      const name = (doc.defaultView?.prompt("Folder name:", "") || "").trim();
+      if (!name) return;
+      const currentId = store.getConversationId();
+      await store.moveConversationToFolder(currentId, name);
+      await this.loadHistory();
+      await this.renderInterfaceSidebarsOnly();
+    };
+    newChatBar.appendChild(newFolderBtn);
+
+    sidebar.appendChild(newChatBar);
+
+    // Scrollable list
     const list = doc.createElement("div");
-    list.className = "history-list";
     list.style.cssText =
-      "flex: 1; overflow-y: auto; display: flex; flex-direction: column;";
+      "flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-height: 0;";
 
-    const currentId = getMessageStore().getConversationId();
+    // Separate archived from active conversations
+    const active: ConversationMetadata[] = [];
+    const archived: ConversationMetadata[] = [];
+    for (const conv of history) {
+      if (conv.archived) {
+        archived.push(conv);
+      } else {
+        active.push(conv);
+      }
+    }
 
-    conversationHistory.forEach((conv) => {
-      const item = doc.createElement("div");
-      item.className = `history-item ${conv.id === currentId ? "active" : ""}`;
-      item.style.cssText = `
-        padding: 10px 12px;
-        cursor: pointer;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        border-bottom: 1px solid var(--border-secondary);
-        background: ${conv.id === currentId ? "var(--background-primary)" : "transparent"};
-        position: relative;
-        transition: background 0.2s;
-      `;
+    // Group active conversations by folder
+    const unfolded: ConversationMetadata[] = [];
+    const folderMap = new Map<string, ConversationMetadata[]>();
+    for (const conv of active) {
+      if (conv.folder) {
+        const group = folderMap.get(conv.folder) || [];
+        group.push(conv);
+        folderMap.set(conv.folder, group);
+      } else {
+        unfolded.push(conv);
+      }
+    }
 
-      item.onclick = (e) => {
-        if ((e.target as HTMLElement).classList.contains("delete-btn")) return;
-        this.loadChat(conv.id);
-      };
+    // Build visual order of all chat IDs (folders sorted → unfiled → archived)
+    const sortedFolders = Array.from(folderMap.keys()).sort();
+    const visualChatOrder: string[] = [];
+    for (const folderName of sortedFolders) {
+      for (const conv of folderMap.get(folderName)!) {
+        visualChatOrder.push(conv.id);
+      }
+    }
+    for (const conv of unfolded) {
+      visualChatOrder.push(conv.id);
+    }
+    for (const conv of archived) {
+      visualChatOrder.push(conv.id);
+    }
 
-      const title = doc.createElement("div");
-      title.textContent = conv.title || "Untitled Chat";
-      title.style.cssText =
-        "font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 20px;";
-      item.appendChild(title);
+    // Render folder sections
+    for (const folderName of sortedFolders) {
+      const folderConvs = folderMap.get(folderName)!;
+      const folderSection = this.createFolderSection(
+        doc,
+        folderName,
+        folderConvs,
+        currentId,
+        visualChatOrder,
+        false,
+      );
+      list.appendChild(folderSection);
+    }
 
-      const preview = doc.createElement("div");
-      preview.textContent = conv.preview || "No messages";
-      preview.style.cssText =
-        "font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
-      item.appendChild(preview);
+    // Unfiled section — always visible as a drop target
+    {
+      const unfiledSection = this.createFolderSection(
+        doc,
+        "Unfiled",
+        unfolded,
+        currentId,
+        visualChatOrder,
+        true,
+      );
+      list.appendChild(unfiledSection);
+    }
 
-      const date = doc.createElement("div");
-      date.textContent = this.formatRelativeTime(new Date(conv.updatedAt));
-      date.style.cssText = "font-size: 10px; color: var(--text-tertiary);";
-      item.appendChild(date);
-
-      // Delete button (hidden by default, shown on hover via CSS in zoteroPane.css)
-      const deleteBtn = doc.createElement("button");
-      deleteBtn.className = "delete-btn";
-      deleteBtn.innerHTML = "✕";
-      deleteBtn.title = "Delete conversation";
-      deleteBtn.style.cssText = `
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        background: transparent;
-        border: none;
-        color: var(--text-tertiary);
-        cursor: pointer;
-        font-size: 14px;
-        padding: 4px;
-        display: none;
-      `;
-      deleteBtn.onclick = (e) => {
-        e.stopPropagation();
-        if (
-          doc.defaultView?.confirm(
-            "Are you sure you want to delete this conversation?",
-          )
-        ) {
-          this.deleteChat(conv.id);
-        }
-      };
-      item.appendChild(deleteBtn);
-
-      // Simple hover effect for JS toggle
-      item.onmouseenter = () => {
-        deleteBtn.style.display = "block";
-      };
-      item.onmouseleave = () => {
-        deleteBtn.style.display = "none";
-      };
-
-      list.appendChild(item);
-    });
-
-    if (conversationHistory.length === 0) {
+    if (active.length === 0 && archived.length === 0) {
       const empty = doc.createElement("div");
-      empty.textContent = "No history yet";
+      empty.textContent = "No chats yet";
       empty.style.cssText =
         "padding: 20px; text-align: center; color: var(--text-tertiary); font-style: italic; font-size: 12px;";
       list.appendChild(empty);
     }
 
+    // Archived section (collapsed by default, no folders, just flat list)
+    if (archived.length > 0) {
+      const archivedSection = doc.createElement("div");
+
+      const archHeader = doc.createElement("div");
+      archHeader.style.cssText = `
+        display: flex;
+        align-items: center;
+        padding: 6px 8px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        gap: 6px;
+        user-select: none;
+      `;
+
+      const archArrow = doc.createElement("span");
+      archArrow.textContent = "\u25B8";
+      archArrow.style.cssText = "font-size: 10px; transition: transform 0.2s;";
+
+      const archLabel = doc.createElement("span");
+      archLabel.textContent = `Archived (${archived.length})`;
+      archLabel.style.cssText =
+        "flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
+
+      archHeader.appendChild(archArrow);
+      archHeader.appendChild(archLabel);
+
+      const archItems = doc.createElement("div");
+      archItems.style.cssText = "display: none;";
+
+      for (const conv of archived) {
+        const item = doc.createElement("div");
+        const isActive = conv.id === currentId;
+        const isSelected = selectedChatIds.has(conv.id);
+        item.style.cssText = `
+          padding: 6px 8px 6px ${isSelected ? "6px" : "20px"};
+          cursor: pointer;
+          font-size: 12px;
+          color: ${isSelected ? "white" : isActive ? "var(--text-primary)" : "var(--text-secondary)"};
+          background: ${isSelected ? "var(--highlight-primary, #4a90d9)" : isActive ? "var(--background-primary)" : "transparent"};
+          border-left: ${isActive ? "3px solid var(--highlight-primary)" : "3px solid transparent"};
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          opacity: ${isSelected ? "1" : "0.7"};
+          transition: background 0.15s;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+        `;
+
+        if (isSelected) {
+          const check = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+          check.textContent = "\u2713";
+          check.style.cssText = `
+            font-size: 12px;
+            font-weight: 700;
+            flex-shrink: 0;
+            width: 14px;
+            text-align: center;
+            color: white;
+          `;
+          item.appendChild(check);
+        }
+
+        const title = doc.createElement("div");
+        title.textContent = conv.title || "Untitled";
+        title.style.cssText =
+          "overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;";
+        item.appendChild(title);
+
+        item.addEventListener("click", (e: MouseEvent) => {
+          const ctrl = e.ctrlKey || e.metaKey;
+          const shift = e.shiftKey;
+
+          if (ctrl && !shift) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (selectedChatIds.has(conv.id)) {
+              selectedChatIds.delete(conv.id);
+            } else {
+              selectedChatIds.add(conv.id);
+            }
+            lastClickedChatId = conv.id;
+            if (currentContainer && currentItem) {
+              Assistant.renderInterface(currentContainer, currentItem);
+            }
+          } else if (shift && lastClickedChatId) {
+            e.preventDefault();
+            e.stopPropagation();
+            const startIdx = visualChatOrder.indexOf(lastClickedChatId);
+            const endIdx = visualChatOrder.indexOf(conv.id);
+            if (startIdx !== -1 && endIdx !== -1) {
+              const lo = Math.min(startIdx, endIdx);
+              const hi = Math.max(startIdx, endIdx);
+              for (let i = lo; i <= hi; i++) {
+                selectedChatIds.add(visualChatOrder[i]);
+              }
+              lastClickedChatId = conv.id;
+              if (currentContainer && currentItem) {
+                Assistant.renderInterface(currentContainer, currentItem);
+              }
+            }
+          } else if (selectedChatIds.size > 0 && !ctrl && !shift) {
+            e.preventDefault();
+            e.stopPropagation();
+            selectedChatIds.clear();
+            lastClickedChatId = conv.id;
+            if (currentContainer && currentItem) {
+              Assistant.renderInterface(currentContainer, currentItem);
+            }
+          } else {
+            lastClickedChatId = conv.id;
+            Assistant.loadChat(conv.id);
+          }
+        });
+
+        item.addEventListener("contextmenu", async (e: MouseEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          await Assistant.showHistoryContextMenu(
+            doc,
+            conv,
+            e.clientX,
+            e.clientY,
+          );
+        });
+        item.onmouseenter = () => {
+          item.style.background = isSelected
+            ? "var(--highlight-primary, #4a90d9)"
+            : "var(--background-hover, rgba(0,0,0,0.05))";
+        };
+        item.onmouseleave = () => {
+          item.style.background = isSelected
+            ? "var(--highlight-primary, #4a90d9)"
+            : isActive
+              ? "var(--background-primary)"
+              : "transparent";
+        };
+
+        archItems.appendChild(item);
+      }
+
+      archHeader.onclick = () => {
+        const collapsed = archItems.style.display === "none";
+        archItems.style.display = collapsed ? "block" : "none";
+        archArrow.textContent = collapsed ? "\u25BE" : "\u25B8";
+      };
+
+      archivedSection.appendChild(archHeader);
+      archivedSection.appendChild(archItems);
+      list.appendChild(archivedSection);
+    }
+
     sidebar.appendChild(list);
+
+    // Bulk action bar (visible when items are selected)
+    if (selectedChatIds.size > 0) {
+      const actionBar = doc.createElement("div");
+      actionBar.style.cssText = `
+        padding: 6px 8px;
+        border-top: 1px solid var(--border-primary);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        flex-shrink: 0;
+        background: var(--background-secondary);
+        position: relative;
+        align-items: center;
+      `;
+
+      const countLabel = doc.createElement("span");
+      countLabel.textContent = `${selectedChatIds.size}`;
+      countLabel.title = `${selectedChatIds.size} selected`;
+      countLabel.style.cssText = `
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--highlight-primary);
+        display: flex;
+        align-items: center;
+        padding: 0 4px;
+        flex-shrink: 0;
+      `;
+      actionBar.appendChild(countLabel);
+
+      const allFolders = await store.getFolders();
+
+      const deleteBtn = doc.createElementNS(
+        HTML_NS,
+        "button",
+      ) as HTMLButtonElement;
+      deleteBtn.textContent = "Delete";
+      deleteBtn.style.cssText = `
+        padding: 3px 6px;
+        border-radius: 4px;
+        background: #d32f2f;
+        color: white;
+        border: none;
+        cursor: pointer;
+        font-size: 10px;
+        font-weight: 500;
+        white-space: nowrap;
+      `;
+      deleteBtn.onclick = async () => {
+        if (
+          !doc.defaultView?.confirm(
+            `Delete ${selectedChatIds.size} conversation(s)?`,
+          )
+        )
+          return;
+        const ids = Array.from(selectedChatIds);
+        selectedChatIds.clear();
+        await Assistant.deleteChats(ids);
+      };
+      actionBar.appendChild(deleteBtn);
+
+      const archiveBtn = doc.createElementNS(
+        HTML_NS,
+        "button",
+      ) as HTMLButtonElement;
+      archiveBtn.textContent = "Archive";
+      archiveBtn.style.cssText = `
+        padding: 3px 6px;
+        border-radius: 4px;
+        background: var(--background-primary);
+        color: var(--text-secondary);
+        border: 1px solid var(--border-primary);
+        cursor: pointer;
+        font-size: 10px;
+        white-space: nowrap;
+      `;
+      archiveBtn.onclick = async () => {
+        const ids = Array.from(selectedChatIds);
+        for (const id of ids) {
+          await store.archiveConversation(id);
+        }
+        selectedChatIds.clear();
+        await Assistant.loadHistory();
+        if (currentContainer && currentItem) {
+          Assistant.renderInterface(currentContainer, currentItem);
+        }
+      };
+      actionBar.appendChild(archiveBtn);
+
+      // Move to folder button (only if folders exist)
+      if (allFolders.length > 0) {
+        const moveBtn = doc.createElementNS(
+          HTML_NS,
+          "button",
+        ) as HTMLButtonElement;
+        moveBtn.textContent = "Move\u2026";
+        moveBtn.style.cssText = `
+          padding: 3px 6px;
+          border-radius: 4px;
+          background: var(--background-primary);
+          color: var(--text-secondary);
+          border: 1px solid var(--border-primary);
+          cursor: pointer;
+          font-size: 10px;
+          white-space: nowrap;
+        `;
+
+        const moveMenu = doc.createElement("div");
+        moveMenu.style.cssText = `
+          position: absolute;
+          bottom: 100%;
+          left: 0;
+          background: var(--background-primary);
+          border: 1px solid var(--border-primary);
+          border-radius: 6px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          padding: 4px 0;
+          min-width: 140px;
+          max-width: 200px;
+          font-size: 12px;
+          z-index: 99999;
+          display: none;
+        `;
+
+        for (const folder of allFolders) {
+          const item = doc.createElement("div");
+          item.textContent = `\u2192 ${folder}`;
+          item.style.cssText =
+            "padding: 6px 12px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
+          item.onmouseenter = () => {
+            item.style.background = "var(--background-hover, rgba(0,0,0,0.05))";
+          };
+          item.onmouseleave = () => {
+            item.style.background = "transparent";
+          };
+          item.onclick = async () => {
+            const ids = Array.from(selectedChatIds);
+            for (const id of ids) {
+              await store.moveConversationToFolder(id, folder);
+            }
+            selectedChatIds.clear();
+            moveMenu.remove();
+            await Assistant.loadHistory();
+            if (currentContainer && currentItem) {
+              Assistant.renderInterface(currentContainer, currentItem);
+            }
+          };
+          moveMenu.appendChild(item);
+        }
+
+        moveBtn.onclick = (e) => {
+          e.stopPropagation();
+          moveMenu.style.display =
+            moveMenu.style.display === "none" ? "block" : "none";
+        };
+        // Close menu on outside click
+        const closeMoveMenu = (e2: Event) => {
+          if (!moveMenu.contains(e2.target as Node)) {
+            moveMenu.style.display = "none";
+          }
+        };
+        doc.addEventListener("click", closeMoveMenu);
+        actionBar.appendChild(moveBtn);
+        actionBar.appendChild(moveMenu);
+      }
+
+      const selectAllBtn = doc.createElementNS(
+        HTML_NS,
+        "button",
+      ) as HTMLButtonElement;
+      selectAllBtn.textContent = "All";
+      selectAllBtn.title = "Select all chats";
+      selectAllBtn.style.cssText = `
+        padding: 3px 6px;
+        border-radius: 4px;
+        background: var(--background-primary);
+        color: var(--text-secondary);
+        border: 1px solid var(--border-primary);
+        cursor: pointer;
+        font-size: 10px;
+        white-space: nowrap;
+      `;
+      selectAllBtn.onclick = () => {
+        for (const conv of conversationHistory) {
+          selectedChatIds.add(conv.id);
+        }
+        if (currentContainer && currentItem) {
+          Assistant.renderInterface(currentContainer, currentItem);
+        }
+      };
+      actionBar.appendChild(selectAllBtn);
+
+      const cancelBtn = doc.createElementNS(
+        HTML_NS,
+        "button",
+      ) as HTMLButtonElement;
+      cancelBtn.textContent = "\u2715";
+      cancelBtn.title = "Cancel selection";
+      cancelBtn.style.cssText = `
+        padding: 3px 6px;
+        border-radius: 4px;
+        background: var(--background-primary);
+        color: var(--text-secondary);
+        border: 1px solid var(--border-primary);
+        cursor: pointer;
+        font-size: 10px;
+        white-space: nowrap;
+      `;
+      cancelBtn.onclick = () => {
+        selectedChatIds.clear();
+        if (currentContainer && currentItem) {
+          Assistant.renderInterface(currentContainer, currentItem);
+        }
+      };
+      actionBar.appendChild(cancelBtn);
+
+      sidebar.appendChild(actionBar);
+    }
+
+    if (!isHistorySidebarVisible) {
+      header.style.display = "none";
+      newChatBar.style.display = "none";
+      list.style.display = "none";
+      const strip = doc.createElement("div");
+      strip.className = "narrow-toggle";
+      strip.style.cssText =
+        "display: flex; flex-direction: column; align-items: center; padding: 8px 0; gap: 8px;";
+      const expandBtn = createIconButton(doc, "\u25B6", "Show sidebar", () => {
+        isHistorySidebarVisible = true;
+        sidebar.style.width = "clamp(120px, 40%, 250px)";
+        sidebar.style.minWidth = "120px";
+        sidebar.style.borderRight = "1px solid var(--border-primary)";
+        collapseHistoryBtn.textContent = "\u25C0";
+        collapseHistoryBtn.title = "Hide sidebar";
+        header.style.display = "flex";
+        newChatBar.style.display = "flex";
+        list.style.display = "";
+        const historyHandle = sidebar.nextElementSibling as HTMLElement | null;
+        if (historyHandle?.classList.contains("seerai-resize-handle")) {
+          historyHandle.style.display = "";
+        }
+        strip.remove();
+      });
+      strip.appendChild(expandBtn);
+      const label = doc.createElement("span");
+      label.textContent = "C";
+      label.style.cssText =
+        "writing-mode: vertical-lr; font-size: 9px; font-weight: 700; color: var(--text-tertiary); letter-spacing: 2px;";
+      strip.appendChild(label);
+      sidebar.appendChild(strip);
+    }
+
     return sidebar;
+  }
+
+  /**
+   * Create a collapsible folder section in the history sidebar.
+   */
+  private static createFolderSection(
+    doc: Document,
+    folderName: string,
+    conversations: ConversationMetadata[],
+    currentId: string,
+    visualChatOrder: string[],
+    isUnfiled: boolean = false,
+  ): HTMLElement {
+    const section = doc.createElement("div");
+    section.dataset.folder = folderName;
+
+    // Allow dropping conversations onto this folder
+    section.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      (e as DragEvent).dataTransfer!.dropEffect = "move";
+      section.style.outline = "2px dashed var(--highlight-primary)";
+      section.style.outlineOffset = "-2px";
+    });
+    section.addEventListener("dragleave", () => {
+      section.style.outline = "";
+    });
+    section.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      section.style.outline = "";
+      const convId = (e as DragEvent).dataTransfer?.getData("text/plain");
+      if (!convId) return;
+      const store = getMessageStore();
+      if (isUnfiled) {
+        await store.removeConversationFromFolder(convId);
+      } else {
+        await store.moveConversationToFolder(convId, folderName);
+      }
+      await Assistant.loadHistory();
+      if (currentContainer && currentItem) {
+        Assistant.renderInterface(currentContainer, currentItem);
+      }
+    });
+
+    // Folder header
+    const header = doc.createElement("div");
+    header.style.cssText = `
+      display: flex;
+      align-items: center;
+      padding: 6px 8px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      gap: 6px;
+      user-select: none;
+    `;
+
+    const arrow = doc.createElement("span");
+    arrow.textContent = "▾";
+    arrow.style.cssText = "font-size: 10px; transition: transform 0.2s;";
+
+    const label = doc.createElement("span");
+    label.textContent = `${folderName} (${conversations.length})`;
+    label.style.cssText =
+      "flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
+
+    header.appendChild(arrow);
+    header.appendChild(label);
+
+    if (!isUnfiled) {
+      const newChatInFolderBtn = doc.createElement("span");
+      newChatInFolderBtn.textContent = "+";
+      newChatInFolderBtn.title = `New chat in "${folderName}"`;
+      newChatInFolderBtn.style.cssText =
+        "font-size: 14px; cursor: pointer; opacity: 0.5; padding: 0 2px; font-weight: 700; color: var(--highlight-primary, #4a90d9);";
+      newChatInFolderBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await Assistant.createNewChatInFolder(folderName);
+      });
+      header.appendChild(newChatInFolderBtn);
+
+      const renameFolderBtn = doc.createElement("span");
+      renameFolderBtn.textContent = "\u270E";
+      renameFolderBtn.title = `Rename folder "${folderName}"`;
+      renameFolderBtn.style.cssText =
+        "font-size: 12px; cursor: pointer; opacity: 0.5; padding: 0 4px;";
+      renameFolderBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const newName = (
+          doc.defaultView?.prompt("Rename folder:", folderName) || ""
+        ).trim();
+        if (!newName || newName === folderName) return;
+        const store = getMessageStore();
+        const history = await store.getHistory();
+        for (const conv of history) {
+          if (conv.folder === folderName) {
+            await store.moveConversationToFolder(conv.id, newName);
+          }
+        }
+        try {
+          const { getWorkspaceStore } = await import("./chat/workspace/store");
+          await getWorkspaceStore().renameWorkspaceFolder(folderName, newName);
+        } catch {
+          // best-effort
+        }
+        await Assistant.loadHistory();
+        if (currentContainer && currentItem) {
+          Assistant.renderInterface(currentContainer, currentItem);
+        }
+      });
+      header.appendChild(renameFolderBtn);
+
+      const deleteFolderBtn = doc.createElement("span");
+      deleteFolderBtn.textContent = "×";
+      deleteFolderBtn.title = `Remove folder "${folderName}" (chats will become unfiled)`;
+      deleteFolderBtn.style.cssText =
+        "font-size: 14px; cursor: pointer; opacity: 0.5; padding: 0 4px;";
+      deleteFolderBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (
+          !doc.defaultView?.confirm(
+            `Remove folder "${folderName}"? Chats will become unfiled and the shared workspace will be deleted.`,
+          )
+        )
+          return;
+        const store = getMessageStore();
+        for (const conv of conversations) {
+          await store.removeConversationFromFolder(conv.id);
+        }
+        try {
+          const { getWorkspaceStore } = await import("./chat/workspace/store");
+          await getWorkspaceStore().deleteWorkspaceFolder(folderName);
+        } catch {
+          // best-effort
+        }
+        await Assistant.loadHistory();
+        if (currentContainer && currentItem) {
+          Assistant.renderInterface(currentContainer, currentItem);
+        }
+      });
+      header.appendChild(deleteFolderBtn);
+    }
+
+    // Conversation items container (initially expanded)
+    const itemsContainer = doc.createElement("div");
+
+    header.onclick = () => {
+      const collapsed = itemsContainer.style.display === "none";
+      itemsContainer.style.display = collapsed ? "block" : "none";
+      arrow.textContent = collapsed ? "▾" : "▸";
+    };
+
+    // Render conversations
+    for (const conv of conversations) {
+      const item = doc.createElement("div");
+      const isActive = conv.id === currentId;
+      const isSelected = selectedChatIds.has(conv.id);
+      item.style.cssText = `
+        padding: 6px 8px 6px ${isSelected ? "6px" : "20px"};
+        cursor: pointer;
+        font-size: 12px;
+        color: ${isSelected ? "white" : isActive ? "var(--text-primary)" : "var(--text-secondary)"};
+        background: ${isSelected ? "var(--highlight-primary, #4a90d9)" : isActive ? "var(--background-primary)" : "transparent"};
+        border-left: ${isActive ? "3px solid var(--highlight-primary)" : "3px solid transparent"};
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        position: relative;
+        transition: background 0.15s;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      `;
+
+      if (isSelected) {
+        const check = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+        check.textContent = "\u2713";
+        check.style.cssText = `
+          font-size: 12px;
+          font-weight: 700;
+          flex-shrink: 0;
+          width: 14px;
+          text-align: center;
+          color: white;
+        `;
+        item.appendChild(check);
+      }
+
+      const title = doc.createElement("div");
+      title.textContent = conv.title || "Untitled";
+      title.style.cssText =
+        "overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;";
+      item.appendChild(title);
+
+      item.addEventListener("click", (e: MouseEvent) => {
+        const ctrl = e.ctrlKey || e.metaKey;
+        const shift = e.shiftKey;
+
+        if (ctrl && !shift) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (selectedChatIds.has(conv.id)) {
+            selectedChatIds.delete(conv.id);
+          } else {
+            selectedChatIds.add(conv.id);
+          }
+          lastClickedChatId = conv.id;
+          if (currentContainer && currentItem) {
+            Assistant.renderInterface(currentContainer, currentItem);
+          }
+        } else if (shift && lastClickedChatId) {
+          e.preventDefault();
+          e.stopPropagation();
+          const startIdx = visualChatOrder.indexOf(lastClickedChatId);
+          const endIdx = visualChatOrder.indexOf(conv.id);
+          if (startIdx !== -1 && endIdx !== -1) {
+            const lo = Math.min(startIdx, endIdx);
+            const hi = Math.max(startIdx, endIdx);
+            for (let i = lo; i <= hi; i++) {
+              selectedChatIds.add(visualChatOrder[i]);
+            }
+            lastClickedChatId = conv.id;
+            if (currentContainer && currentItem) {
+              Assistant.renderInterface(currentContainer, currentItem);
+            }
+          }
+        } else if (selectedChatIds.size > 0 && !ctrl && !shift) {
+          e.preventDefault();
+          e.stopPropagation();
+          selectedChatIds.clear();
+          lastClickedChatId = conv.id;
+          if (currentContainer && currentItem) {
+            Assistant.renderInterface(currentContainer, currentItem);
+          }
+        } else {
+          lastClickedChatId = conv.id;
+          Assistant.loadChat(conv.id);
+        }
+      });
+
+      item.addEventListener("contextmenu", (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        Assistant.showHistoryContextMenu(doc, conv, e.clientX, e.clientY, item);
+      });
+
+      // Drag and drop
+      item.draggable = true;
+      item.addEventListener("dragstart", (e) => {
+        (e as DragEvent).dataTransfer?.setData("text/plain", conv.id);
+        (e as DragEvent).dataTransfer!.effectAllowed = "move";
+        item.style.opacity = "0.5";
+      });
+      item.addEventListener("dragend", () => {
+        item.style.opacity = "1";
+      });
+
+      const dotsBtn = doc.createElement("span");
+      dotsBtn.textContent = "\u22EE";
+      dotsBtn.title = "More actions";
+      dotsBtn.style.cssText = `
+        position: absolute;
+        right: 4px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 14px;
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity 0.1s;
+        padding: 0 4px;
+        color: ${isSelected ? "rgba(255,255,255,0.7)" : "var(--text-secondary)"};
+      `;
+      dotsBtn.addEventListener("click", async (e: MouseEvent) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const itemRect = item.getBoundingClientRect();
+        await Assistant.showHistoryContextMenu(
+          doc,
+          conv,
+          itemRect.right,
+          itemRect.top,
+          item,
+        );
+      });
+      item.appendChild(dotsBtn);
+
+      item.onmouseenter = () => {
+        item.style.background = isSelected
+          ? "var(--highlight-primary, #4a90d9)"
+          : isActive
+            ? "var(--background-primary)"
+            : "var(--background-hover, rgba(0,0,0,0.05))";
+        dotsBtn.style.opacity = "1";
+      };
+      item.onmouseleave = () => {
+        item.style.background = isSelected
+          ? "var(--highlight-primary, #4a90d9)"
+          : isActive
+            ? "var(--background-primary)"
+            : "transparent";
+        dotsBtn.style.opacity = "0";
+      };
+
+      itemsContainer.appendChild(item);
+    }
+
+    section.appendChild(header);
+    section.appendChild(itemsContainer);
+    return section;
+  }
+
+  /**
+   * Show a context menu for a history item (rename, delete, copy, clone, download, archive, move).
+   */
+  private static async showHistoryContextMenu(
+    doc: Document,
+    conv: ConversationMetadata,
+    x: number,
+    y: number,
+    anchor?: HTMLElement,
+  ) {
+    const store = getMessageStore();
+    const allFolders = await store.getFolders();
+
+    // Remove any existing context menus
+    const existing = doc.getElementById("history-context-menu");
+    if (existing) existing.remove();
+
+    const menu = doc.createElement("div");
+    menu.id = "history-context-menu";
+    menu.style.cssText = `
+      position: fixed;
+      left: ${x}px;
+      top: ${y}px;
+      z-index: 99999;
+      background: var(--background-primary);
+      border: 1px solid var(--border-primary);
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      padding: 4px 0;
+      min-width: 200px;
+      font-size: 12px;
+      max-height: 80vh;
+      overflow-y: auto;
+    `;
+
+    const addItem = (
+      text: string,
+      action: () => void,
+      danger: boolean = false,
+    ) => {
+      const el = doc.createElement("div");
+      el.textContent = text;
+      el.style.cssText = `
+        padding: 6px 12px;
+        cursor: pointer;
+        color: ${danger ? "#ef5350" : "var(--text-primary)"};
+        transition: background 0.1s;
+        white-space: nowrap;
+      `;
+      el.onclick = async () => {
+        menu.remove();
+        await action();
+      };
+      el.onmouseenter = () => {
+        el.style.background = "var(--background-hover, rgba(0,0,0,0.05))";
+      };
+      el.onmouseleave = () => {
+        el.style.background = "transparent";
+      };
+      menu.appendChild(el);
+    };
+
+    const addSeparator = () => {
+      const sep = doc.createElement("div");
+      sep.style.cssText =
+        "border-top: 1px solid var(--border-primary); margin: 4px 0;";
+      menu.appendChild(sep);
+    };
+
+    const refreshHistory = async () => {
+      await Assistant.loadHistory();
+      if (currentContainer && currentItem) {
+        Assistant.renderInterface(currentContainer, currentItem);
+      }
+    };
+
+    // Rename
+    addItem("Rename...", async () => {
+      const newTitle = (
+        doc.defaultView?.prompt("Rename conversation:", conv.title || "") || ""
+      ).trim();
+      if (!newTitle || newTitle === conv.title) return;
+      await store.updateConversationMetadata({
+        id: conv.id,
+        title: newTitle,
+      });
+      await refreshHistory();
+    });
+
+    addSeparator();
+
+    // Copy full chat history + context
+    addItem("Copy", async () => {
+      try {
+        const exported = await store.exportConversation(conv.id);
+        const clipText =
+          "data:text/plain;charset=utf-8," + encodeURIComponent(exported);
+        // In Zotero, we can use write to temp and copy to clipboard
+        const textEncoder = new TextEncoder();
+        const encoded = textEncoder.encode(exported);
+        // Use a simple approach: copy via doc command
+        const textarea = doc.createElement("textarea");
+        textarea.value = exported;
+        textarea.style.cssText = "position: fixed; top: -9999px;";
+        doc.body?.appendChild(textarea);
+        textarea.select();
+        doc.execCommand("copy");
+        textarea.remove();
+      } catch (e) {
+        Zotero.debug(`[seerai] Copy failed: ${e}`);
+      }
+    });
+
+    // Clone
+    addItem("Clone", async () => {
+      try {
+        const newId = await store.cloneConversation(conv.id);
+        await refreshHistory();
+        // Switch to the clone
+        setTimeout(() => Assistant.loadChat(newId), 100);
+      } catch (e) {
+        Zotero.debug(`[seerai] Clone failed: ${e}`);
+      }
+    });
+
+    // Download as JSON
+    addItem("Download", async () => {
+      try {
+        const exported = await store.exportConversation(conv.id);
+        const fileName = `${conv.title || "chat"}.json`.replace(
+          /[^a-zA-Z0-9._-]/g,
+          "_",
+        );
+        const downloadDir = PathUtils.join(
+          (Zotero.Prefs as any).get("browser.download.dir") ||
+            PathUtils.join(Zotero.DataDirectory.dir, "downloads"),
+          fileName,
+        );
+        const encoder = new TextEncoder();
+        await IOUtils.write(downloadDir, encoder.encode(exported));
+      } catch (e) {
+        Zotero.debug(`[seerai] Download failed: ${e}`);
+      }
+    });
+
+    addSeparator();
+
+    // Archive / Unarchive
+    if (conv.archived) {
+      addItem("Unarchive", async () => {
+        await store.unarchiveConversation(conv.id);
+        await refreshHistory();
+      });
+    } else {
+      addItem("Archive", async () => {
+        await store.archiveConversation(conv.id);
+        await refreshHistory();
+      });
+    }
+
+    // Move to folder sub-items
+    if (conv.folder) {
+      addItem(`\u21A9 Remove from "${conv.folder}"`, async () => {
+        await store.removeConversationFromFolder(conv.id);
+        await refreshHistory();
+      });
+    }
+
+    for (const folder of allFolders) {
+      if (folder === conv.folder) continue;
+      addItem(`\u2192 ${folder}`, async () => {
+        await store.moveConversationToFolder(conv.id, folder);
+        await refreshHistory();
+      });
+    }
+
+    addItem("+ New folder...", async () => {
+      const name = (
+        doc.defaultView?.prompt("New folder name:", "") || ""
+      ).trim();
+      if (!name) return;
+      await store.moveConversationToFolder(conv.id, name);
+      await refreshHistory();
+    });
+
+    addSeparator();
+
+    addItem(
+      "Delete",
+      async () => {
+        if (doc.defaultView?.confirm("Delete this conversation?")) {
+          await Assistant.deleteChat(conv.id);
+        }
+      },
+      true,
+    );
+
+    const container = anchor || doc.body;
+    if (!container) return;
+    container.appendChild(menu);
+
+    // Clamp to viewport
+    setTimeout(() => {
+      const menuRect = menu.getBoundingClientRect();
+      const viewW = doc.defaultView?.innerWidth || 1200;
+      const viewH = doc.defaultView?.innerHeight || 800;
+      if (menuRect.right > viewW - 8) {
+        menu.style.left = `${Math.max(8, viewW - menuRect.width - 8)}px`;
+      }
+      if (menuRect.bottom > viewH - 8) {
+        menu.style.top = `${Math.max(8, viewH - menuRect.height - 8)}px`;
+      }
+    }, 0);
+
+    // Click outside to close
+    const closeListener = (e: Event) => {
+      if (!menu.contains(e.target as Node)) {
+        menu.remove();
+        doc.removeEventListener("click", closeListener);
+      }
+    };
+    setTimeout(() => doc.addEventListener("click", closeListener), 0);
+  }
+
+  /**
+   * Re-render only the sidebars (history + workspace) without full reload.
+   */
+  private static async renderInterfaceSidebarsOnly() {
+    if (currentContainer && currentItem) {
+      await this.renderInterface(currentContainer, currentItem);
+    }
+  }
+
+  /**
+   * Create a horizontal resize handle for sidebar width adjustment.
+   * @param direction "left" = drag right increases width (history sidebar),
+   *                  "right" = drag left increases width (workspace sidebar)
+   */
+  private static createHorizontalResizeHandle(
+    doc: Document,
+    direction: "left" | "right",
+    onResize: (width: number) => void,
+    getWidth: () => number,
+    minWidth: number = 120,
+    maxWidth: number = 500,
+    onDragEnd?: (width: number) => void,
+  ): HTMLElement {
+    const handle = doc.createElement("div");
+    handle.className = "seerai-resize-handle";
+    handle.style.cssText = `
+      width: 4px;
+      cursor: col-resize;
+      background: transparent;
+      flex-shrink: 0;
+      transition: background 0.15s;
+      z-index: 10;
+    `;
+    handle.addEventListener("mouseenter", () => {
+      handle.style.background = "var(--highlight-primary)";
+    });
+    handle.addEventListener("mouseleave", () => {
+      handle.style.background = "transparent";
+    });
+
+    let dragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    const sign = direction === "left" ? 1 : -1;
+
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      dragging = true;
+      startX = (e as MouseEvent).clientX;
+      startWidth = getWidth();
+      handle.style.background = "var(--highlight-primary)";
+      const body = handle.ownerDocument?.body;
+      if (body) {
+        body.style.cursor = "col-resize";
+        body.style.userSelect = "none";
+      }
+    });
+
+    doc.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const delta = ((e as MouseEvent).clientX - startX) * sign;
+      const newWidth = Math.max(
+        minWidth,
+        Math.min(maxWidth, startWidth + delta),
+      );
+      onResize(newWidth);
+    });
+
+    doc.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      handle.style.background = "transparent";
+      const body = handle.ownerDocument?.body;
+      if (body) {
+        body.style.cursor = "";
+        body.style.userSelect = "";
+      }
+      if (onDragEnd) onDragEnd(getWidth());
+    });
+
+    return handle;
+  }
+
+  /**
+   * Create a vertical resize handle for editor height adjustment.
+   * Drag down increases height.
+   */
+  private static createVerticalResizeHandle(
+    doc: Document,
+    onResize: (height: number) => void,
+    getHeight: () => number,
+    minHeight: number = 120,
+    maxHeight: number = 800,
+    onDragEnd?: (height: number) => void,
+  ): HTMLElement {
+    const handle = doc.createElement("div");
+    handle.style.cssText = `
+      height: 8px;
+      cursor: row-resize;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      z-index: 10;
+      position: relative;
+    `;
+
+    // Visible grip indicator
+    const grip = doc.createElement("div");
+    grip.style.cssText = `
+      width: 40px;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--text-tertiary);
+      opacity: 0.4;
+      transition: opacity 0.15s, background 0.15s;
+    `;
+    handle.appendChild(grip);
+
+    handle.addEventListener("mouseenter", () => {
+      grip.style.opacity = "0.8";
+      grip.style.background = "var(--highlight-primary)";
+      handle.style.background = "var(--background-hover, rgba(0,0,0,0.03))";
+    });
+    handle.addEventListener("mouseleave", () => {
+      if (dragging) return;
+      grip.style.opacity = "0.4";
+      grip.style.background = "var(--text-tertiary)";
+      handle.style.background = "transparent";
+    });
+
+    let dragging = false;
+    let startY = 0;
+    let startHeight = 0;
+
+    handle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      dragging = true;
+      startY = (e as MouseEvent).clientY;
+      startHeight = getHeight();
+      grip.style.opacity = "1";
+      grip.style.background = "var(--highlight-primary)";
+      handle.style.background = "var(--background-hover, rgba(0,0,0,0.03))";
+      const vBody = handle.ownerDocument?.body;
+      if (vBody) {
+        vBody.style.cursor = "row-resize";
+        vBody.style.userSelect = "none";
+      }
+    });
+
+    doc.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const delta = startY - (e as MouseEvent).clientY;
+      const newHeight = Math.max(
+        minHeight,
+        Math.min(maxHeight, startHeight + delta),
+      );
+      onResize(newHeight);
+    });
+
+    doc.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      grip.style.opacity = "0.4";
+      grip.style.background = "var(--text-tertiary)";
+      handle.style.background = "transparent";
+      const vBody2 = handle.ownerDocument?.body;
+      if (vBody2) {
+        vBody2.style.cursor = "";
+        vBody2.style.userSelect = "";
+      }
+      if (onDragEnd) onDragEnd(getHeight());
+    });
+
+    return handle;
   }
 
   /**
@@ -2983,6 +4491,7 @@ export class Assistant {
             setCompleted,
             updateProgress,
             setFailed,
+            updateStats: () => {},
           };
           activeAgentSession.toolContainer = listContainer;
 
@@ -3013,14 +4522,11 @@ export class Assistant {
             activeAgentSession.iterationCount > 0 ||
             activeAgentSession.toolResults.length > 0
           ) {
-            setThinking();
-          } else if (
-            activeAgentSession.iterationCount > 0 ||
-            activeAgentSession.toolResults.length > 0
-          ) {
             const finalCount = activeAgentSession.iterationCount || 0;
             const toolCount = activeAgentSession.toolResults.length;
             setCompleted(finalCount, toolCount);
+          } else {
+            setThinking();
           }
 
           // CRITICAL: Update the uiElement references in toolResults so observer updates THIS element
@@ -3101,23 +4607,930 @@ export class Assistant {
     // Update initially after a delay to ensure context is ready
     setTimeout(updateTokenDisplay, 500);
 
-    // Subscribe to context changes for dynamic updates
+    const myGeneration = renderGeneration;
     ChatContextManager.getInstance().addListener(() => {
-      updateTokenDisplay();
+      if (renderGeneration === myGeneration) updateTokenDisplay();
+    });
+    stateManager.subscribe(() => {
+      if (renderGeneration === myGeneration) updateTokenDisplay();
     });
 
-    // Also subscribe to settings changes (e.g. Include Notes Only)
-    stateManager.subscribe(() => {
-      updateTokenDisplay();
-    });
+    // === WORKSPACE EDITOR CONTAINER ===
+    const workspaceEditorContainer = doc.createElement("div");
+    workspaceEditorContainer.className = "workspace-editor-container";
+    const editorManager = WorkspaceEditorManager.getInstance();
+    editorManager.createEditorContainer(doc, workspaceEditorContainer);
+
+    const makeOnFileClick = (
+      entry: any,
+      diffMode?: string,
+      oldContent?: string,
+      newContent?: string,
+    ) => {
+      if (diffMode) {
+        return editorManager.openFileWithDiff(
+          entry,
+          oldContent ?? "",
+          newContent ?? "",
+        );
+      }
+      return editorManager.openFile(entry);
+    };
+
+    // === WORKSPACE SIDEBAR ===
+    let workspaceSidebar: HTMLElement;
+    try {
+      workspaceSidebar = createWorkspaceSidebar(doc, {
+        onFileClick: async (entry, diffMode, oldContent, newContent) => {
+          await makeOnFileClick(entry, diffMode, oldContent, newContent);
+        },
+        onFileCreate: async () => {
+          const name = (
+            doc.defaultView?.prompt(
+              "Enter file path (e.g., src/new-file.ts):",
+              "",
+            ) || ""
+          ).trim();
+          if (!name) return;
+          const store = getWorkspaceStore();
+          await store.writeFile(name, "", `Created ${name}`, "user");
+          await refreshWorkspaceSidebar(workspaceSidebar, {
+            onFileClick: async (entry, diffMode, oldContent, newContent) => {
+              await makeOnFileClick(entry, diffMode, oldContent, newContent);
+            },
+            onFileCreate: async () => {},
+            onFileDelete: async (entry) => {},
+            onFileRename: async (entry) => {},
+          });
+        },
+        onFileDelete: async (entry) => {
+          if (
+            !doc.defaultView?.confirm(
+              `Delete "${entry.path}"? This cannot be undone.`,
+            )
+          )
+            return;
+          const store = getWorkspaceStore();
+          await store.deleteFile(entry.path);
+          editorManager.closeAll();
+          await refreshWorkspaceSidebar(workspaceSidebar, {
+            onFileClick: async (entry, diffMode, oldContent, newContent) => {
+              await makeOnFileClick(entry, diffMode, oldContent, newContent);
+            },
+            onFileCreate: async () => {},
+            onFileDelete: async (e) => {},
+            onFileRename: async (e) => {},
+          });
+        },
+        onFileRename: async (entry) => {
+          const newPath = (
+            doc.defaultView?.prompt("Rename to:", entry.path) || ""
+          ).trim();
+          if (!newPath || newPath === entry.path) return;
+          const store = getWorkspaceStore();
+          await store.renameFile(entry.path, newPath);
+          await refreshWorkspaceSidebar(workspaceSidebar, {
+            onFileClick: async (entry, diffMode, oldContent, newContent) => {
+              await makeOnFileClick(entry, diffMode, oldContent, newContent);
+            },
+            onFileCreate: async () => {},
+            onFileDelete: async (e) => {},
+            onFileRename: async (e) => {},
+          });
+        },
+      });
+
+      // Refresh callbacks (re-bind with workspaceSidebar reference)
+      const refreshCallbacks = () => ({
+        onFileClick: async (
+          entry: any,
+          diffMode?: string,
+          oldContent?: string,
+          newContent?: string,
+        ) => {
+          await makeOnFileClick(entry, diffMode, oldContent, newContent);
+        },
+        onFileCreate: async () => {
+          const name = (
+            doc.defaultView?.prompt(
+              "Enter file path (e.g., src/new-file.ts):",
+              "",
+            ) || ""
+          ).trim();
+          if (!name) return;
+          const store = getWorkspaceStore();
+          await store.writeFile(name, "", `Created ${name}`, "user");
+          await refreshWorkspaceSidebar(workspaceSidebar, refreshCallbacks());
+        },
+        onFileDelete: async (entry: any) => {
+          if (
+            !doc.defaultView?.confirm(
+              `Delete "${entry.path}"? This cannot be undone.`,
+            )
+          )
+            return;
+          const store = getWorkspaceStore();
+          await store.deleteFile(entry.path);
+          editorManager.closeAll();
+          await refreshWorkspaceSidebar(workspaceSidebar, refreshCallbacks());
+        },
+        onFileRename: async (entry: any) => {
+          const newPath = (
+            doc.defaultView?.prompt("Rename to:", entry.path) || ""
+          ).trim();
+          if (!newPath || newPath === entry.path) return;
+          const store = getWorkspaceStore();
+          await store.renameFile(entry.path, newPath);
+          await refreshWorkspaceSidebar(workspaceSidebar, refreshCallbacks());
+        },
+      });
+
+      // Wire up auto-refresh when workspace tools write/delete/edit files
+      getWorkspaceStore().onWorkspaceChanged = async () => {
+        await refreshWorkspaceSidebar(workspaceSidebar, refreshCallbacks());
+      };
+    } catch (e) {
+      Zotero.debug(`[seerai] Error creating workspace sidebar: ${e}`);
+      workspaceSidebar = doc.createElement("div");
+      workspaceSidebar.textContent = `Error: ${e}`;
+    }
 
     // Assemble
     chatContainer.appendChild(selectionArea);
+    chatContainer.appendChild(this.createPromptBanner(doc, stateManager));
     chatContainer.appendChild(messagesArea);
+    chatContainer.appendChild(workspaceEditorContainer);
     chatContainer.appendChild(inputArea);
 
+    const historySidebar = await this.createHistorySidebar(doc);
+
+    // Ensure workspace sidebar has flex-shrink: 0
+    workspaceSidebar.style.flexShrink = "0";
+
+    // Read persisted sizes
+    const prefPrefix = config.prefsPrefix;
+    const historyWidth =
+      (Zotero.Prefs.get(`${prefPrefix}.historySidebarWidth`) as number) || 220;
+    const workspaceWidth =
+      (Zotero.Prefs.get(`${prefPrefix}.workspaceSidebarWidth`) as number) ||
+      260;
+    const editorHeight =
+      (Zotero.Prefs.get(`${prefPrefix}.workspaceEditorHeight`) as number) ||
+      300;
+
+    // Apply sizes (respect sidebar collapsed states)
+    if (isHistorySidebarVisible) {
+      historySidebar.style.width = `${historyWidth}px`;
+      historySidebar.style.minWidth = "0";
+    }
+    if (!(workspaceSidebar as any)._isCollapsed) {
+      workspaceSidebar.style.width = `${workspaceWidth}px`;
+      workspaceSidebar.style.minWidth = "0";
+    }
+    workspaceEditorContainer.style.height = `${editorHeight}px`;
+    workspaceEditorContainer.style.maxHeight = `${editorHeight}px`;
+
+    // History resize handle (right edge of left sidebar)
+    const historyHandle = this.createHorizontalResizeHandle(
+      doc,
+      "left",
+      (w) => {
+        historySidebar.style.width = `${w}px`;
+        historySidebar.style.minWidth = "0";
+      },
+      () => parseInt(historySidebar.style.width) || historyWidth,
+      120,
+      500,
+      (w) => Zotero.Prefs.set(`${prefPrefix}.historySidebarWidth`, w),
+    );
+
+    // Workspace resize handle (left edge of right sidebar)
+    const workspaceHandle = this.createHorizontalResizeHandle(
+      doc,
+      "right",
+      (w) => {
+        workspaceSidebar.style.width = `${w}px`;
+        workspaceSidebar.style.minWidth = "0";
+      },
+      () => parseInt(workspaceSidebar.style.width) || workspaceWidth,
+      120,
+      500,
+      (w) => Zotero.Prefs.set(`${prefPrefix}.workspaceSidebarWidth`, w),
+    );
+
+    // Editor height resize handle (top edge of editor container)
+    const editorHeightHandle = this.createVerticalResizeHandle(
+      doc,
+      (h) => {
+        workspaceEditorContainer.style.height = `${h}px`;
+        workspaceEditorContainer.style.maxHeight = `${h}px`;
+      },
+      () => parseInt(workspaceEditorContainer.style.height) || editorHeight,
+      120,
+      800,
+      (h) => Zotero.Prefs.set(`${prefPrefix}.workspaceEditorHeight`, h),
+    );
+
+    mainWrapper.appendChild(historySidebar);
+    mainWrapper.appendChild(historyHandle);
     mainWrapper.appendChild(chatContainer);
+    mainWrapper.appendChild(workspaceHandle);
+    mainWrapper.appendChild(workspaceSidebar);
+
+    // Hide resize handles for collapsed sidebars
+    if (!isHistorySidebarVisible) {
+      historyHandle.style.display = "none";
+    }
+    if ((workspaceSidebar as any)._isCollapsed) {
+      workspaceHandle.style.display = "none";
+    }
+
+    // Insert editor height handle before editor container
+    chatContainer.insertBefore(editorHeightHandle, workspaceEditorContainer);
+
+    // Populate workspace sidebar with current files
+    await refreshWorkspaceSidebar(workspaceSidebar, {
+      onFileClick: async (entry, diffMode, oldContent, newContent) => {
+        if (diffMode) {
+          await editorManager.openFileWithDiff(
+            entry,
+            oldContent ?? "",
+            newContent ?? "",
+          );
+        } else {
+          await editorManager.openFile(entry);
+        }
+      },
+      onFileCreate: async () => {},
+      onFileDelete: async (entry) => {},
+      onFileRename: async (entry) => {},
+    });
+
     return mainWrapper;
+  }
+
+  /**
+   * Create a collapsible prompt config banner above the messages area.
+   * Clicking the header expands/collapses an inline editor (not a popup).
+   */
+  private static createPromptBanner(
+    doc: Document,
+    stateManager: ReturnType<typeof getChatStateManager>,
+  ): HTMLElement {
+    const store = getMessageStore();
+    const options = stateManager.getOptions();
+    const systemPrompt = options.systemPrompt || "";
+    const skillIds = options.skillIds || [];
+
+    const banner = doc.createElement("div");
+    banner.id = "prompt-config-banner";
+    banner.style.cssText = `
+      padding: 6px 10px;
+      font-size: 11px;
+      flex-shrink: 0;
+      border: 1px solid var(--border-primary);
+      border-radius: 6px;
+      background: var(--background-secondary);
+    `;
+
+    const header = doc.createElement("div");
+    header.style.cssText =
+      "display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;";
+
+    const arrow = doc.createElement("span");
+    arrow.textContent = "\u25B8";
+    arrow.style.cssText = "font-size: 10px; transition: transform 0.2s;";
+
+    const label = doc.createElement("span");
+    label.style.cssText =
+      "font-weight: 600; color: var(--text-secondary); white-space: nowrap;";
+    label.textContent = "System Prompt";
+
+    const preview = doc.createElement("span");
+    preview.style.cssText =
+      "color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0;";
+    preview.textContent = systemPrompt
+      ? systemPrompt.replace(/\n/g, " ").slice(0, 60) +
+        (systemPrompt.length > 60 ? "\u2026" : "")
+      : "None set";
+
+    // Skills count badge
+    if (skillIds.length > 0) {
+      const badge = doc.createElement("span");
+      badge.textContent = `${skillIds.length} skill(s)`;
+      badge.style.cssText =
+        "background: var(--accent-blue, #007AFF); color: #fff; border-radius: 8px; padding: 0 6px; font-size: 10px; white-space: nowrap;";
+      header.appendChild(badge);
+    }
+
+    header.appendChild(arrow);
+    header.appendChild(label);
+    header.appendChild(preview);
+
+    // Inline editable body (collapsed by default unless persisted)
+    const body = doc.createElement("div");
+    body.style.cssText = systemPromptExpanded
+      ? "margin-top: 8px;"
+      : "display: none; margin-top: 8px;";
+    body.dataset.loaded = "false";
+
+    if (systemPromptExpanded) {
+      arrow.textContent = "\u25BE";
+      // Build the editor body immediately since it's already expanded
+      void this.buildPromptEditorBody(doc, body, banner, stateManager).then(
+        () => {
+          body.dataset.loaded = "true";
+        },
+      );
+    }
+
+    // Build the editor inline on first expand
+    header.addEventListener("click", async () => {
+      const collapsed = body.style.display === "none";
+      if (collapsed) {
+        body.style.display = "block";
+        arrow.textContent = "\u25BE";
+        systemPromptExpanded = true;
+        if (body.dataset.loaded !== "true") {
+          await this.buildPromptEditorBody(doc, body, banner, stateManager);
+          body.dataset.loaded = "true";
+        }
+      } else {
+        body.style.display = "none";
+        arrow.textContent = "\u25B8";
+        systemPromptExpanded = false;
+      }
+    });
+
+    banner.appendChild(header);
+    banner.appendChild(body);
+
+    return banner;
+  }
+
+  /**
+   * Populate the inline prompt editor body with textarea + skills + actions.
+   */
+  private static async buildPromptEditorBody(
+    doc: Document,
+    body: HTMLElement,
+    banner: HTMLElement,
+    stateManager: ReturnType<typeof getChatStateManager>,
+  ): Promise<void> {
+    // Clear any existing content (prevents duplicates on rapid re-expand)
+    body.innerHTML = "";
+
+    const store = getMessageStore();
+    const options = stateManager.getOptions();
+    const currentPrompt = options.systemPrompt || "";
+    const currentSkillIds = options.skillIds || [];
+
+    // System prompt textarea
+    const promptLabel = doc.createElement("label");
+    promptLabel.textContent = "System Prompt";
+    promptLabel.style.cssText =
+      "font-weight: 600; color: var(--text-secondary); font-size: 11px; display: block; margin-bottom: 4px;";
+    body.appendChild(promptLabel);
+
+    const promptArea = doc.createElement("textarea");
+    promptArea.value = currentPrompt;
+    promptArea.placeholder =
+      "Enter a custom system prompt for this conversation...";
+    promptArea.style.cssText = `
+      width: 100%;
+      padding: 8px;
+      font-family: "Menlo", "Monaco", "Consolas", monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      border: 1px solid var(--border-primary);
+      border-radius: 4px;
+      background: var(--background-primary);
+      color: var(--text-primary);
+      resize: vertical;
+      box-sizing: border-box;
+      min-height: 80px;
+      outline: none;
+    `;
+    promptArea.rows = 5;
+    body.appendChild(promptArea);
+
+    // Skills selection
+    const skillsLabel = doc.createElement("div");
+    skillsLabel.textContent = "Skills (from Prompt Library)";
+    skillsLabel.style.cssText =
+      "font-weight: 600; color: var(--text-secondary); font-size: 11px; margin-top: 8px; margin-bottom: 4px;";
+    body.appendChild(skillsLabel);
+
+    const skillsContainer = doc.createElement("div");
+    skillsContainer.style.cssText =
+      "max-height: 160px; overflow-y: auto; border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px;";
+    body.appendChild(skillsContainer);
+
+    const selectedSkills = new Set<string>(currentSkillIds);
+
+    try {
+      const skills = await getPromptsByCategory("skills");
+
+      if (skills.length === 0) {
+        const empty = doc.createElement("div");
+        empty.textContent = "No skills templates found. Create one below.";
+        empty.style.cssText =
+          "padding: 8px; color: var(--text-tertiary); font-style: italic; font-size: 11px;";
+        skillsContainer.appendChild(empty);
+      } else {
+        for (const skill of skills) {
+          const row = doc.createElement("label");
+          row.style.cssText =
+            "display: flex; align-items: center; gap: 6px; padding: 4px 6px; cursor: pointer; font-size: 11px;";
+          row.addEventListener("mouseenter", () => {
+            row.style.background = "var(--background-hover, rgba(0,0,0,0.05))";
+          });
+          row.addEventListener("mouseleave", () => {
+            row.style.background = "transparent";
+          });
+
+          const cb = doc.createElement("input");
+          cb.type = "checkbox";
+          cb.checked = selectedSkills.has(skill.id);
+          cb.addEventListener("change", () => {
+            if (cb.checked) selectedSkills.add(skill.id);
+            else selectedSkills.delete(skill.id);
+          });
+
+          const name = doc.createElement("span");
+          name.textContent = skill.name;
+          name.style.cssText = "flex: 1;";
+
+          row.appendChild(cb);
+          row.appendChild(name);
+          skillsContainer.appendChild(row);
+        }
+      }
+
+      // "New Skill" inline form
+      const newSkillRow = doc.createElement("div");
+      newSkillRow.style.cssText =
+        "display: flex; gap: 4px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border-primary);";
+      const newSkillInput = doc.createElement("input");
+      newSkillInput.type = "text";
+      newSkillInput.placeholder = "New skill name...";
+      newSkillInput.style.cssText = `
+        flex: 1;
+        padding: 4px 8px;
+        font-size: 11px;
+        border: 1px solid var(--border-primary);
+        border-radius: 4px;
+        background: var(--background-primary);
+        color: var(--text-primary);
+        outline: none;
+      `;
+      const newSkillBtn = doc.createElementNS(
+        HTML_NS,
+        "button",
+      ) as HTMLButtonElement;
+      newSkillBtn.textContent = "+";
+      newSkillBtn.title = "Add skill template";
+      newSkillBtn.style.cssText = `
+        padding: 4px 8px;
+        font-size: 11px;
+        border: 1px solid var(--border-primary);
+        border-radius: 4px;
+        background: var(--background-secondary);
+        color: var(--text-secondary);
+        cursor: pointer;
+      `;
+      newSkillBtn.addEventListener("click", async () => {
+        const name = newSkillInput.value.trim();
+        if (!name) return;
+        try {
+          const template = promptArea.value.trim();
+          await addPrompt({
+            name,
+            description: `Skill: ${name}`,
+            template: template || `You are skilled at ${name.toLowerCase()}.`,
+            category: "skills",
+            tags: ["skill", name.toLowerCase()],
+          });
+          newSkillInput.value = "";
+          selectedSkills.add(name.toLowerCase().replace(/\s+/g, "-"));
+          newSkillBtn.textContent = "\u2713";
+          setTimeout(() => {
+            newSkillBtn.textContent = "+";
+          }, 1000);
+        } catch (e) {
+          Zotero.debug(`[seerai] Error adding skill: ${e}`);
+        }
+      });
+      newSkillRow.appendChild(newSkillInput);
+      newSkillRow.appendChild(newSkillBtn);
+      skillsContainer.appendChild(newSkillRow);
+    } catch (e) {
+      const err = doc.createElement("div");
+      err.textContent = `Error loading skills: ${e}`;
+      err.style.cssText = "padding: 8px; color: #ef5350;";
+      skillsContainer.appendChild(err);
+    }
+
+    // Action buttons
+    const actions = doc.createElement("div");
+    actions.style.cssText =
+      "display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;";
+
+    const cancelBtn = doc.createElementNS(
+      HTML_NS,
+      "button",
+    ) as HTMLButtonElement;
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.style.cssText = `
+      padding: 5px 10px;
+      font-size: 11px;
+      border: 1px solid var(--border-primary);
+      border-radius: 4px;
+      background: var(--background-secondary);
+      color: var(--text-secondary);
+      cursor: pointer;
+    `;
+    cancelBtn.addEventListener("click", () => {
+      body.style.display = "none";
+      systemPromptExpanded = false;
+      const arrowEl = banner.querySelector("span");
+      if (arrowEl) arrowEl.textContent = "\u25B8";
+    });
+    actions.appendChild(cancelBtn);
+
+    const saveBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+    saveBtn.textContent = "Apply";
+    saveBtn.style.cssText = `
+      padding: 5px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      border: none;
+      border-radius: 4px;
+      background: var(--highlight-primary);
+      color: #fff;
+      cursor: pointer;
+    `;
+    saveBtn.addEventListener("click", async () => {
+      const newPrompt = promptArea.value.trim();
+      const newSkillIds = Array.from(selectedSkills);
+
+      stateManager.setOptions({
+        systemPrompt: newPrompt || undefined,
+        skillIds: newSkillIds.length > 0 ? newSkillIds : undefined,
+      } as any);
+
+      await store.updateConversationMetadata({
+        systemPrompt: newPrompt || undefined,
+        skillIds: newSkillIds.length > 0 ? newSkillIds : undefined,
+      });
+
+      // Refresh banner to show updated preview text
+      if (banner.parentNode) {
+        const newBanner = await this.createPromptBanner(doc, stateManager);
+        banner.parentNode.replaceChild(newBanner, banner);
+      }
+    });
+    actions.appendChild(saveBtn);
+
+    body.appendChild(actions);
+  }
+
+  /**
+   * Show the prompt configuration modal for editing system prompt and skills.
+   * @deprecated Use the inline expander in createPromptBanner instead.
+   */
+  private static async showPromptConfigModal(
+    doc: Document,
+    stateManager: ReturnType<typeof getChatStateManager>,
+    banner: HTMLElement,
+  ): Promise<void> {
+    const existing = doc.getElementById("prompt-config-modal");
+    if (existing) existing.remove();
+    const existingBackdrop = doc.getElementById("prompt-config-modal-backdrop");
+    if (existingBackdrop) existingBackdrop.remove();
+
+    const store = getMessageStore();
+    const options = stateManager.getOptions();
+    const currentPrompt = options.systemPrompt || "";
+    const currentSkillIds = options.skillIds || [];
+
+    const overlay = doc.createElement("div");
+    overlay.id = "prompt-config-modal-backdrop";
+    overlay.style.cssText = `
+      position: absolute;
+      inset: 0;
+      z-index: 100000;
+      background: rgba(0,0,0,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `;
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    const modal = doc.createElement("div");
+    modal.id = "prompt-config-modal";
+    modal.style.cssText = `
+      background: var(--background-primary);
+      border: 1px solid var(--border-primary);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+      padding: 16px;
+      min-width: 440px;
+      max-width: 600px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      font-size: 12px;
+    `;
+
+    // Title
+    const title = doc.createElement("div");
+    title.style.cssText =
+      "display: flex; justify-content: space-between; align-items: center;";
+    const titleText = doc.createElement("span");
+    titleText.textContent = "Configure Prompt & Skills";
+    titleText.style.cssText = "font-weight: 600; font-size: 14px;";
+    const closeBtn = doc.createElement("span");
+    closeBtn.textContent = "\u2715";
+    closeBtn.style.cssText =
+      "cursor: pointer; font-size: 16px; color: var(--text-secondary); padding: 0 4px;";
+    closeBtn.addEventListener("click", () => overlay.remove());
+    title.appendChild(titleText);
+    title.appendChild(closeBtn);
+    modal.appendChild(title);
+
+    // System prompt textarea
+    const promptLabel = doc.createElement("label");
+    promptLabel.textContent = "System Prompt";
+    promptLabel.style.cssText =
+      "font-weight: 600; color: var(--text-secondary);";
+    modal.appendChild(promptLabel);
+
+    const promptArea = doc.createElement("textarea");
+    promptArea.value = currentPrompt;
+    promptArea.placeholder =
+      "Enter a custom system prompt for this conversation...";
+    promptArea.style.cssText = `
+      width: 100%;
+      padding: 8px;
+      font-family: "Menlo", "Monaco", "Consolas", monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      border: 1px solid var(--border-primary);
+      border-radius: 4px;
+      background: var(--background-primary);
+      color: var(--text-primary);
+      resize: vertical;
+      box-sizing: border-box;
+      min-height: 80px;
+      outline: none;
+    `;
+    promptArea.rows = 5;
+    modal.appendChild(promptArea);
+
+    // Skills selection
+    const skillsLabel = doc.createElement("div");
+    skillsLabel.textContent = "Skills (from Prompt Library)";
+    skillsLabel.style.cssText =
+      "font-weight: 600; color: var(--text-secondary); margin-top: 4px;";
+    modal.appendChild(skillsLabel);
+
+    const skillsContainer = doc.createElement("div");
+    skillsContainer.style.cssText =
+      "max-height: 200px; overflow-y: auto; border: 1px solid var(--border-primary); border-radius: 4px; padding: 4px;";
+
+    // Load skills from prompt library
+    try {
+      const skills = await getPromptsByCategory("skills");
+      const selectedSkills = new Set(currentSkillIds);
+
+      if (skills.length === 0) {
+        const empty = doc.createElement("div");
+        empty.textContent =
+          "No skills templates found. Add 'skills' category templates in the Prompt Library settings.";
+        empty.style.cssText =
+          "padding: 8px; color: var(--text-tertiary); font-style: italic;";
+        skillsContainer.appendChild(empty);
+      } else {
+        for (const skill of skills) {
+          const row = doc.createElement("label");
+          row.style.cssText =
+            "display: flex; align-items: center; gap: 6px; padding: 4px 6px; cursor: pointer; font-size: 11px;";
+          row.addEventListener("mouseenter", () => {
+            row.style.background = "var(--background-hover, rgba(0,0,0,0.05))";
+          });
+          row.addEventListener("mouseleave", () => {
+            row.style.background = "transparent";
+          });
+
+          const cb = doc.createElement("input");
+          cb.type = "checkbox";
+          cb.checked = selectedSkills.has(skill.id);
+          cb.addEventListener("change", () => {
+            if (cb.checked) selectedSkills.add(skill.id);
+            else selectedSkills.delete(skill.id);
+          });
+
+          const name = doc.createElement("span");
+          name.textContent = skill.name;
+          name.style.cssText = "flex: 1;";
+
+          row.appendChild(cb);
+          row.appendChild(name);
+          skillsContainer.appendChild(row);
+        }
+      }
+
+      // Store selectedSkills set for save
+      (modal as any)._selectedSkills = selectedSkills;
+
+      // Add "New Skill" form
+      const newSkillRow = doc.createElement("div");
+      newSkillRow.style.cssText =
+        "display: flex; gap: 4px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border-primary);";
+      const newSkillInput = doc.createElement("input");
+      newSkillInput.type = "text";
+      newSkillInput.placeholder = "Skill name...";
+      newSkillInput.style.cssText = `
+        flex: 1;
+        padding: 4px 8px;
+        font-size: 11px;
+        border: 1px solid var(--border-primary);
+        border-radius: 4px;
+        background: var(--background-primary);
+        color: var(--text-primary);
+        outline: none;
+      `;
+      const newSkillBtn = doc.createElementNS(
+        HTML_NS,
+        "button",
+      ) as HTMLButtonElement;
+      newSkillBtn.textContent = "+";
+      newSkillBtn.title = "Add skill template";
+      newSkillBtn.style.cssText = `
+        padding: 4px 8px;
+        font-size: 11px;
+        border: 1px solid var(--border-primary);
+        border-radius: 4px;
+        background: var(--background-secondary);
+        color: var(--text-secondary);
+        cursor: pointer;
+      `;
+      newSkillBtn.addEventListener("click", async () => {
+        const name = newSkillInput.value.trim();
+        if (!name) return;
+        try {
+          const template = promptArea.value.trim();
+          await addPrompt({
+            name,
+            description: `Skill: ${name}`,
+            template: template || `You are skilled at ${name.toLowerCase()}.`,
+            category: "skills",
+            tags: ["skill", name.toLowerCase()],
+          });
+          newSkillInput.value = "";
+          const newCb = doc.createElement("input");
+          newCb.type = "checkbox";
+          newCb.checked = true;
+          selectedSkills.add(name.toLowerCase().replace(/\s+/g, "-"));
+          newSkillBtn.textContent = "\u2713";
+          setTimeout(() => {
+            newSkillBtn.textContent = "+";
+          }, 1000);
+        } catch (e) {
+          Zotero.debug(`[seerai] Error adding skill: ${e}`);
+        }
+      });
+      newSkillRow.appendChild(newSkillInput);
+      newSkillRow.appendChild(newSkillBtn);
+      skillsContainer.appendChild(newSkillRow);
+    } catch (e) {
+      const err = doc.createElement("div");
+      err.textContent = `Error loading skills: ${e}`;
+      err.style.cssText = "padding: 8px; color: #ef5350;";
+      skillsContainer.appendChild(err);
+    }
+
+    modal.appendChild(skillsContainer);
+
+    // Action buttons
+    const actions = doc.createElement("div");
+    actions.style.cssText =
+      "display: flex; justify-content: space-between; gap: 8px; margin-top: 4px;";
+
+    const presetBtn = doc.createElementNS(
+      HTML_NS,
+      "button",
+    ) as HTMLButtonElement;
+    presetBtn.textContent = "Save as Preset...";
+    presetBtn.style.cssText = `
+      padding: 6px 12px;
+      font-size: 11px;
+      border: 1px solid var(--border-primary);
+      border-radius: 4px;
+      background: var(--background-secondary);
+      color: var(--text-secondary);
+      cursor: pointer;
+    `;
+    presetBtn.addEventListener("click", async () => {
+      const name = (doc.defaultView?.prompt("Preset name:", "") || "").trim();
+      if (!name) return;
+      const sel = (modal as any)._selectedSkills as Set<string>;
+      const skillIds = Array.from(sel);
+      // Save to prompt library
+      try {
+        await addPrompt({
+          name,
+          description: `Agent preset: ${promptArea.value ? "with prompt" : ""} ${skillIds.length > 0 ? "with " + skillIds.length + " skills" : ""}`,
+          template: promptArea.value,
+          category: "skills",
+          tags: ["preset", ...skillIds],
+        });
+        Zotero.debug(`[seerai] Preset "${name}" saved to prompt library`);
+      } catch (e) {
+        Zotero.debug(`[seerai] Error saving preset: ${e}`);
+      }
+    });
+    actions.appendChild(presetBtn);
+
+    const rightActions = doc.createElement("div");
+    rightActions.style.cssText = "display: flex; gap: 8px;";
+
+    const cancelBtn = doc.createElementNS(
+      HTML_NS,
+      "button",
+    ) as HTMLButtonElement;
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.style.cssText = `
+      padding: 6px 12px;
+      font-size: 11px;
+      border: 1px solid var(--border-primary);
+      border-radius: 4px;
+      background: var(--background-secondary);
+      color: var(--text-secondary);
+      cursor: pointer;
+    `;
+    cancelBtn.addEventListener("click", () => overlay.remove());
+    rightActions.appendChild(cancelBtn);
+
+    const saveBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+    saveBtn.textContent = "Apply";
+    saveBtn.style.cssText = `
+      padding: 6px 16px;
+      font-size: 11px;
+      font-weight: 600;
+      border: none;
+      border-radius: 4px;
+      background: var(--highlight-primary);
+      color: #fff;
+      cursor: pointer;
+    `;
+    saveBtn.addEventListener("click", async () => {
+      const sel = (modal as any)._selectedSkills as Set<string>;
+      const newPrompt = promptArea.value.trim();
+      const newSkillIds = Array.from(sel);
+
+      // Update chat options
+      stateManager.setOptions({
+        systemPrompt: newPrompt || undefined,
+        skillIds: newSkillIds.length > 0 ? newSkillIds : undefined,
+      } as any);
+
+      // Persist to conversation metadata
+      await store.updateConversationMetadata({
+        systemPrompt: newPrompt || undefined,
+        skillIds: newSkillIds.length > 0 ? newSkillIds : undefined,
+      });
+
+      // Refresh banner
+      if (banner.parentNode) {
+        const newBanner = await this.createPromptBanner(doc, stateManager);
+        banner.parentNode.replaceChild(newBanner, banner);
+      }
+
+      overlay.remove();
+    });
+    rightActions.appendChild(saveBtn);
+    actions.appendChild(rightActions);
+    modal.appendChild(actions);
+
+    overlay.appendChild(modal);
+
+    // Append overlay to the banner's nearest positioned ancestor or the chat container
+    const chatContainerEl =
+      banner.closest("#assistant-messages-area")?.parentElement ||
+      banner.parentElement;
+    if (chatContainerEl) {
+      (chatContainerEl as HTMLElement).style.position = "relative";
+      chatContainerEl.appendChild(overlay);
+    } else {
+      const appendTarget = doc.body || doc.documentElement;
+      if (appendTarget) appendTarget.appendChild(overlay);
+    }
+    promptArea.focus();
   }
 
   /**
@@ -3253,6 +5666,7 @@ export class Assistant {
       onClick: (e: Event) => void,
     ) => {
       const btn = ztoolkit.UI.createElement(doc, "button", {
+        namespace: "html",
         properties: { innerText: icon },
         attributes: { title: title },
         styles: {
@@ -3670,6 +6084,7 @@ export class Assistant {
     }) as HTMLInputElement;
 
     const searchBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Search" },
       styles: {
         padding: "10px 20px",
@@ -3724,6 +6139,7 @@ export class Assistant {
 
     // Suggestions button (replaces auto-dropdown with user-triggered action)
     const suggestionsBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "💡", title: "Get suggestions" },
       styles: {
         padding: "8px 10px",
@@ -3881,6 +6297,7 @@ export class Assistant {
 
     // AI Query Refiner button (🤖)
     const aiRefineBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: {
         innerText: "🤖",
         title: "AI: Refine query for Semantic Scholar",
@@ -4079,6 +6496,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
               });
 
               const useBtn = ztoolkit.UI.createElement(doc, "button", {
+                namespace: "html",
                 properties: { innerText: "✓ Use & Search" },
                 styles: {
                   flex: "1",
@@ -4100,6 +6518,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
               });
 
               const copyBtn = ztoolkit.UI.createElement(doc, "button", {
+                namespace: "html",
                 properties: { innerText: "📋 Copy" },
                 styles: {
                   padding: "8px 12px",
@@ -4164,6 +6583,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
     // === PAST SEARCHES BUTTON AND DROPDOWN ===
     const pastSearchesBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "📜", title: "Past Searches" },
       styles: {
         padding: "8px 10px",
@@ -4226,8 +6646,16 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
             fontSize: "12px",
           },
         });
-        emptyMsg.innerHTML =
-          "📭 No past searches yet<br><br>Your search history will appear here after you perform searches.";
+        emptyMsg.textContent = "📭 No past searches yet";
+        const br1 = doc.createElementNS(HTML_NS, "br");
+        const br2 = doc.createElementNS(HTML_NS, "br");
+        emptyMsg.appendChild(br1);
+        emptyMsg.appendChild(br2);
+        emptyMsg.appendChild(
+          doc.createTextNode(
+            "Your search history will appear here after you perform searches.",
+          ),
+        );
         pastSearchesDropdown.appendChild(emptyMsg);
       } else {
         // Header
@@ -4296,6 +6724,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
           // Delete button
           const deleteBtn = ztoolkit.UI.createElement(doc, "button", {
+            namespace: "html",
             properties: { innerText: "🗑️", title: "Delete this search" },
             styles: {
               padding: "4px 6px",
@@ -4539,6 +6968,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
     // Save button
     const saveBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "💾 Save" },
       styles: {
         padding: "4px 10px",
@@ -4574,6 +7004,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
     // Rename button
     const renameBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "✏️" },
       attributes: { title: "Rename preset" },
       styles: {
@@ -4627,6 +7058,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
     // Delete button
     const deleteBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "🗑️" },
       attributes: { title: "Delete preset" },
       styles: {
@@ -4663,6 +7095,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
     // Toggle button for advanced filters
     const toggleBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "⚙️ Advanced" },
       attributes: { title: "Show/hide advanced filters" },
       styles: {
@@ -5610,7 +8043,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     container: HTMLElement,
     item: Zotero.Item,
   ): void {
-    container.innerHTML = "";
+    container.textContent = "";
 
     if (currentSearchResults.length === 0 && !currentSearchState.query) {
       // Initial empty state
@@ -5675,6 +8108,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
     // Export BibTeX button (Keep only this button in header)
     const exportBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "📥 Export BibTeX" },
       styles: {
         padding: "4px 10px",
@@ -6040,6 +8474,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     }) as HTMLInputElement;
 
     const sendBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "➤" },
       styles: {
         padding: "8px 12px",
@@ -6344,21 +8779,22 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           return "\n";
         case "hr":
           return "\n---\n";
-        case "a":
+        case "a": {
           const href = el.getAttribute("href") || "";
           return `[${children}](${href})`;
+        }
         case "ul":
           return `${children}\n`;
         case "ol":
           return `${children}\n`;
-        case "li":
-          // Check if parent is ol or ul
+        case "li": {
           const parent = el.parentElement;
           if (parent?.tagName.toLowerCase() === "ol") {
             const index = Array.from(parent.children).indexOf(el) + 1;
             return `${index}. ${children}\n`;
           }
           return `- ${children}\n`;
+        }
         case "blockquote":
           return (
             children
@@ -6634,6 +9070,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // 3. Append to DOM (Fallback to documentElement for XUL)
     if (doc.body) {
       doc.body.appendChild(backdrop);
+      if (!doc.body) return;
       doc.body.appendChild(menu);
     } else {
       doc.documentElement?.appendChild(backdrop);
@@ -6995,6 +9432,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     if (tableContainer) {
       // Create new Show More button
       const showMoreBtn = ztoolkit.UI.createElement(doc, "button", {
+        namespace: "html",
         properties: { innerText: "📥 Show More", id: "show-more-btn" },
         styles: {
           display: "block",
@@ -7213,6 +9651,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Add to Zotero button with full PDF discovery integration
     const addToZoteroBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "➕ Add to Zotero" },
       styles: {
         ...actionBtnStyle,
@@ -7264,6 +9703,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
                     // Attach button
                     const attachBtn = ztoolkit.UI.createElement(doc, "button", {
+                      namespace: "html",
                       properties: { innerText: "⬇️ Attach" },
                       styles: {
                         padding: "4px 8px",
@@ -7326,6 +9766,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
                     // Retry button
                     const retryBtn = ztoolkit.UI.createElement(doc, "button", {
+                      namespace: "html",
                       properties: { innerText: "🔁 Retry" },
                       styles: {
                         padding: "4px 8px",
@@ -7431,6 +9872,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Add to Table button with full PDF discovery integration
     const addToTableBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "📊 Add to Table" },
       styles: actionBtnStyle,
       listeners: [
@@ -7485,6 +9927,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
                     // Attach button
                     const attachBtn = ztoolkit.UI.createElement(doc, "button", {
+                      namespace: "html",
                       properties: { innerText: "⬇️ Attach" },
                       styles: {
                         padding: "4px 8px",
@@ -7546,6 +9989,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
                     // Retry button
                     const retryBtn = ztoolkit.UI.createElement(doc, "button", {
+                      namespace: "html",
                       properties: { innerText: "🔁 Retry" },
                       styles: {
                         padding: "4px 8px",
@@ -7649,6 +10093,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Open in browser button
     const openBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "🔗 Open" },
       styles: actionBtnStyle,
       listeners: [
@@ -7666,6 +10111,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // PDF Download button (only if open access PDF available)
     if (paper.openAccessPdf?.url) {
       const pdfBtn = ztoolkit.UI.createElement(doc, "button", {
+        namespace: "html",
         properties: { innerText: "🔗 PDF" },
         styles: {
           ...actionBtnStyle,
@@ -7703,6 +10149,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       let sourceUrl: string | null = null;
 
       const pdfDiscoveryBtn = ztoolkit.UI.createElement(doc, "button", {
+        namespace: "html",
         properties: { innerText: "🔍 Find PDF" },
         styles: {
           ...actionBtnStyle,
@@ -7975,6 +10422,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // Find Similar button (recommendations)
 
     const similarBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "🔮 Similar" },
       styles: actionBtnStyle,
       listeners: [
@@ -8085,6 +10533,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       styles: { margin: "0", fontSize: "14px", fontWeight: "600" },
     });
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "✕" },
       styles: {
         border: "none",
@@ -8197,6 +10646,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       // Semantic Scholar link
       if (author.url) {
         const linkBtn = ztoolkit.UI.createElement(doc, "button", {
+          namespace: "html",
           properties: { innerText: "🔗 View on Semantic Scholar" },
           styles: {
             width: "100%",
@@ -9170,6 +11620,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Add Papers button
     const addPapersBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: {
         className: "table-btn table-btn-primary",
         innerText: "➕ Add Papers",
@@ -9199,6 +11650,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Extract All button (for OCR)
     const extractBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: {
         className: "table-btn extract-all-btn",
         innerText: "📄 Extract All",
@@ -9230,6 +11682,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       ? `🔍 ${pdfSearchBatchStats.completed}/${pdfSearchBatchStats.total}`
       : "🔍 Search all PDF";
     const searchPdfBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: {
         className: "table-btn search-pdf-all-btn",
         innerText: searchPdfBtnText,
@@ -9261,6 +11714,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Export button
     const exportBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { className: "table-btn", innerText: "📤" },
       attributes: { title: "Export to CSV" },
       styles: {
@@ -9285,6 +11739,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Save as Notes button (Data Traceability)
     const saveAsNotesBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { className: "table-btn", innerText: "📋 Notes" },
       attributes: { title: "Save table data as notes attached to each paper" },
       styles: {
@@ -9319,6 +11774,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Save button
     const saveBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { className: "table-btn", innerText: "💾" },
       attributes: { title: "Save workspace to history" },
       styles: {
@@ -9343,6 +11799,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Copy All Data button
     const copyAllBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { className: "table-btn", innerText: "📋" },
       attributes: { title: "Copy all table data to clipboard" },
       styles: {
@@ -9367,6 +11824,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // History button
     const historyBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { className: "table-btn", innerText: "📜" },
       attributes: { title: "Load from history" },
       styles: {
@@ -9391,6 +11849,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Start Fresh button
     const startFreshBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { className: "table-btn", innerText: "🔄 New" },
       attributes: { title: "Start fresh workspace" },
       styles: {
@@ -9480,6 +11939,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Prev Button
     const prevBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "◀", disabled: currentPage <= 1 },
       styles: {
         background: "none",
@@ -9518,6 +11978,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Next Button
     const nextBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "▶", disabled: currentPage >= totalPages },
       styles: {
         background: "none",
@@ -9883,6 +12344,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Cancel button
     const cancelBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Cancel" },
       styles: {
         padding: "6px 12px",
@@ -9899,6 +12361,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Add button
     const addBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Add" },
       styles: {
         padding: "6px 12px",
@@ -10052,6 +12515,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Close button in header
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "✕" },
       styles: {
         background: "rgba(0,0,0,0.1)",
@@ -10275,6 +12739,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
         // Add button with animation
         const addBtn = ztoolkit.UI.createElement(doc, "button", {
+          namespace: "html",
           properties: { innerText: "+" },
           styles: {
             width: "28px",
@@ -10483,6 +12948,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Add All button
     const addAllBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "➕ Add All" },
       styles: {
         padding: "10px 18px",
@@ -10551,6 +13017,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Done button
     const doneBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Done" },
       styles: {
         padding: "10px 18px",
@@ -12664,6 +15131,7 @@ You MUST call the generate_tags function.`;
     header.appendChild(title);
 
     const closeX = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "✕" },
       styles: {
         background: "none",
@@ -12700,6 +15168,7 @@ You MUST call the generate_tags function.`;
     });
 
     const previewBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "👁 Preview" },
       styles: {
         padding: "6px 12px",
@@ -12715,6 +15184,7 @@ You MUST call the generate_tags function.`;
     });
 
     const editBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "✏️ Edit" },
       styles: {
         padding: "6px 12px",
@@ -12832,6 +15302,7 @@ You MUST call the generate_tags function.`;
       // Generate button if we have notes or PDF
       if (hasNotes || hasPDF) {
         const genBtn = ztoolkit.UI.createElement(doc, "button", {
+          namespace: "html",
           properties: {
             innerText: hasNotes
               ? "⚡ Generate from Notes"
@@ -12876,6 +15347,7 @@ You MUST call the generate_tags function.`;
       // Search PDF button if no PDF (even if notes exist)
       if (!hasPDF) {
         const searchPdfBtn = ztoolkit.UI.createElement(doc, "button", {
+          namespace: "html",
           properties: { innerText: "🔍 Search PDF" },
           attributes: { title: "Search for PDF to attach" },
           styles: {
@@ -12906,6 +15378,7 @@ You MUST call the generate_tags function.`;
                     if (!hasNotes) {
                       searchPdfBtn.replaceWith(
                         ztoolkit.UI.createElement(doc, "button", {
+                          namespace: "html",
                           properties: { innerText: "⚡ Generate from PDF" },
                           styles: {
                             padding: "10px 16px",
@@ -13010,6 +15483,7 @@ You MUST call the generate_tags function.`;
 
     // Copy button
     const copyBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "📋 Copy" },
       styles: {
         padding: "10px 16px",
@@ -13032,6 +15506,7 @@ You MUST call the generate_tags function.`;
 
     // Save as Note button
     const saveAsNoteBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "📝 Save as Note" },
       attributes: { title: "Save content as a new note" },
       styles: {
@@ -13084,6 +15559,7 @@ You MUST call the generate_tags function.`;
 
     // Save button
     const saveBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "💾 Save" },
       styles: {
         padding: "10px 16px",
@@ -13127,6 +15603,7 @@ You MUST call the generate_tags function.`;
 
     // Cancel button
     const cancelBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Cancel" },
       styles: {
         padding: "10px 16px",
@@ -13219,6 +15696,7 @@ You MUST call the generate_tags function.`;
     header.appendChild(title);
 
     const closeX = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "✕" },
       styles: {
         background: "none",
@@ -13250,6 +15728,7 @@ You MUST call the generate_tags function.`;
     });
 
     const previewBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "👁 Preview" },
       styles: {
         padding: "6px 12px",
@@ -13265,6 +15744,7 @@ You MUST call the generate_tags function.`;
     });
 
     const editBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "✏️ Edit" },
       styles: {
         padding: "6px 12px",
@@ -13375,6 +15855,7 @@ You MUST call the generate_tags function.`;
 
     // Copy button
     const copyBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "📋 Copy" },
       styles: {
         padding: "10px 16px",
@@ -13397,6 +15878,7 @@ You MUST call the generate_tags function.`;
 
     // Save button
     const saveBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "💾 Save" },
       styles: {
         padding: "10px 16px",
@@ -13432,6 +15914,7 @@ You MUST call the generate_tags function.`;
 
     // Cancel button
     const cancelBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Cancel" },
       styles: {
         padding: "10px 16px",
@@ -13600,6 +16083,7 @@ You MUST call the generate_tags function.`;
     header.appendChild(headerTitle);
 
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "✕" },
       styles: {
         background: "rgba(0,0,0,0.1)",
@@ -13737,6 +16221,7 @@ You MUST call the generate_tags function.`;
 
           // Rename button
           const renameBtn = ztoolkit.UI.createElement(doc, "button", {
+            namespace: "html",
             properties: { innerText: "✏️", title: "Rename" },
             styles: {
               background: "none",
@@ -13781,6 +16266,7 @@ You MUST call the generate_tags function.`;
 
           // Delete button
           const deleteBtn = ztoolkit.UI.createElement(doc, "button", {
+            namespace: "html",
             properties: { innerText: "🗑", title: "Delete" },
             styles: {
               background: "none",
@@ -13922,6 +16408,7 @@ You MUST call the generate_tags function.`;
     header.appendChild(headerTitle);
 
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "✕" },
       styles: {
         background: "rgba(0,0,0,0.1)",
@@ -14036,6 +16523,7 @@ You MUST call the generate_tags function.`;
         row.appendChild(info);
 
         const addBtn = ztoolkit.UI.createElement(doc, "button", {
+          namespace: "html",
           properties: { innerText: "Add Table Context" },
           styles: {
             padding: "4px 10px",
@@ -14163,6 +16651,7 @@ You MUST call the generate_tags function.`;
       },
     });
     const doneBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Done" },
       styles: {
         padding: "6px 14px",
@@ -14323,6 +16812,7 @@ You MUST call the generate_tags function.`;
 
     // Add Button
     const addBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "➕ Add Papers" },
       styles: {
         marginTop: "12px",
@@ -15511,6 +18001,7 @@ You MUST call the generate_tags function.`;
       });
 
       const saveRowBtn = ztoolkit.UI.createElement(doc, "button", {
+        namespace: "html",
         properties: { innerText: "💾" },
         attributes: { title: "Save this row as a note attached to the paper" },
         styles: {
@@ -15564,6 +18055,7 @@ You MUST call the generate_tags function.`;
 
       // Tag generation button
       const tagBtn = ztoolkit.UI.createElement(doc, "button", {
+        namespace: "html",
         properties: { innerText: "🏷️" },
         attributes: { title: "Generate AI tags for this paper" },
         styles: {
@@ -15596,6 +18088,7 @@ You MUST call the generate_tags function.`;
 
       // Bomb button (Delete from Zotero)
       const bombBtn = ztoolkit.UI.createElement(doc, "button", {
+        namespace: "html",
         properties: { innerText: "💣" },
         attributes: { title: "Delete item from Zotero completely" },
         styles: {
@@ -15675,6 +18168,7 @@ You MUST call the generate_tags function.`;
 
       // Remove button
       const removeRowBtn = ztoolkit.UI.createElement(doc, "button", {
+        namespace: "html",
         properties: { innerText: "🗑️" },
         attributes: { title: "Remove this paper from the table" },
         styles: {
@@ -16218,6 +18712,7 @@ You MUST call the generate_tags function.`;
     header.appendChild(headerTitle);
 
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "✕" },
       styles: {
         background: "rgba(0,0,0,0.1)",
@@ -16317,6 +18812,7 @@ You MUST call the generate_tags function.`;
 
     // Load Button
     const loadPresetBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "📥" },
       attributes: { title: "Load preset" },
       styles: {
@@ -16359,6 +18855,7 @@ You MUST call the generate_tags function.`;
 
     // Save Button
     const savePresetBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "💾" },
       attributes: { title: "Save current as preset" },
       styles: {
@@ -16400,6 +18897,7 @@ You MUST call the generate_tags function.`;
 
     // Delete Button
     const deletePresetBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "🗑" },
       attributes: { title: "Delete selected preset" },
       styles: {
@@ -16498,6 +18996,7 @@ You MUST call the generate_tags function.`;
       const coreColumns = ["title", "author", "year", "sources"];
       if (!coreColumns.includes(col.id)) {
         const deleteBtn = ztoolkit.UI.createElement(doc, "button", {
+          namespace: "html",
           properties: { innerText: "🗑" },
           styles: {
             background: "none",
@@ -16696,6 +19195,7 @@ You MUST call the generate_tags function.`;
     addSection.appendChild(managerAiParams);
 
     const addColumnBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Add Column" },
       styles: {
         padding: "8px 16px",
@@ -16850,6 +19350,7 @@ You MUST call the generate_tags function.`;
     header.appendChild(headerTitle);
 
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "✕" },
       styles: {
         background: "rgba(0,0,0,0.1)",
@@ -17029,6 +19530,7 @@ You MUST call the generate_tags function.`;
 
     // Add button
     const addBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Add Column" },
       styles: {
         padding: "8px 12px",
@@ -17518,6 +20020,7 @@ You MUST call the generate_tags function.`;
 
     // Remove Column button
     const removeBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "🗑️ Remove Column" },
       styles: {
         padding: "8px 12px",
@@ -17698,6 +20201,7 @@ You MUST call the generate_tags function.`;
       } else {
         // Generate button
         const genBtn = ztoolkit.UI.createElement(doc, "button", {
+          namespace: "html",
           properties: { innerText: "✨ Generate" },
           styles: {
             padding: "6px 12px",
@@ -18064,6 +20568,7 @@ You MUST call the generate_tags function.`;
 
     // "Show More" button (Initial placement at bottom of table container)
     const showMoreBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "📥 Show More", id: "show-more-btn" },
       styles: {
         display: "block",
@@ -18123,6 +20628,7 @@ You MUST call the generate_tags function.`;
       onClick: (e: Event) => void,
     ) => {
       const btn = ztoolkit.UI.createElement(doc, "button", {
+        namespace: "html",
         properties: { innerText: icon },
         attributes: { title: title },
         styles: {
@@ -18335,6 +20841,7 @@ You MUST call the generate_tags function.`;
     });
 
     const removeBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "🗑️ Remove Column" },
       styles: {
         padding: "6px 10px",
@@ -18370,6 +20877,7 @@ You MUST call the generate_tags function.`;
     actions.appendChild(removeBtn);
 
     const saveBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Save Changes" },
       styles: {
         padding: "6px 12px",
@@ -18673,6 +21181,7 @@ You MUST call the generate_tags function.`;
     saveRow.appendChild(saveInput);
 
     const savePresetBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "💾 Save" },
       styles: {
         padding: "4px 8px",
@@ -18744,6 +21253,7 @@ You MUST call the generate_tags function.`;
 
           // Load
           const loadBtn = ztoolkit.UI.createElement(doc, "button", {
+            namespace: "html",
             properties: { innerText: "Load" },
             styles: {
               fontSize: "10px",
@@ -18778,6 +21288,7 @@ You MUST call the generate_tags function.`;
 
           // Delete
           const delBtn = ztoolkit.UI.createElement(doc, "button", {
+            namespace: "html",
             properties: { innerText: "✕" },
             styles: {
               fontSize: "10px",
@@ -18822,7 +21333,9 @@ You MUST call the generate_tags function.`;
         try {
           const raw = Zotero.Prefs.get("extensions.seer-ai.search.presets");
           if (raw) savedPresets = JSON.parse(raw as string);
-        } catch (e) {}
+        } catch (e) {
+          /* intentionally ignore parse errors */
+        }
 
         savedPresets[name.trim()] = searchColumnConfig.columns;
         Zotero.Prefs.set(
@@ -18848,6 +21361,8 @@ You MUST call the generate_tags function.`;
     /*
             const footer = ztoolkit.UI.createElement(doc, 'div', { styles: { display: "flex", justifyContent: "flex-end", marginTop: "10px" } });
             const closeBtn = ztoolkit.UI.createElement(doc, 'button', {
+      namespace: "html",
+            namespace: "html",
                 properties: { innerText: "Close" },
                 styles: { padding: "4px 10px", cursor: "pointer", backgroundColor: "var(--background-secondary)", border: "1px solid var(--border-primary)", borderRadius: "4px", fontSize: "11px" },
                 listeners: [{ type: "click", listener: () => { backdrop.remove(); popover.remove(); } }]
@@ -19212,6 +21727,7 @@ You MUST call the generate_tags function.`;
     saveRow.appendChild(saveInput);
 
     const savePresetBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "💾 Save" },
       styles: {
         padding: "4px 8px",
@@ -19278,6 +21794,7 @@ You MUST call the generate_tags function.`;
 
           // Load
           const loadBtn = ztoolkit.UI.createElement(doc, "button", {
+            namespace: "html",
             properties: { innerText: "Load" },
             styles: {
               fontSize: "10px",
@@ -19316,6 +21833,7 @@ You MUST call the generate_tags function.`;
 
           // Delete
           const delBtn = ztoolkit.UI.createElement(doc, "button", {
+            namespace: "html",
             properties: { innerText: "✕" },
             styles: {
               fontSize: "10px",
@@ -19445,6 +21963,7 @@ You MUST call the generate_tags function.`;
       // Delete button for non-core columns
       if (!coreColumnIds.includes(col.id)) {
         const deleteBtn = ztoolkit.UI.createElement(doc, "button", {
+          namespace: "html",
           properties: { innerText: "🗑" },
           attributes: { title: "Delete column" },
           styles: {
@@ -19680,6 +22199,7 @@ You MUST call the generate_tags function.`;
       } else {
         // Generate button
         const generateBtn = ztoolkit.UI.createElement(doc, "button", {
+          namespace: "html",
           properties: { innerText: "🔄 Generate" },
           styles: {
             padding: "3px 8px",
@@ -20250,6 +22770,7 @@ ${tableRows}  </tbody>
     header.appendChild(headerTitle);
 
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "✕" },
       styles: {
         background: "rgba(0,0,0,0.1)",
@@ -20397,6 +22918,7 @@ ${tableRows}  </tbody>
         row.appendChild(label);
 
         const addBtn = ztoolkit.UI.createElement(doc, "button", {
+          namespace: "html",
           properties: { innerText: "+" },
           styles: {
             width: "24px",
@@ -20604,6 +23126,7 @@ ${tableRows}  </tbody>
     header.appendChild(headerTitle);
 
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "✕" },
       styles: {
         background: "rgba(0,0,0,0.1)",
@@ -20779,6 +23302,7 @@ ${tableRows}  </tbody>
           row.appendChild(addedLabel);
         } else {
           const addBtn = ztoolkit.UI.createElement(doc, "button", {
+            namespace: "html",
             properties: { innerText: "+" },
             styles: {
               width: "24px",
@@ -20945,6 +23469,7 @@ ${tableRows}  </tbody>
       },
     });
     const doneBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Done" },
       styles: {
         padding: "6px 14px",
@@ -21502,6 +24027,7 @@ ${tableRows}  </tbody>
 
     // Close button
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Close" },
       styles: {
         marginTop: "12px",
@@ -22046,6 +24572,7 @@ ${tableRows}  </tbody>
       },
       properties: {
         value: currentDraftText,
+        className: "seerai-chat-input",
       },
       styles: {
         flex: "1",
@@ -22208,6 +24735,7 @@ ${tableRows}  </tbody>
     }) as unknown as HTMLInputElement;
 
     const sendBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: {
         innerText: "➤ Send",
         disabled: this.isStreaming,
@@ -22264,6 +24792,7 @@ ${tableRows}  </tbody>
 
     // Stop button
     const stopBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "⏹", id: "stop-btn", title: "Stop Generation" },
       styles: {
         padding: "0 12px",
@@ -22319,6 +24848,7 @@ ${tableRows}  </tbody>
     let clearConfirmTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const clearBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "🗑", title: "Clear Chat" },
       styles: {
         padding: "0 12px",
@@ -22364,7 +24894,7 @@ ${tableRows}  </tbody>
               clearConfirmState = false;
 
               conversationMessages = [];
-              if (messagesArea) messagesArea.innerHTML = "";
+              if (messagesArea) messagesArea.replaceChildren();
               try {
                 await getMessageStore().clearMessages();
               } catch (e) {
@@ -22387,6 +24917,7 @@ ${tableRows}  </tbody>
 
     // Save button
     const saveBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "💾", title: "Save Chat" },
       styles: {
         padding: "0 12px",
@@ -22413,6 +24944,7 @@ ${tableRows}  </tbody>
 
     // Settings / Config button
     const settingsBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: {
         innerText: "⚙️",
         title: "Chat Settings (Model, Mode, Web Search)",
@@ -22493,6 +25025,7 @@ ${tableRows}  </tbody>
     };
 
     const agenticBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: {
         innerText: agenticEnabled ? "🤖" : "💬",
         title: "Toggle Agentic Mode (tool calling)",
@@ -22536,6 +25069,7 @@ ${tableRows}  </tbody>
 
     // Scope selector button (dropdown trigger)
     const scopeBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: {
         innerText: "▼",
         title: `Scope: ${this.getScopeLabel(this.getScopePref())}`,
@@ -22591,6 +25125,7 @@ ${tableRows}  </tbody>
 
     // Prompt Library button
     const promptsBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "📚", title: "Prompt Library" },
       styles: {
         width: "32px",
@@ -22694,6 +25229,7 @@ ${tableRows}  </tbody>
     // ── 📎 File Upload Button ──
     // Opens a file picker for PDF/audio/text/markdown, adds to context system
     const uploadBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: {
         innerText: "\u{1F4CE}",
         title: "Attach file (PDF, audio, text, markdown)",
@@ -23161,6 +25697,7 @@ ${tableRows}  </tbody>
     });
 
     const imageGenBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: {
         innerText: "\u{1F3A8}",
         title: "Generate Image from prompt",
@@ -23181,6 +25718,7 @@ ${tableRows}  </tbody>
     }) as HTMLButtonElement;
 
     const imageGenDropupBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "\u25B2", title: "Image generation settings" },
       styles: {
         padding: "0 4px",
@@ -23487,7 +26025,10 @@ Rules:
           });
 
           // Download button
-          const downloadBtn = doc.createElement("button");
+          const downloadBtn = doc.createElementNS(
+            HTML_NS,
+            "button",
+          ) as HTMLButtonElement;
           downloadBtn.innerText = "\u{2B07}\u{FE0F}";
           downloadBtn.title = "Save image";
           downloadBtn.style.cssText = `
@@ -23599,6 +26140,7 @@ Rules:
     });
 
     const videoGenBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: {
         innerText: "\u{1F3AC}",
         title: "Generate Video from prompt",
@@ -23619,6 +26161,7 @@ Rules:
     }) as HTMLButtonElement;
 
     const videoGenDropupBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "\u25B2", title: "Video generation settings" },
       styles: {
         padding: "0 4px",
@@ -23984,7 +26527,10 @@ Rules:
             "display: flex; gap: 8px; align-items: center;";
 
           // Open in browser
-          const openBtn = doc.createElement("button");
+          const openBtn = doc.createElementNS(
+            HTML_NS,
+            "button",
+          ) as HTMLButtonElement;
           openBtn.innerText = "\u{1F517} Open";
           openBtn.title = "Open video in browser";
           openBtn.style.cssText = `
@@ -23999,7 +26545,10 @@ Rules:
           actionsRow.appendChild(openBtn);
 
           // Save video
-          const saveVideoBtn = doc.createElement("button");
+          const saveVideoBtn = doc.createElementNS(
+            HTML_NS,
+            "button",
+          ) as HTMLButtonElement;
           saveVideoBtn.innerText = "\u{2B07}\u{FE0F} Save";
           saveVideoBtn.title = "Save video to disk";
           saveVideoBtn.style.cssText = `
@@ -24097,6 +26646,7 @@ Rules:
     });
 
     const mediaGenMainBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: {
         innerText: "\u{1F3A8}",
         title: "Generate Image from prompt",
@@ -24126,6 +26676,7 @@ Rules:
     });
 
     const mediaGenDropBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "\u25BC", title: "Media generation options" },
       styles: {
         padding: "0 4px",
@@ -24245,11 +26796,12 @@ Rules:
 
     toolbarRow.appendChild(toolbarLeft);
 
-    // History Button
-    const historyBtn = ztoolkit.UI.createElement(doc, "button", {
-      properties: { innerText: "📜", title: "Chat History" },
+    // New Chat button
+    const newChatBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
+      properties: { innerText: "\u2795", title: "New Chat" },
       styles: {
-        padding: "0 12px",
+        padding: "0 10px",
         height: "32px",
         fontSize: "13px",
         border: "1px solid var(--border-primary)",
@@ -24260,24 +26812,27 @@ Rules:
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        transition: "all 0.2s ease",
       },
       listeners: [
         {
           type: "click",
-          listener: (e: MouseEvent) => {
-            this.showHistoryPopover(doc, historyBtn as HTMLElement);
+          listener: async () => {
+            await this.createNewChat();
           },
         },
       ],
     });
+
     toolbarRight.appendChild(stopBtn);
+    toolbarRight.appendChild(newChatBtn);
     toolbarRight.appendChild(clearBtn);
     toolbarRight.appendChild(saveBtn);
-    toolbarRight.appendChild(historyBtn);
     toolbarRow.appendChild(toolbarRight);
 
     // Web Search toggle button
     const webSearchBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: {
         innerText: "\uD83D\uDD0D",
         title: "Toggle web search (enriches AI context with web results)",
@@ -24354,129 +26909,6 @@ Rules:
     inputContainer.appendChild(imagePreviewArea);
     inputContainer.appendChild(inputArea);
     return inputContainer;
-  }
-
-  /**
-   * Show history popover with past conversations
-   */
-  private static async showHistoryPopover(
-    doc: Document,
-    anchorBtn: HTMLElement,
-  ) {
-    const dropdown = doc.createElement("div");
-    dropdown.className = "history-popover";
-    dropdown.style.cssText = `
-      position: absolute;
-      bottom: 45px;
-      right: 0;
-      width: 280px;
-      max-height: 400px;
-      background: var(--background-primary);
-      border: 1px solid var(--border-primary);
-      border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-      z-index: 1000;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      animation: slide-up 0.2s ease-out;
-    `;
-
-    const header = doc.createElement("div");
-    header.style.cssText =
-      "padding: 8px 12px; border-bottom: 1px solid var(--border-primary); display: flex; justify-content: space-between; align-items: center; background: var(--background-secondary);";
-
-    const title = doc.createElement("span");
-    title.textContent = "Chat History";
-    title.style.fontWeight = "600";
-    title.style.fontSize = "12px";
-    header.appendChild(title);
-
-    const newChatBtn = doc.createElement("button");
-    newChatBtn.textContent = "+ New Chat";
-    newChatBtn.style.cssText =
-      "padding: 4px 8px; font-size: 11px; background: var(--highlight-primary); color: white; border: none; border-radius: 4px; cursor: pointer;";
-    newChatBtn.onclick = () => {
-      this.createNewChat();
-      dropdown.remove();
-    };
-    header.appendChild(newChatBtn);
-    dropdown.appendChild(header);
-
-    const listContainer = doc.createElement("div");
-    listContainer.className = "history-list";
-    listContainer.style.cssText =
-      "overflow-y: auto; flex: 1; max-height: 350px;";
-
-    if (conversationHistory.length === 0) {
-      const emptyMsg = doc.createElement("div");
-      emptyMsg.textContent = "No history yet";
-      emptyMsg.style.cssText =
-        "padding: 20px; text-align: center; color: var(--text-tertiary); font-style: italic;";
-      listContainer.appendChild(emptyMsg);
-    } else {
-      conversationHistory.forEach((conv) => {
-        const item = doc.createElement("div");
-        item.className =
-          "history-item" +
-          (getMessageStore().getConversationId() === conv.id ? " active" : "");
-        item.style.cssText =
-          "padding: 10px 12px; border-bottom: 1px solid var(--border-quaternary); cursor: pointer; position: relative; transition: background 0.2s;";
-
-        const itemTitle = doc.createElement("div");
-        itemTitle.textContent = conv.title || "Untitled Chat";
-        itemTitle.style.cssText =
-          "font-weight: 500; font-size: 13px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 25px;";
-        item.appendChild(itemTitle);
-
-        const itemMeta = doc.createElement("div");
-        itemMeta.textContent = this.formatRelativeTime(
-          new Date(conv.updatedAt),
-        );
-        itemMeta.style.cssText =
-          "font-size: 11px; color: var(--text-tertiary); margin-top: 2px;";
-        item.appendChild(itemMeta);
-
-        const deleteBtn = doc.createElement("span");
-        deleteBtn.innerHTML = "🗑️";
-        deleteBtn.className = "delete-btn";
-        deleteBtn.style.cssText =
-          "position: absolute; right: 8px; top: 10px; opacity: 0; transition: opacity 0.2s; font-size: 12px;";
-        deleteBtn.onclick = (e) => {
-          e.stopPropagation();
-          if (doc.defaultView?.confirm("Delete this conversation?")) {
-            this.deleteChat(conv.id);
-            dropdown.remove();
-          }
-        };
-        item.appendChild(deleteBtn);
-
-        item.onmouseenter = () => {
-          deleteBtn.style.opacity = "0.7";
-        };
-        item.onmouseleave = () => {
-          deleteBtn.style.opacity = "0";
-        };
-
-        item.onclick = () => {
-          this.loadChat(conv.id);
-          dropdown.remove();
-        };
-        listContainer.appendChild(item);
-      });
-    }
-
-    dropdown.appendChild(listContainer);
-    anchorBtn.parentElement?.appendChild(dropdown);
-
-    // Close on outside click
-    const outsideClick = (e: MouseEvent) => {
-      if (!dropdown.contains(e.target as Node) && e.target !== anchorBtn) {
-        dropdown.remove();
-        doc.removeEventListener("click", outsideClick);
-      }
-    };
-    setTimeout(() => doc.addEventListener("click", outsideClick), 0);
   }
 
   /**
@@ -24576,7 +27008,7 @@ Rules:
     btnContainer.style.cssText =
       "display: flex; gap: 8px; justify-content: flex-end;";
 
-    const denyBtn = doc.createElement("button");
+    const denyBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
     denyBtn.textContent = "Deny";
     denyBtn.style.cssText = `
           padding: 4px 12px;
@@ -24587,7 +27019,10 @@ Rules:
           font-size: 0.85em;
       `;
 
-    const allowBtn = doc.createElement("button");
+    const allowBtn = doc.createElementNS(
+      HTML_NS,
+      "button",
+    ) as HTMLButtonElement;
     allowBtn.textContent = "Allow";
     allowBtn.style.cssText = `
           padding: 4px 12px;
@@ -24718,6 +27153,14 @@ Rules:
       contentDiv: contentDiv,
       toolContainer: null,
       isToolDetailsOpen: false, // Default closed until tools run
+      currentTextBlock: null,
+      turnTextSoFar: "",
+      previousTurnsTextLength: 0,
+      completedTodos: 0,
+      totalTodos: 0,
+      lastToolName: "",
+      lastToolSummary: "",
+      cumulativeTokens: 0,
     };
 
     const session = activeAgentSession;
@@ -24733,18 +27176,35 @@ Rules:
       }
     };
 
+    const refreshAgentStats = () => {
+      if (!session || !session.toolProcessState) return;
+
+      const maxIterations =
+        getAgentConfigFromPrefs().maxAgentIterations || Infinity;
+
+      session.toolProcessState.updateStats({
+        turns: session.iterationCount,
+        totalTools: session.toolResults.length,
+        estimatedTokens: session.cumulativeTokens,
+        completedTodos: session.completedTodos,
+        totalTodos: session.totalTodos,
+        lastToolName: session.lastToolName,
+        lastToolSummary: session.lastToolSummary,
+        isThinking: session.isThinking,
+      });
+    };
+
     const observer: AgentUIObserver = {
       onToken: (token: string, fullResponse: string) => {
         if (!Assistant.isStreaming) return;
         session.fullResponse = fullResponse;
-        if (session.contentDiv) {
+        if (session.contentDiv && session.currentTextBlock) {
           // Process streaming content to handle think tags
           const { displayContent, isThinking: stillThinking } =
             processStreamingContent(fullResponse);
 
           // If we're still in a think block with no visible content, keep the thinking indicator
           if (stillThinking && session.isThinking) {
-            // Keep showing "Thinking..." indicator
             return;
           }
 
@@ -24754,27 +27214,16 @@ Rules:
             session.isThinking = false;
           }
 
-          // Ensure markdown container exists
-          let mdContainer = session.contentDiv.querySelector(
-            ".markdown-content",
-          ) as HTMLElement;
-          if (!mdContainer) {
-            mdContainer =
-              session.contentDiv.ownerDocument!.createElement("div");
-            mdContainer.className = "markdown-content";
-            if (session.contentDiv.firstChild) {
-              session.contentDiv.insertBefore(
-                mdContainer,
-                session.contentDiv.firstChild,
-              );
-            } else {
-              session.contentDiv.appendChild(mdContainer);
+          // Extract only new text for this turn
+          const turnText = fullResponse.slice(session.previousTurnsTextLength);
+          if (turnText && turnText !== session.turnTextSoFar) {
+            session.turnTextSoFar = turnText;
+            // Process only the current turn's text for think tags
+            const turnProcessed = processStreamingContent(turnText);
+            const turnDisplay = turnProcessed.displayContent;
+            if (turnDisplay) {
+              this.smartRender(session.currentTextBlock!, turnDisplay);
             }
-          }
-
-          // Throttled update
-          if (displayContent) {
-            this.smartRender(mdContainer, displayContent);
           }
         }
         if (session.messagesArea) {
@@ -24785,10 +27234,37 @@ Rules:
         if (!Assistant.isStreaming) return;
         session.isThinking = true;
         session.iterationCount = iteration;
+        session.previousTurnsTextLength = session.fullResponse.length;
+        session.turnTextSoFar = "";
+
+        // Start a new text block for this turn
+        if (session.contentDiv) {
+          const doc = session.contentDiv.ownerDocument!;
+          const block = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+          block.className = "markdown-content agent-turn-text";
+          // Insert new text block before the tool process container or at end
+          if (session.toolProcessState?.container) {
+            session.contentDiv.insertBefore(
+              block,
+              session.toolProcessState.container,
+            );
+          } else {
+            session.contentDiv.appendChild(block);
+          }
+          session.currentTextBlock = block;
+        }
 
         if (session.toolProcessState) {
           session.toolProcessState.setThinking();
         }
+        refreshAgentStats();
+      },
+      onPreApiCall: (estimatedInputTokens: number) => {
+        session.cumulativeTokens = Math.max(
+          session.cumulativeTokens,
+          estimatedInputTokens,
+        );
+        refreshAgentStats();
       },
       onToolCallStarted: (toolCall: ToolCall) => {
         if (!Assistant.isStreaming) return;
@@ -24799,21 +27275,17 @@ Rules:
 
           // Initial creation of the process container logic
           if (!session.toolProcessState) {
-            // Surgical removal of typing indicator
             session.contentDiv.querySelector(".typing-indicator")?.remove();
 
             const processUI = createToolProcessUI(doc);
             session.toolProcessState = processUI;
             session.contentDiv.appendChild(processUI.container);
 
-            // Set initial state
             processUI.setThinking();
 
-            // Auto-open on first tool
             (processUI.container as any).open = true;
             session.isToolDetailsOpen = true;
 
-            // Track toggles
             processUI.container.addEventListener("toggle", (e: Event) => {
               if (session) {
                 session.isToolDetailsOpen = (
@@ -24822,8 +27294,6 @@ Rules:
               }
             });
 
-            // Store the list container for appending tool cards
-            // The list container is the div inside the details
             session.toolContainer = processUI.container.querySelector(
               ".tool-list-container",
             ) as HTMLElement;
@@ -24831,14 +27301,22 @@ Rules:
 
           // Update label to show which tool is being executed
           session.toolProcessState.setExecutingTool(toolCall.function.name);
+          session.lastToolName = toolCall.function.name;
+          session.lastToolSummary = "";
+          refreshAgentStats();
 
           const toolUI = createToolExecutionUI(doc, toolCall);
 
+          // Append tool card inside the process container's list
           if (session.toolContainer) {
             session.toolContainer.appendChild(toolUI);
           } else {
-            // Fallback if list container missing (shouldn't happen given createToolProcessUI structure)
             session.contentDiv.appendChild(toolUI);
+          }
+
+          // Auto-expand the process container so tool cards are visible
+          if (session.toolProcessState?.container) {
+            (session.toolProcessState.container as any).open = true;
           }
 
           session.toolResults.push({ toolCall, uiElement: toolUI });
@@ -24854,12 +27332,34 @@ Rules:
         );
         if (tr) tr.result = result;
 
-        if (session.messagesArea && session.toolContainer && tr?.uiElement) {
+        if (session.messagesArea && session.contentDiv && tr?.uiElement) {
           const doc = session.messagesArea.ownerDocument!;
           const newUI = createToolExecutionUI(doc, toolCall, result);
-          session.toolContainer.replaceChild(newUI, tr.uiElement);
+          if (tr.uiElement.parentNode) {
+            tr.uiElement.parentNode.replaceChild(newUI, tr.uiElement);
+          }
           tr.uiElement = newUI;
           smartScrollToBottom();
+        }
+
+        // Render standalone question panel for workspace_question
+        if (
+          toolCall.function.name === "workspace_question" &&
+          result.success &&
+          result.data &&
+          session.contentDiv
+        ) {
+          const data = result.data as Record<string, unknown>;
+          if (data.questions && Array.isArray(data.questions)) {
+            const questions = data.questions as any[];
+            const doc = session.contentDiv.ownerDocument!;
+            const panel = createQuestionPanel(doc, questions);
+            session.contentDiv.insertBefore(
+              panel,
+              session.contentDiv.firstChild,
+            );
+            smartScrollToBottom();
+          }
         }
 
         // CRITICAL: Update the counter label in real-time
@@ -24869,34 +27369,35 @@ Rules:
             session.toolResults.length,
           );
         }
+
+        if (result.success && result.data) {
+          session.lastToolSummary =
+            result.summary || JSON.stringify(result.data).slice(0, 60);
+          const data = result.data as Record<string, unknown>;
+          if (data.todos && Array.isArray(data.todos)) {
+            const todos = data.todos as Array<{ status: string }>;
+            session.totalTodos = todos.length;
+            session.completedTodos = todos.filter(
+              (t) => t.status === "completed" || t.status === "cancelled",
+            ).length;
+          }
+        }
+
+        const msgTokens = ChatStateManager.countTokens(
+          JSON.stringify(result.data || result.error || ""),
+        );
+        session.cumulativeTokens += msgTokens;
+        refreshAgentStats();
       },
       onMessageUpdate: (content: string) => {
         if (!Assistant.isStreaming) return;
-        // Strip think tags from the content
         const cleanedContent = stripThinkTags(content);
         session.fullResponse = cleanedContent;
-        if (session.contentDiv) {
-          // Surgical removal of typing indicator
+        if (session.contentDiv && session.currentTextBlock) {
           if (cleanedContent) {
             session.contentDiv.querySelector(".typing-indicator")?.remove();
           }
-
-          let mdContainer =
-            session.contentDiv.querySelector(".markdown-content");
-          if (!mdContainer) {
-            mdContainer =
-              session.contentDiv.ownerDocument!.createElement("div");
-            mdContainer.className = "markdown-content";
-            if (session.contentDiv.firstChild) {
-              session.contentDiv.insertBefore(
-                mdContainer,
-                session.contentDiv.firstChild,
-              );
-            } else {
-              session.contentDiv.appendChild(mdContainer);
-            }
-          }
-          mdContainer.innerHTML = parseMarkdown(cleanedContent);
+          session.currentTextBlock.innerHTML = parseMarkdown(cleanedContent);
         }
       },
       onComplete: async (content: string, iterationCount?: number) => {
@@ -24916,25 +27417,9 @@ Rules:
             typingIndicator.remove();
           }
 
-          // CRITICAL: Ensure final content is rendered to DOM
-          // This fixes the hidden text bug after many tool calls
-          let mdContainer =
-            session.contentDiv.querySelector(".markdown-content");
-          if (!mdContainer) {
-            mdContainer =
-              session.contentDiv.ownerDocument!.createElement("div");
-            mdContainer.className = "markdown-content";
-            if (session.contentDiv.firstChild) {
-              session.contentDiv.insertBefore(
-                mdContainer,
-                session.contentDiv.firstChild,
-              );
-            } else {
-              session.contentDiv.appendChild(mdContainer);
-            }
-          }
-          if (cleanedContent) {
-            this.smartRender(mdContainer as HTMLElement, cleanedContent, true); // Force final render
+          // Render into the current turn's text block if available
+          if (cleanedContent && session.currentTextBlock) {
+            this.smartRender(session.currentTextBlock, cleanedContent, true);
           }
         }
 
@@ -25002,7 +27487,12 @@ Rules:
           if (session.toolProcessState) {
             session.toolProcessState.setFailed(error.message);
           } else {
-            session.contentDiv.innerHTML = `<span style="color: #c62828;">Error: ${error.message}</span>`;
+            const errIndicator =
+              session.contentDiv.ownerDocument!.createElement("div");
+            errIndicator.style.cssText =
+              "margin-top:8px;padding:4px 8px;border-radius:4px;font-size:12px;color:#c62828;background:rgba(198,40,40,0.08);";
+            errIndicator.textContent = `Error: ${error.message}`;
+            session.contentDiv.appendChild(errIndicator);
           }
         }
         activeAgentSession = null;
@@ -25564,7 +28054,37 @@ Rules:
 
       const scopePref = this.getScopePref();
       const scopeLabel = this.getScopeLabel(scopePref);
-      const systemPrompt = `You are a helpful research assistant for Zotero. You help users understand and analyze their academic papers, notes, and research data tables.
+
+      // Build custom prompt prefix from per-conversation config
+      let customPromptPrefix = "";
+      const convSystemPrompt = options.systemPrompt;
+      const convSkillIds = options.skillIds;
+
+      if (convSystemPrompt || (convSkillIds && convSkillIds.length > 0)) {
+        customPromptPrefix = "\n\n[Custom Instructions]\n";
+        if (convSystemPrompt) {
+          customPromptPrefix += `${convSystemPrompt}\n`;
+        }
+        if (convSkillIds && convSkillIds.length > 0) {
+          try {
+            const skills = await getPromptsByCategory("skills");
+            const activeSkills = skills.filter((s) =>
+              convSkillIds.includes(s.id),
+            );
+            for (const skill of activeSkills) {
+              customPromptPrefix += `\n--- Skill: ${skill.name} ---\n${skill.template}\n`;
+            }
+          } catch (e) {
+            Zotero.debug(`[seerai] Error loading skills: ${e}`);
+          }
+        }
+      }
+
+      const workspaceTree = await buildWorkspaceTreePrompt();
+
+      const systemPrompt =
+        customPromptPrefix +
+        `You are a helpful research assistant for Zotero. You help users understand and analyze their academic papers, notes, and research data tables.
 
 Current Library/Folder Scope: ${scopeLabel} (Tools will only find items within this scope).
 
@@ -25572,24 +28092,20 @@ ${context}${webContext}
 
 Be concise, accurate, and helpful. When referencing papers, cite them by title or author.
 
-Table Management:
-1. To analyze papers in a structured way, use 'create_table' to start a new analysis or 'add_to_table' to add papers to an existing one.
-2. Use 'create_table_column' to add AI-powered analysis columns (e.g., "Methodology", "Result Summary").
-3. Use 'generate_table_data' to trigger the background analysis of those columns.
-4. Always 'list_tables' first if you need to find an existing table ID. If no table is found, create one.
-5. You can fall back to using 'active' or 'undefined' as a table_id if you believe a table was just created or is active, and the tools will try to find the most recent one.
+CRITICAL WORKFLOW RULE: You MUST use tools to EXECUTE every action requested. Do NOT merely describe what you will do or produce analysis text — you must actually perform the work through tool calls. Continue calling tools until the task is fully COMPLETE, then call the 'task_complete' tool to signal completion. If you receive results from a tool and more work remains, immediately call the next required tool. Do not stop until 'task_complete' is called.
 
-Research & Paper Discovery:
-1. Use 'search_external' to find new papers on Semantic Scholar.
-2. Use 'import_paper' to bring a paper into Zotero. Specify 'target_collection_id' for subfolders. Set 'trigger_ocr: true' for immediate PDF text extraction.
-3. Use 'find_collection' to find folders by name. If not found, use 'list_collection' to explore or 'create_collection' to make them.
-4. Use 'create_collection' to create new subfolders (e.g., "reviewing" under a project folder).
-5. Use 'list_collection' to browse contents of a folder (child collections and items with metadata).
-6. Use 'move_item' and 'remove_item_from_collection' for organization.
-7. Use 'read_item_content' with 'trigger_ocr: true' to extract text from PDFs for quantitative analysis if notes are missing.
-8. Use 'create_note' with 'collection_id' for standalone notes (e.g., search strategies) inside folders.
+TODO-Driven Task Execution (MANDATORY for multi-step tasks):
+1. When the user gives you a task with multiple steps or actions, your FIRST action MUST be to call 'todowrite' to create a structured plan. Do NOT start executing steps before planning.
+2. Write clear, actionable todos with unique IDs covering every step the user requested.
+3. Mark the first todo as 'in_progress', then execute it using the appropriate tools.
+4. After completing a step, call 'todowrite' again to mark it 'completed' and set the next step to 'in_progress'.
+5. Use 'todoread' to recover your task state if you lose track after context compaction or many tool calls.
+6. You MUST call 'task_complete' ONLY when ALL todos are 'completed' or 'cancelled'. Never call 'task_complete' with pending items remaining.
+${buildToolPromptSections()}
+${webContext ? " When using web search results, cite the source URL." : ""}
 
-${webContext ? " When using web search results, cite the source URL." : ""}`;
+${isAgenticModeEnabled() ? WORKSPACE_SYSTEM_PROMPT : ""}
+${workspaceTree}`;
 
       // Merge pasted images with Zotero item images
       const manuallyPastedParts: VisionMessageContentPart[] = pastedImages.map(
@@ -25763,7 +28279,7 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
       Zotero.debug(`[seerai] Agentic mode: ${agenticEnabled}`);
 
       if (agenticEnabled) {
-        // Use agentic chat handler with tool calling
+        const continuation = await getMessageStore().getContinuation();
         await handleAgenticChat(
           text,
           systemPrompt,
@@ -25780,6 +28296,7 @@ ${webContext ? " When using web search results, cite the source URL." : ""}`;
               scopePref === "selection"
                 ? this.resolveSelectionScope()
                 : undefined,
+            continuation,
           },
           observer,
         );
@@ -25976,6 +28493,7 @@ Note: Context was automatically reduced using semantic search due to size constr
 
             const retryAgenticEnabled = isAgenticModeEnabled();
             if (retryAgenticEnabled) {
+              const continuation = await getMessageStore().getContinuation();
               await handleAgenticChat(
                 text,
                 ragSystemPrompt,
@@ -25987,6 +28505,7 @@ Note: Context was automatically reduced using semantic search due to size constr
                   permissionHandler: Assistant.handleInlinePermissionRequest,
                   temperature: retryChatOptions.temperature,
                   maxTokens: retryChatOptions.maxTokens,
+                  continuation,
                 },
                 observer,
               );
@@ -26232,6 +28751,7 @@ Note: Context was automatically reduced using stricter semantic search due to si
 
             const retryAgenticEnabled = isAgenticModeEnabled();
             if (retryAgenticEnabled) {
+              const continuation = await getMessageStore().getContinuation();
               await handleAgenticChat(
                 text,
                 ragSystemPrompt,
@@ -26243,6 +28763,7 @@ Note: Context was automatically reduced using stricter semantic search due to si
                   permissionHandler: Assistant.handleInlinePermissionRequest,
                   temperature: retryChatOptions.temperature,
                   maxTokens: retryChatOptions.maxTokens,
+                  continuation,
                 },
                 observer,
               );
@@ -26341,9 +28862,14 @@ Note: Context was automatically reduced using stricter semantic search due to si
       if (contentDiv) {
         const isError =
           error instanceof Error && error.message !== "Request was cancelled";
-        contentDiv.innerHTML = isError
-          ? `<span style="color: #c62828;">${errMsg}</span>`
-          : errMsg;
+        const indicator = contentDiv.ownerDocument!.createElement("div");
+        indicator.style.cssText =
+          "margin-top:8px;padding:4px 8px;border-radius:4px;font-size:12px;" +
+          (isError
+            ? "color:#c62828;background:rgba(198,40,40,0.08);"
+            : "color:var(--text-secondary);background:var(--background-secondary);");
+        indicator.textContent = errMsg;
+        contentDiv.appendChild(indicator);
       }
     } finally {
       input.disabled = false;
@@ -26547,15 +29073,35 @@ Note: Context was automatically reduced using stricter semantic search due to si
       const listContainer = container.querySelector(".tool-list-container");
       const targetContainer = listContainer || container;
 
+      let hasQuestions = false;
+      const questionPanels: HTMLElement[] = [];
       toolResults.forEach((tr) => {
         const toolUI = createToolExecutionUI(doc, tr.toolCall, tr.result);
         targetContainer.appendChild(toolUI);
+
+        if (
+          tr.toolCall.function.name === "workspace_question" &&
+          tr.result?.success &&
+          (tr.result.data as any).questions &&
+          Array.isArray((tr.result.data as any).questions)
+        ) {
+          hasQuestions = true;
+          const questions = (tr.result.data as any).questions as any[];
+          const panel = createQuestionPanel(doc, questions);
+          questionPanels.push(panel);
+        }
       });
 
       // Set state to completed
       const finalCount = iterationCount !== undefined ? iterationCount : 0;
       const toolCount = toolResults ? toolResults.length : 0;
       setCompleted(finalCount, toolCount);
+
+      if (hasQuestions) {
+        questionPanels.forEach((panel) => {
+          msgDiv.appendChild(panel);
+        });
+      }
 
       msgDiv.appendChild(container);
     }
@@ -26670,6 +29216,7 @@ Note: Context was automatically reduced using stricter semantic search due to si
     }) as HTMLInputElement;
 
     const saveBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Send" },
       styles: {
         padding: "6px 12px",
@@ -26699,6 +29246,7 @@ Note: Context was automatically reduced using stricter semantic search due to si
     });
 
     const cancelBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
       properties: { innerText: "Cancel" },
       styles: {
         padding: "6px 12px",
@@ -26770,7 +29318,7 @@ Note: Context was automatically reduced using stricter semantic search due to si
     ) as HTMLElement;
     if (!messagesArea) return;
 
-    messagesArea.innerHTML = "";
+    messagesArea.replaceChildren();
 
     const lastUserMsgIndex = conversationMessages
       .map((m) => m.role)
@@ -26961,9 +29509,14 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
       if (contentDiv) {
         const isError =
           error instanceof Error && error.message !== "Request was cancelled";
-        contentDiv.innerHTML = isError
-          ? `<span style="color: #c62828;">${errMsg}</span>`
-          : errMsg;
+        const indicator = contentDiv.ownerDocument!.createElement("div");
+        indicator.style.cssText =
+          "margin-top:8px;padding:4px 8px;border-radius:4px;font-size:12px;" +
+          (isError
+            ? "color:#c62828;background:rgba(198,40,40,0.08);"
+            : "color:var(--text-secondary);background:var(--background-secondary);");
+        indicator.textContent = errMsg;
+        contentDiv.appendChild(indicator);
       }
     } finally {
       if (input) input.disabled = false;
@@ -27050,8 +29603,6 @@ Be concise, accurate, and helpful. When referencing papers, cite them by title o
    * Add items to the currently active table (if any)
    */
   static async addItemsToCurrentTable(items: Zotero.Item[]): Promise<void> {
-    // Reload from disk to ensure we have the latest config
-    // (tools may have modified the config on disk bypassing the in-memory variable)
     const tableStore = getTableStore();
     currentTableConfig = await tableStore.loadConfig();
 

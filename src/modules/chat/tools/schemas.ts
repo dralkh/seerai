@@ -305,6 +305,109 @@ export const WebParamsSchema = z.discriminatedUnion("action", [
   }),
 ]);
 
+// ==================== WORKSPACE SCHEMAS ====================
+
+export const WorkspaceReadFileParamsSchema = z.object({
+  path: z.string().describe("File path relative to workspace root"),
+  offset: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Start reading at line (1-indexed)"),
+  limit: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Maximum lines to read"),
+});
+
+export const WorkspaceWriteFileParamsSchema = z.object({
+  path: z.string().describe("File path relative to workspace root"),
+  content: z.string().describe("Full content to write"),
+  message: z.string().optional().describe("Description of the change"),
+});
+
+export const WorkspaceEditFileParamsSchema = z.object({
+  path: z.string().describe("File path relative to workspace root"),
+  oldString: z.string().describe("Exact text to replace"),
+  newString: z.string().describe("Text to replace with"),
+  replaceAll: z
+    .boolean()
+    .default(false)
+    .optional()
+    .describe("Replace all occurrences"),
+  message: z.string().optional().describe("Description of the change"),
+});
+
+export const WorkspaceGlobParamsSchema = z.object({
+  pattern: z.string().describe("Glob pattern (e.g. '**/*.ts', '*.json')"),
+  path: z.string().optional().describe("Directory to search within"),
+});
+
+export const WorkspaceGrepParamsSchema = z.object({
+  pattern: z.string().describe("Regex pattern to search for"),
+  include: z.string().optional().describe("File pattern filter (e.g. '*.ts')"),
+  path: z.string().optional().describe("Directory to search within"),
+});
+
+export const WorkspaceQuestionParamsSchema = z.object({
+  questions: z
+    .array(
+      z.object({
+        question: z.string().describe("The complete question text"),
+        header: z.string().max(30).describe("Very short label (max 30 chars)"),
+        options: z
+          .array(
+            z.object({
+              label: z.string().describe("Display text (1-5 words, concise)"),
+              description: z.string().describe("Explanation of choice"),
+            }),
+          )
+          .describe("Available choices"),
+        multiple: z
+          .boolean()
+          .default(false)
+          .optional()
+          .describe("Allow selecting multiple choices"),
+      }),
+    )
+    .describe("Questions to ask the user"),
+});
+
+export const WorkspaceBashParamsSchema = z.object({
+  command: z.string().describe("The bash command to execute"),
+  workdir: z
+    .string()
+    .optional()
+    .describe("Working directory relative to workspace root"),
+  description: z
+    .string()
+    .describe("Clear, concise description of what this command does"),
+});
+
+export const WorkspaceDiffParamsSchema = z.object({
+  path: z.string().describe("File path relative to workspace root"),
+  previous: z
+    .boolean()
+    .default(true)
+    .optional()
+    .describe("Compare with previous version"),
+  versionId: z.string().optional().describe("Specific version ID to compare"),
+});
+
+export const WorkspaceLogParamsSchema = z.object({
+  path: z.string().describe("File path relative to workspace root"),
+  limit: z
+    .number()
+    .int()
+    .positive()
+    .default(20)
+    .optional()
+    .describe("Max history entries"),
+});
+
 // ==================== SCHEMA REGISTRY ====================
 
 const schemaRegistry: Partial<Record<ToolName, z.ZodSchema>> = {
@@ -320,6 +423,15 @@ const schemaRegistry: Partial<Record<ToolName, z.ZodSchema>> = {
   [TOOL_NAMES.NOTE]: NoteParamsSchema,
   [TOOL_NAMES.RELATED_PAPERS]: RelatedPapersParamsSchema,
   [TOOL_NAMES.WEB]: WebParamsSchema,
+  [TOOL_NAMES.WORKSPACE_READ_FILE]: WorkspaceReadFileParamsSchema,
+  [TOOL_NAMES.WORKSPACE_WRITE_FILE]: WorkspaceWriteFileParamsSchema,
+  [TOOL_NAMES.WORKSPACE_EDIT_FILE]: WorkspaceEditFileParamsSchema,
+  [TOOL_NAMES.WORKSPACE_GLOB]: WorkspaceGlobParamsSchema,
+  [TOOL_NAMES.WORKSPACE_GREP]: WorkspaceGrepParamsSchema,
+  [TOOL_NAMES.WORKSPACE_QUESTION]: WorkspaceQuestionParamsSchema,
+  [TOOL_NAMES.WORKSPACE_BASH]: WorkspaceBashParamsSchema,
+  [TOOL_NAMES.WORKSPACE_DIFF]: WorkspaceDiffParamsSchema,
+  [TOOL_NAMES.WORKSPACE_LOG]: WorkspaceLogParamsSchema,
 };
 
 // ==================== SENSITIVITY REGISTRY ====================
@@ -339,6 +451,15 @@ const sensitivityRegistry: Record<ToolName, SensitivityLevel> = {
   [TOOL_NAMES.NOTE]: "write",
   [TOOL_NAMES.RELATED_PAPERS]: "read",
   [TOOL_NAMES.WEB]: "read",
+  [TOOL_NAMES.WORKSPACE_READ_FILE]: "read",
+  [TOOL_NAMES.WORKSPACE_WRITE_FILE]: "write",
+  [TOOL_NAMES.WORKSPACE_EDIT_FILE]: "write",
+  [TOOL_NAMES.WORKSPACE_GLOB]: "read",
+  [TOOL_NAMES.WORKSPACE_GREP]: "read",
+  [TOOL_NAMES.WORKSPACE_QUESTION]: "read",
+  [TOOL_NAMES.WORKSPACE_BASH]: "write",
+  [TOOL_NAMES.WORKSPACE_DIFF]: "read",
+  [TOOL_NAMES.WORKSPACE_LOG]: "read",
 };
 
 // ==================== UTILITIES ====================

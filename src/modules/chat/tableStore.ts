@@ -69,6 +69,15 @@ export class TableStore {
   }
 
   /**
+   * Create a fresh config (new ID), save it, and return it.
+   */
+  async createFreshConfig(): Promise<TableConfig> {
+    const config = this.createDefaultConfig();
+    await this.saveConfig(config);
+    return config;
+  }
+
+  /**
    * Load the current table configuration
    */
   async loadConfig(): Promise<TableConfig> {
@@ -96,23 +105,24 @@ export class TableStore {
     }
   }
 
+  /**
+   * Create a default table configuration
+   */
   private createDefaultConfig(): TableConfig {
     const now = new Date().toISOString();
     return {
       id: this.generateId(),
       ...defaultTableConfig,
-      columns: [...defaultColumns],
+      columns: [...defaultColumns], // Clone to avoid mutation
       createdAt: now,
       updatedAt: now,
     };
   }
 
-  async createFreshConfig(): Promise<TableConfig> {
-    const config = this.createDefaultConfig();
-    await this.saveConfig(config);
-    return config;
-  }
-
+  /**
+   * Save the current table configuration
+   * Uses write lock to prevent race conditions during concurrent saves
+   */
   async saveConfig(config: TableConfig): Promise<void> {
     return this.withWriteLock(async () => {
       try {
@@ -194,26 +204,11 @@ export class TableStore {
         encoder.encode(JSON.stringify(history, null, 2)),
       );
 
-      // Only save as current config if this table IS the current config
-      try {
-        if (await IOUtils.exists(this.configFile)) {
-          const currentBytes = await IOUtils.read(this.configFile);
-          const currentContent = new TextDecoder().decode(currentBytes);
-          if (currentContent) {
-            const currentConfig = JSON.parse(currentContent);
-            if (currentConfig.id === tableId) {
-              await IOUtils.write(
-                this.configFile,
-                encoder.encode(JSON.stringify(entry.config, null, 2)),
-              );
-            }
-          }
-        }
-      } catch {
-        Zotero.debug(
-          `[seerai] updateTable: Could not check current config, skipping configFile write`,
-        );
-      }
+      // Also save as current config
+      await IOUtils.write(
+        this.configFile,
+        encoder.encode(JSON.stringify(entry.config, null, 2)),
+      );
 
       return entry.config;
     });

@@ -19,6 +19,7 @@ export type PromptCategory =
   | "comparative"
   | "writing"
   | "summary"
+  | "skills"
   | "custom";
 
 export interface PlaceholderInfo {
@@ -493,11 +494,12 @@ export const CATEGORY_LABELS: Record<
   PromptCategory,
   { label: string; icon: string }
 > = {
-  analysis: { label: "Analysis", icon: "🔍" },
-  comparative: { label: "Comparative", icon: "⚖️" },
-  writing: { label: "Writing", icon: "✍️" },
-  summary: { label: "Summary", icon: "📄" },
-  custom: { label: "Custom", icon: "⚙️" },
+  analysis: { label: "Analysis", icon: "\uD83D\uDD0D" },
+  comparative: { label: "Comparative", icon: "\u2696\uFE0F" },
+  writing: { label: "Writing", icon: "\u270D\uFE0F" },
+  summary: { label: "Summary", icon: "\uD83D\uDCC4" },
+  skills: { label: "Skills", icon: "\uD83E\uDEE1" },
+  custom: { label: "Custom", icon: "\u2699\uFE0F" },
 };
 
 export function getCategoryLabel(category: PromptCategory): string {

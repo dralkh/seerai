@@ -5,6 +5,9 @@ import zotero from "@zotero-plugin/eslint-config";
 export default zotero({
   overrides: [
     {
+      ignores: ["test/repro_*.js"],
+    },
+    {
       files: ["**/*.ts"],
       rules: {
         // We disable this rule here because the template

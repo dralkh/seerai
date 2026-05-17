@@ -56,3 +56,7 @@ pref("ragMinScore", 30);
 pref("ragChunkSize", 512);
 pref("ragChunkOverlap", 64);
 pref("tableGenerationSound", true);
+pref("historySidebarWidth", 120);
+pref("workspaceSidebarWidth", 120);
+pref("workspaceSidebarCollapsed", true);
+pref("workspaceEditorHeight", 300);

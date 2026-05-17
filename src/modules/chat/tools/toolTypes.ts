@@ -267,9 +267,7 @@ export interface AddToTableParams {
 /**
  * Parameters for list_tables tool
  */
-export interface ListTablesParams {
-  // No parameters needed
-}
+export type ListTablesParams = Record<string, never>;
 
 /**
  * Parameters for create_table_column tool
@@ -793,7 +791,6 @@ export interface WebParams {
 // ==================== Tool Name Constants ====================
 
 export const TOOL_NAMES = {
-  // Core tools (unchanged)
   SEARCH_LIBRARY: "search_library",
   SEARCH_EXTERNAL: "search_external",
   GET_ITEM_METADATA: "get_item_metadata",
@@ -801,14 +798,23 @@ export const TOOL_NAMES = {
   IMPORT_PAPER: "import_paper",
   GENERATE_ITEM_TAGS: "generate_item_tags",
 
-  // Consolidated tools
-  // Consolidated tools
   CONTEXT: "context",
   COLLECTION: "collection",
   TABLE: "table",
   NOTE: "note",
   RELATED_PAPERS: "related_papers",
   WEB: "web",
+
+  // Workspace tools
+  WORKSPACE_READ_FILE: "workspace_read_file",
+  WORKSPACE_WRITE_FILE: "workspace_write_file",
+  WORKSPACE_EDIT_FILE: "workspace_edit_file",
+  WORKSPACE_GLOB: "workspace_glob",
+  WORKSPACE_GREP: "workspace_grep",
+  WORKSPACE_QUESTION: "workspace_question",
+  WORKSPACE_BASH: "workspace_bash",
+  WORKSPACE_DIFF: "workspace_diff",
+  WORKSPACE_LOG: "workspace_log",
 } as const;
 
 export type ToolName = (typeof TOOL_NAMES)[keyof typeof TOOL_NAMES];

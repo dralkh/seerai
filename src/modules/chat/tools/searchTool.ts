@@ -303,7 +303,8 @@ export async function executeImportPaper(
   config: AgentConfig,
 ): Promise<ToolResult> {
   try {
-    let { paper_id, target_collection_id, trigger_ocr, wait_for_pdf } = params;
+    const { paper_id, trigger_ocr, wait_for_pdf } = params;
+    let { target_collection_id } = params;
 
     Zotero.debug(
       `[seerai] Tool: import_paper id=${paper_id} target_col=${target_collection_id} trigger_ocr=${trigger_ocr}`,

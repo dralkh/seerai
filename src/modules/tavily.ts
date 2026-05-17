@@ -418,7 +418,7 @@ class TavilyService {
       if (content) {
         // Match markdown links to PDFs: [text](url.pdf)
         const pdfLinkRegex =
-          /\[([^\]]*)\]\((https?:\/\/[^\s\)]+\.pdf[^\s\)]*)\)/gi;
+          /\[([^\]]*)\]\((https?:\/\/[^\s)]+\.pdf[^\s)]*)\)/gi;
         const match = pdfLinkRegex.exec(content);
         if (match) {
           Zotero.debug(`[seerai] Found PDF in content: ${match[2]}`);
@@ -432,7 +432,7 @@ class TavilyService {
 
         // Check for "Download PDF" type links
         const downloadRegex =
-          /\[([^\]]*(?:download|pdf|full\s*text)[^\]]*)\]\((https?:\/\/[^\s\)]+)\)/gi;
+          /\[([^\]]*(?:download|pdf|full\s*text)[^\]]*)\]\((https?:\/\/[^\s)]+)\)/gi;
         const downloadMatch = downloadRegex.exec(content);
         if (downloadMatch) {
           Zotero.debug(`[seerai] Found download link: ${downloadMatch[2]}`);

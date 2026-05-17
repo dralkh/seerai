@@ -115,7 +115,7 @@ function markdownToHtml(markdown: string): string {
     }
 
     // Ordered List (1. or 1))
-    const olMatch = line.match(/^[\s]*\d+[\.\)]\s+(.*)$/);
+    const olMatch = line.match(/^[\s]*\d+[.)]\s+(.*)$/);
     if (olMatch) {
       if (!inList || listType !== "ol") {
         flushList();

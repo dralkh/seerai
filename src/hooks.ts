@@ -423,7 +423,6 @@ async function processAllLibraryItems() {
   ztoolkit.log(`DataLab: Processing all PDFs in library ${libraryID}`);
 
   // Get all regular items in the library
-  // @ts-ignore
   const allItems = (await Zotero.Items.getAll(libraryID)) as Zotero.Item[];
   const parentItems: Zotero.Item[] = [];
 

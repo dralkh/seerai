@@ -3,6 +3,8 @@
  * Modal/popover for browsing and selecting prompt templates
  */
 
+const HTML_NS = "http://www.w3.org/1999/xhtml";
+
 import {
   PromptTemplate,
   PromptCategory,
@@ -37,9 +39,6 @@ export async function showPromptPicker(
   anchorEl: HTMLElement,
   options: PromptPickerOptions,
 ): Promise<void> {
-  const parentContainer = anchorEl.parentElement;
-  if (!parentContainer) return;
-
   // Check if we are toggling the same button
   const existing = doc.querySelector(".prompt-picker-container");
   if (existing) {
@@ -54,7 +53,7 @@ export async function showPromptPicker(
 
   activePickerAnchor = anchorEl;
 
-  // Create container
+  // Create container — use fixed positioning like chatSettings
   const container = doc.createElement("div");
   container.className = "prompt-picker-container";
   container.style.cssText = `
@@ -71,32 +70,12 @@ export async function showPromptPicker(
         z-index: 10003;
     `;
 
-  // Calculate position
   const rect = anchorEl.getBoundingClientRect();
-  const view = doc.defaultView || { innerHeight: 800, innerWidth: 1200 };
+  const win = doc.defaultView || ({} as Window);
+  const winHeight = (win as any).innerHeight || 800;
 
-  // Default: Above the button, left-aligned if possible
-  const bottom = view.innerHeight - rect.top + 6; // 6px gap
-  let left = rect.left;
-
-  // Check width overflow
-  if (left + 380 > view.innerWidth) {
-    // Align right edge with button right edge if it overflows
-    left = rect.right - 380;
-  }
-  // Check left overflow
-  if (left < 10) left = 10;
-
-  // Check height overflow (if top of popup would be offscreen)
-  // 480px max height
-  if (rect.top - 480 < 0) {
-    // Not enough space above? Try below.
-    // But "drop up" is requested. We'll clamp max-height instead if needed logic is added.
-    // For now, let's just clamp the top position.
-  }
-
-  container.style.bottom = `${bottom}px`;
-  container.style.left = `${left}px`;
+  container.style.bottom = `${winHeight - rect.top + 8}px`;
+  container.style.left = `${Math.max(4, rect.left)}px`;
 
   // State
   let currentCategory: PromptCategory | null = options.initialCategory || null;
@@ -255,12 +234,29 @@ export async function showPromptPicker(
           selectedPrompt?.id === prompt.id,
           () => {
             selectedPrompt = prompt;
-            renderPromptList(); // Re-render to update selection
+            renderPromptList();
           },
           () => {
             options.onSelect(prompt);
             close();
           },
+          prompt.isBuiltIn
+            ? undefined
+            : () => {
+                showPromptEditor(doc, container, prompt, async () => {
+                  await renderPromptList();
+                });
+              },
+          prompt.isBuiltIn
+            ? undefined
+            : () => {
+                deletePrompt(prompt.id).then(() => {
+                  if (selectedPrompt?.id === prompt.id) {
+                    selectedPrompt = null;
+                  }
+                  renderPromptList();
+                });
+              },
         );
         listContainer.appendChild(card);
       }
@@ -284,7 +280,7 @@ export async function showPromptPicker(
         gap: 8px;
     `;
 
-  const newBtn = doc.createElement("button");
+  const newBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
   newBtn.textContent = "+ New Prompt";
   newBtn.style.cssText = `
         padding: 8px 14px;
@@ -301,7 +297,7 @@ export async function showPromptPicker(
     });
   });
 
-  const insertBtn = doc.createElement("button");
+  const insertBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
   insertBtn.textContent = "Insert ▸";
   insertBtn.style.cssText = `
         padding: 8px 16px;
@@ -335,31 +331,32 @@ export async function showPromptPicker(
   container.appendChild(footer);
 
   // === Assemble and show ===
-  // === Assemble and show ===
-  // Append to body (or documentElement) for fixed positioning
-  if (doc.body) {
-    doc.body.appendChild(container);
-  } else {
-    (doc.documentElement as HTMLElement).appendChild(container);
-  }
+  const mountPoint = doc.body || doc.documentElement;
+  if (!mountPoint) return;
+  mountPoint.appendChild(container);
 
   // === Close handling ===
   function close() {
     container.remove();
     activePickerAnchor = null;
     options.onClose?.();
-    doc.removeEventListener("click", closeHandler);
+    doc.removeEventListener("mousedown", closeHandler);
     doc.removeEventListener("keydown", escHandler);
   }
 
   const closeHandler = (e: MouseEvent) => {
-    // Close if click is outside container AND outside the button
-    // AND not inside the editor overlay (which is child of container)
-    // Use composedPath() to handle clicks on elements that might be removed from DOM
-    const path = e.composedPath();
-    if (!path.includes(container) && !path.includes(anchorEl)) {
-      close();
+    const target = e.target as Node;
+    // Don't close if click is inside container or anchor
+    if (container.contains(target) || anchorEl.contains(target)) {
+      return;
     }
+    // Don't close if focus is inside container (e.g. native select dropdown
+    // renders options outside the DOM, but activeElement stays on the <select>)
+    const activeEl = doc.activeElement;
+    if (activeEl && container.contains(activeEl)) {
+      return;
+    }
+    close();
   };
 
   const escHandler = (e: KeyboardEvent) => {
@@ -370,7 +367,7 @@ export async function showPromptPicker(
   };
 
   setTimeout(() => {
-    doc.addEventListener("click", closeHandler);
+    doc.addEventListener("mousedown", closeHandler);
     doc.addEventListener("keydown", escHandler);
   }, 0);
 
@@ -388,7 +385,7 @@ function createCategoryTab(
   isActive: boolean,
   onClick: () => void,
 ): HTMLElement {
-  const tab = doc.createElement("button");
+  const tab = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
   tab.style.cssText = `
         display: flex;
         align-items: center;
@@ -414,6 +411,8 @@ function createPromptCard(
   isSelected: boolean,
   onSelect: () => void,
   onDoubleClick: () => void,
+  onEdit?: () => void,
+  onDelete?: () => void,
 ): HTMLElement {
   const card = doc.createElement("div");
   card.className = "prompt-card";
@@ -459,6 +458,80 @@ function createPromptCard(
   header.appendChild(icon);
   header.appendChild(name);
   header.appendChild(badges);
+
+  if (!prompt.isBuiltIn && (onEdit || onDelete)) {
+    const actions = doc.createElement("div");
+    actions.style.cssText =
+      "display: flex; gap: 2px; margin-left: auto; opacity: 0; transition: opacity 0.15s ease;";
+
+    if (onEdit) {
+      const editBtn = doc.createElementNS(
+        HTML_NS,
+        "button",
+      ) as HTMLButtonElement;
+      editBtn.textContent = "✏️";
+      editBtn.title = "Edit";
+      editBtn.style.cssText = `
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 12px;
+            padding: 2px 4px;
+            border-radius: 4px;
+            opacity: 0.6;
+        `;
+      editBtn.addEventListener("click", (e: Event) => {
+        e.stopPropagation();
+        onEdit();
+      });
+      editBtn.addEventListener("mouseenter", () => {
+        editBtn.style.opacity = "1";
+      });
+      editBtn.addEventListener("mouseleave", () => {
+        editBtn.style.opacity = "0.6";
+      });
+      actions.appendChild(editBtn);
+    }
+
+    if (onDelete) {
+      const deleteBtn = doc.createElementNS(
+        HTML_NS,
+        "button",
+      ) as HTMLButtonElement;
+      deleteBtn.textContent = "🗑️";
+      deleteBtn.title = "Delete";
+      deleteBtn.style.cssText = `
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 12px;
+            padding: 2px 4px;
+            border-radius: 4px;
+            opacity: 0.6;
+        `;
+      deleteBtn.addEventListener("click", (e: Event) => {
+        e.stopPropagation();
+        onDelete();
+      });
+      deleteBtn.addEventListener("mouseenter", () => {
+        deleteBtn.style.opacity = "1";
+        deleteBtn.style.color = "#e53935";
+      });
+      deleteBtn.addEventListener("mouseleave", () => {
+        deleteBtn.style.opacity = "0.6";
+        deleteBtn.style.color = "";
+      });
+      actions.appendChild(deleteBtn);
+    }
+
+    header.appendChild(actions);
+    card.addEventListener("mouseenter", () => {
+      actions.style.opacity = "1";
+    });
+    card.addEventListener("mouseleave", () => {
+      actions.style.opacity = "0";
+    });
+  }
   card.appendChild(header);
 
   // Description
@@ -550,7 +623,7 @@ async function showPromptEditor(
         background: var(--background-secondary);
     `;
 
-  const backBtn = doc.createElement("button");
+  const backBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
   backBtn.textContent = "← Back";
   backBtn.style.cssText = `
         background: none;
@@ -672,7 +745,7 @@ async function showPromptEditor(
         border-top: 1px solid var(--border-primary);
     `;
 
-  const cancelBtn = doc.createElement("button");
+  const cancelBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
   cancelBtn.textContent = "Cancel";
   cancelBtn.style.cssText = `
         padding: 8px 16px;
@@ -685,7 +758,7 @@ async function showPromptEditor(
     `;
   cancelBtn.addEventListener("click", () => editorOverlay.remove());
 
-  const saveBtn = doc.createElement("button");
+  const saveBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
   saveBtn.textContent = existingPrompt ? "Save Changes" : "Create Prompt";
   saveBtn.style.cssText = `
         padding: 8px 16px;

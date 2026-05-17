@@ -31,6 +31,16 @@ export interface AgentIteration {
   endTime?: number;
   toolSpans: ToolSpan[];
   tokenCount?: number;
+  estimatedInputTokens?: number;
+}
+
+export interface AgentStats {
+  turns: number;
+  totalTools: number;
+  failedTools: number;
+  estimatedInputTokens: number;
+  lastToolName: string;
+  lastToolSummary: string;
 }
 
 /**
@@ -45,6 +55,7 @@ export interface AgentTrace {
   totalToolCalls: number;
   failedToolCalls: number;
   finalSuccess: boolean;
+  compactions: number;
 }
 
 /**
@@ -67,6 +78,7 @@ class AgentTracer {
       totalToolCalls: 0,
       failedToolCalls: 0,
       finalSuccess: false,
+      compactions: 0,
     };
     this.activeTraces.set(sessionId, trace);
     Zotero.debug(`[seerai][trace] Session started: ${sessionId}`);
@@ -95,6 +107,13 @@ class AgentTracer {
       iteration.endTime = Date.now();
       trace.iterations.push(iteration);
       this.activeIterations.delete(sessionId);
+    }
+  }
+
+  setIterationTokens(sessionId: string, estimatedInputTokens: number): void {
+    const iteration = this.activeIterations.get(sessionId);
+    if (iteration) {
+      iteration.estimatedInputTokens = estimatedInputTokens;
     }
   }
 
@@ -182,11 +201,58 @@ class AgentTracer {
       Zotero.debug(
         `[seerai][trace] Tool calls: ${trace.totalToolCalls} (${trace.failedToolCalls} failed)`,
       );
+      Zotero.debug(`[seerai][trace] Compactions: ${trace.compactions}`);
 
       return trace;
     }
 
     return undefined;
+  }
+
+  /**
+   * Track a context compaction event
+   */
+  logCompaction(sessionId: string, compactionIndex: number): void {
+    const trace = this.activeTraces.get(sessionId);
+    if (trace) {
+      trace.compactions++;
+    }
+    Zotero.debug(
+      `[seerai][trace] Context compaction #${compactionIndex} for session ${sessionId}`,
+    );
+  }
+
+  getStats(sessionId: string): AgentStats | null {
+    const trace = this.activeTraces.get(sessionId);
+    if (!trace) return null;
+
+    const iteration = this.activeIterations.get(sessionId);
+    let lastToolName = "";
+    let lastToolSummary = "";
+
+    if (iteration && iteration.toolSpans.length > 0) {
+      const lastSpan = iteration.toolSpans[iteration.toolSpans.length - 1];
+      lastToolName = lastSpan.toolName;
+      if (lastSpan.result) {
+        lastToolSummary = lastSpan.result.dataSummary || "";
+      }
+    }
+
+    let estimatedInputTokens = 0;
+    for (const iter of trace.iterations) {
+      estimatedInputTokens += iter.estimatedInputTokens || 0;
+    }
+
+    return {
+      turns:
+        trace.iterations.length +
+        (this.activeIterations.has(sessionId) ? 1 : 0),
+      totalTools: trace.totalToolCalls,
+      failedTools: trace.failedToolCalls,
+      estimatedInputTokens,
+      lastToolName,
+      lastToolSummary,
+    };
   }
 
   /**

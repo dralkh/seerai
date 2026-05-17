@@ -51,6 +51,17 @@ export class ZoteroClient {
     return this.request("POST", endpoint, args);
   }
 
+  async getWorkspaceInfo(): Promise<{
+    workspaceDir: string;
+    conversationId: string;
+  } | null> {
+    try {
+      return await this.request("GET", "/seerai/workspace_info", undefined);
+    } catch {
+      return null;
+    }
+  }
+
   private async request(
     method: "GET" | "POST",
     path: string,

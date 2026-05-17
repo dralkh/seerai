@@ -51,8 +51,7 @@ export async function executeCollection(
         { collection_id: params.collection_id! },
         config,
       );
-    case "add_item":
-      // For each item, call executeMoveItem
+    case "add_item": {
       if (!params.item_ids || params.item_ids.length === 0) {
         return {
           success: false,
@@ -76,7 +75,8 @@ export async function executeCollection(
         summary: `Added ${added} item(s) to collection`,
         data: { added_count: added },
       };
-    case "remove_item":
+    }
+    case "remove_item": {
       if (!params.item_ids || params.item_ids.length === 0) {
         return {
           success: false,
@@ -96,6 +96,7 @@ export async function executeCollection(
         summary: `Removed ${removed} item(s) from collection`,
         data: { removed_count: removed },
       };
+    }
     default:
       return {
         success: false,

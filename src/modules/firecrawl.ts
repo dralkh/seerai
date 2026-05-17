@@ -483,7 +483,7 @@ class FirecrawlService {
       if (result.markdown) {
         // Match markdown links to PDFs: [text](url.pdf)
         const pdfLinkRegex =
-          /\[([^\]]*)\]\((https?:\/\/[^\s\)]+\.pdf[^\s\)]*)\)/gi;
+          /\[([^\]]*)\]\((https?:\/\/[^\s)]+\.pdf[^\s)]*)\)/gi;
         const match = pdfLinkRegex.exec(result.markdown);
         if (match) {
           Zotero.debug(`[seerai] Found PDF in markdown: ${match[2]}`);
@@ -497,7 +497,7 @@ class FirecrawlService {
 
         // Also check for "Download PDF" type links
         const downloadRegex =
-          /\[([^\]]*(?:download|pdf|full\s*text)[^\]]*)\]\((https?:\/\/[^\s\)]+)\)/gi;
+          /\[([^\]]*(?:download|pdf|full\s*text)[^\]]*)\]\((https?:\/\/[^\s)]+)\)/gi;
         const downloadMatch = downloadRegex.exec(result.markdown);
         if (downloadMatch) {
           Zotero.debug(

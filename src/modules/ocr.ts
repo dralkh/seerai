@@ -263,7 +263,6 @@ export class OcrService {
         (typeof filePath === "string" && filePath.startsWith("storage:"))
       ) {
         ztoolkit.log("DataLab: Attempting manual path resolution...");
-        // @ts-ignore
         const dataDirPath = Zotero.DataDirectory.dir;
         ztoolkit.log(`DataLab: Zotero.DataDirectory.dir: ${dataDirPath}`);
 
@@ -276,7 +275,6 @@ export class OcrService {
           );
 
           if (fileName) {
-            // @ts-ignore
             filePath = PathUtils.join(
               dataDirPath,
               "storage",
@@ -357,7 +355,6 @@ export class OcrService {
           throw new Error(`Local server returned status ${response.status}`);
         }
 
-        // @ts-ignore
         const result = response.response;
         ztoolkit.log(
           `DataLab: Local response keys: ${Object.keys(result).join(", ")}`,
@@ -406,7 +403,6 @@ export class OcrService {
         }
 
         // Read the file
-        // @ts-ignore
         const fileData: Uint8Array = await IOUtils.read(filePath);
         ztoolkit.log(`Mistral: Read ${fileData.length} bytes from file`);
 
@@ -445,7 +441,6 @@ export class OcrService {
           },
         );
 
-        // @ts-ignore
         const uploadResult = uploadResponse.response;
         ztoolkit.log("Mistral: Upload response", JSON.stringify(uploadResult));
 
@@ -475,7 +470,6 @@ export class OcrService {
           },
         );
 
-        // @ts-ignore
         const urlResult = urlResponse.response;
         ztoolkit.log("Mistral: URL response", JSON.stringify(urlResult));
 
@@ -514,7 +508,6 @@ export class OcrService {
           },
         );
 
-        // @ts-ignore
         const ocrResult = ocrResponse.response;
         ztoolkit.log(
           "Mistral: OCR response keys",
@@ -595,7 +588,6 @@ export class OcrService {
           false;
 
         // Read the file using IOUtils
-        // @ts-ignore
         const fileData: Uint8Array = await IOUtils.read(filePath);
         ztoolkit.log(`DataLab: Read ${fileData.length} bytes from file`);
 

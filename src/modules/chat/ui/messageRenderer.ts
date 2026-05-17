@@ -219,7 +219,10 @@ export function createActionButton(
   tooltip: string,
   onClick: () => void,
 ): HTMLElement {
-  const btn = doc.createElement("button");
+  const btn = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "button",
+  ) as HTMLButtonElement;
   btn.innerText = icon;
   btn.title = tooltip;
   Object.assign(btn.style, {

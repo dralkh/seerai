@@ -32,7 +32,6 @@ const CONFIG_VERSION = 1;
 // Helper to get all preference keys for a branch
 function getPrefKeys(branchName: string): string[] {
   try {
-    // @ts-ignore
     const branch = Services.prefs.getBranch(branchName);
     const children = (branch as any).getChildList(""); // Fix lint: only 1 argument expected
     return children.map((child: string) => branchName + child);

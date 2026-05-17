@@ -220,14 +220,18 @@ export interface AIModelConfig {
 }
 
 // Conversation metadata
-export interface Conversation {
+export interface ConversationMetadata {
   id: string;
   title: string;
   createdAt: Date;
   updatedAt: Date;
-  messages: ChatMessage[];
-  states: ChatStates;
-  options: ChatOptions; // Persisted options for this conversation
+  messageCount: number;
+  preview: string;
+  folder?: string;
+  archived?: boolean;
+  systemPrompt?: string;
+  skillIds?: string[];
+  continuation?: string;
 }
 
 // Metadata for history listing
@@ -238,6 +242,10 @@ export interface ConversationMetadata {
   updatedAt: Date;
   messageCount: number;
   preview: string; // Snippet of the last message
+  folder?: string; // Folder/space name for organizing chats (undefined = unfiled)
+  archived?: boolean; // Whether the chat is archived (hidden from main view)
+  systemPrompt?: string; // Custom system prompt for this conversation
+  skillIds?: string[]; // Skill template IDs from prompt library to preload
 }
 
 // Index of all conversations
@@ -265,6 +273,10 @@ export interface ChatOptions {
   model?: string;
   ragEnabled?: boolean; // Enable semantic search (RAG) for large context
   ragTokenThreshold?: number; // Token count threshold to auto-activate RAG
+  /** Per-conversation custom system prompt */
+  systemPrompt?: string;
+  /** Skill template IDs from prompt library to inject into system prompt */
+  skillIds?: string[];
 }
 
 export const defaultChatOptions: ChatOptions = {

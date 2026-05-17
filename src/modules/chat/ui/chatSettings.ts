@@ -1184,7 +1184,9 @@ export function showChatSettings(
         let freshPerms: Record<string, string> = {};
         try {
           freshPerms = JSON.parse(freshPermsStr || "{}");
-        } catch (e) {}
+        } catch (e) {
+          /* intentionally ignore parse errors */
+        }
 
         const curr = freshPerms[toolKey] || "allow";
         let next = "allow";
@@ -1214,7 +1216,9 @@ export function showChatSettings(
   let currentPerms: Record<string, string> = {};
   try {
     currentPerms = JSON.parse(currentPermsStr || "{}");
-  } catch (e) {}
+  } catch (e) {
+    /* intentionally ignore parse errors */
+  }
   renderToolList(currentPerms);
 
   permSection.appendChild(permList);

@@ -8,6 +8,7 @@
 
 import {
   OpenAIMessage,
+  AnyOpenAIMessage,
   VisionMessage,
   VisionMessageContentPart,
   ToolCall,
@@ -15,48 +16,556 @@ import {
   ToolResultMessage,
   ToolDefinition,
   openAIService,
+  createProvider,
+  type AgentQuery,
+  type ProviderEvent,
 } from "../openai";
 import {
-  agentTools,
+  getFilteredAgentTools,
   executeToolCall,
   formatToolResult,
   getAgentConfigFromPrefs,
   AgentConfig,
   ToolResult,
+  TOOL_NAMES,
 } from "./tools";
 import { ChatMessage } from "./types";
 import { parseMarkdown } from "./markdown";
 import { getActiveModelConfig } from "./modelConfig";
 import { agentTracer } from "./tracer";
+import { ChatStateManager } from "./stateManager";
+import { getWorkspaceStore } from "./workspace/store";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
+
+interface CompactionState {
+  count: number;
+  lastCompactAt: number;
+}
+
+async function archiveTranscript(
+  messages: AnyOpenAIMessage[],
+): Promise<string | null> {
+  try {
+    const store = getWorkspaceStore();
+    const timestamp = new Date()
+      .toISOString()
+      .replace(/[:.]/g, "-")
+      .slice(0, 19);
+    const slug = `compact-${timestamp}`;
+    const archivePath = `.conversations/${slug}.md`;
+
+    const lines = messages
+      .map((m) => {
+        const role = m.role || "unknown";
+        const content =
+          typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+        return `## [${role}]\n\n${content}`;
+      })
+      .join("\n\n---\n\n");
+
+    const header = [
+      `# Archived Transcript`,
+      ``,
+      `**Archived at:** ${new Date().toISOString()}`,
+      `**Messages:** ${messages.length}`,
+      ``,
+      `---`,
+      ``,
+    ].join("\n");
+
+    await store.writeFile(
+      archivePath,
+      header + lines,
+      `Archive transcript ${slug}`,
+      "system",
+    );
+    Zotero.debug(`[seerai] Archived transcript to ${archivePath}`);
+    return archivePath;
+  } catch (e) {
+    Zotero.debug(`[seerai] Failed to archive transcript: ${e}`);
+    return null;
+  }
+}
+
+async function hasIncompleteTodos(): Promise<boolean> {
+  try {
+    const store = getWorkspaceStore();
+    const file = await store.readFile(".agent/TODO.json");
+    if (file?.content) {
+      const todos = JSON.parse(file.content);
+      if (Array.isArray(todos)) {
+        return todos.some(
+          (t: { status: string }) =>
+            t.status === "pending" || t.status === "in_progress",
+        );
+      }
+    }
+  } catch {
+    // No TODOs
+  }
+  return false;
+}
+
+/**
+ * Summarize conversation for context compaction.
+ * Uses a non-streaming call to avoid interfering with the main stream.
+ */
+async function summarizeConversation(
+  messagesToSummarize: AnyOpenAIMessage[],
+): Promise<string> {
+  const prompt = [
+    {
+      role: "system" as const,
+      content:
+        "You are a summarization assistant. Your task is to condense a conversation into a detailed but concise summary. " +
+        "Focus on: 1) what the user originally asked for, 2) what has been completed so far (with specific results), " +
+        "3) the current state of any TODO list, 4) what remains to be done next. " +
+        "Preserve key facts: paper titles, DOIs, item IDs, collection names, table names, and other identifiers.",
+    },
+    {
+      role: "user" as const,
+      content:
+        "Please summarize the following conversation. Include all important details and identifiers:\n\n" +
+        messagesToSummarize
+          .map((m) => {
+            const role = m.role || "unknown";
+            const content =
+              typeof m.content === "string"
+                ? m.content
+                : JSON.stringify(m.content);
+            return `[${role}]: ${content}`;
+          })
+          .join("\n\n"),
+    },
+  ];
+
+  try {
+    const result = await openAIService.chatCompletion(prompt);
+    return result || "(summary unavailable)";
+  } catch (e) {
+    Zotero.debug(`[seerai] Compaction summarization failed: ${e}`);
+    return "(summary generation failed)";
+  }
+}
+
+/**
+ * Read current TODO state from workspace.
+ */
+async function readToDoState(): Promise<string> {
+  try {
+    const store = getWorkspaceStore();
+    const file = await store.readFile(".agent/TODO.json");
+    if (file?.content) {
+      const todos = JSON.parse(file.content);
+      if (Array.isArray(todos) && todos.length > 0) {
+        const lines = todos.map(
+          (t: { content: string; status: string }) =>
+            `  - [${t.status}] ${t.content}`,
+        );
+        return `Current TODOs:\n${lines.join("\n")}`;
+      }
+    }
+  } catch {
+    // No TODOs
+  }
+  return "";
+}
+
+/**
+ * Check if context needs compaction and perform it if needed.
+ * Returns true if compaction was performed.
+ */
+async function maybeCompactContext(
+  messages: AnyOpenAIMessage[],
+  contextLength: number,
+  outputBudget: number,
+  compactionState: CompactionState,
+  sessionId: string,
+): Promise<boolean> {
+  if (compactionState.count >= 3) return false;
+
+  const totalTokens = messages.reduce((sum, m) => {
+    const content =
+      typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+    return sum + ChatStateManager.countTokens(content);
+  }, 0);
+
+  const safeLimit = contextLength - outputBudget;
+  if (totalTokens < safeLimit * 0.85) return false;
+
+  Zotero.debug(
+    `[seerai] Context compaction triggered: ${totalTokens} tokens > ${safeLimit * 0.85} (85% of ${safeLimit})`,
+  );
+
+  const systemMsg = messages[0];
+  const userMsg = messages.find((m) => m.role === "user") as
+    | OpenAIMessage
+    | undefined;
+
+  const toSummarize = messages.slice(1);
+
+  const archivePath = await archiveTranscript(toSummarize);
+
+  const summary = await summarizeConversation(toSummarize);
+  const todoState = await readToDoState();
+
+  messages.length = 0;
+  messages.push(systemMsg);
+
+  const compactParts: string[] = [
+    `[CONTEXT COMPACTED #${compactionState.count + 1}]`,
+  ];
+  if (archivePath) {
+    compactParts.push(`[ARCHIVED: ${archivePath}]`);
+  }
+  compactParts.push(
+    `Conversation summary:\n${summary}`,
+    todoState,
+    "Continue from where you left off. Use the summary above to understand what has been done and what remains.",
+  );
+
+  const compactBlock = compactParts.filter(Boolean).join("\n\n");
+
+  messages.push({
+    role: "system",
+    content: compactBlock,
+  } as OpenAIMessage);
+
+  if (userMsg) {
+    messages.push(userMsg);
+  }
+
+  compactionState.count++;
+  compactionState.lastCompactAt = Date.now();
+  agentTracer.logCompaction(sessionId, compactionState.count);
+
+  Zotero.debug(
+    `[seerai] Context compaction #${compactionState.count} complete`,
+  );
+  return true;
+}
 
 /**
  * Options for the agentic chat
  */
 export interface AgenticChatOptions {
-  /** Enable tool calling */
   enableTools: boolean;
-  /** Include images in the request */
   includeImages: boolean;
-  /** Pasted images to include */
   pastedImages?: { id: string; image: string; mimeType: string }[];
-  /** Handler for inline permission requests */
   permissionHandler?: (
     toolCallId: string,
     toolName: string,
   ) => Promise<boolean>;
-  /** Chat temperature */
   temperature?: number;
-  /** Max tokens */
   maxTokens?: number;
-  /** Library scope override */
   libraryScope?: import("./tools").LibraryScope;
+  continuation?: string;
 }
 
 /**
  * Create a container for tool execution process
  */
+/**
+ * Create a standalone interactive question panel for workspace_question.
+ * Renders as a prominent card in the chat — NOT inside collapsible tool cards.
+ */
+export function createQuestionPanel(
+  doc: Document,
+  questions: any[],
+): HTMLElement {
+  const selections: Map<number, string[]> = new Map();
+
+  const panel = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  panel.className = "seerai-question-panel";
+  panel.style.cssText = `
+    margin: 12px 0;
+    border: 2px solid var(--highlight-primary, #007AFF);
+    border-radius: 10px;
+    background: var(--background-primary, #fff);
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  `;
+
+  const banner = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  banner.style.cssText = `
+    padding: 10px 14px;
+    background: var(--highlight-primary, #007AFF);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  `;
+  const bannerText = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  bannerText.textContent = "\u2753 Questions from Assistant";
+  const stepLabel = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  stepLabel.style.cssText = "font-size: 12px; font-weight: 400; opacity: 0.9;";
+  banner.appendChild(bannerText);
+  banner.appendChild(stepLabel);
+  panel.appendChild(banner);
+
+  // Tab indicator dots
+  const tabRow = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  tabRow.style.cssText = `
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 14px 0;
+  `;
+  const tabDots: HTMLElement[] = [];
+  for (let i = 0; i < questions.length; i++) {
+    const dot = doc.createElementNS(HTML_NS, "button") as HTMLElement;
+    dot.textContent = `${i + 1}`;
+    dot.style.cssText = `
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 1.5px solid var(--border-primary);
+      background: var(--background-primary);
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    `;
+    dot.addEventListener("click", () => {
+      currentTab = i;
+      renderTab();
+    });
+    tabRow.appendChild(dot);
+    tabDots.push(dot);
+  }
+  panel.appendChild(tabRow);
+
+  const body = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  body.style.cssText = "padding: 12px 14px; min-height: 80px;";
+  panel.appendChild(body);
+
+  const navRow = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  navRow.style.cssText = `
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 14px 12px;
+    gap: 8px;
+    border-top: 1px solid var(--border-secondary, #e0e0e0);
+  `;
+  panel.appendChild(navRow);
+
+  let currentTab = 0;
+
+  function triggerSend() {
+    const input = doc.querySelector(
+      ".seerai-chat-input",
+    ) as HTMLTextAreaElement | null;
+    if (!input) return;
+
+    const lines: string[] = [];
+    for (let i = 0; i < questions.length; i++) {
+      const q = questions[i];
+      const sel = selections.get(i);
+      const answer = sel && sel.length > 0 ? sel.join(", ") : "(no answer)";
+      lines.push(`**${q.header}**: ${answer}`);
+      lines.push(`(${q.question})`);
+      lines.push("");
+    }
+
+    input.value = lines.join("\n").trim();
+    input.focus();
+    input.dispatchEvent(
+      new (doc.defaultView as any).Event("input", { bubbles: true }),
+    );
+
+    // Trigger send via Enter keydown
+    const enterEvent = new (doc.defaultView as any).KeyboardEvent("keydown", {
+      key: "Enter",
+      code: "Enter",
+      keyCode: 13,
+      which: 13,
+      bubbles: true,
+      cancelable: true,
+    });
+    input.dispatchEvent(enterEvent);
+  }
+
+  function renderTab() {
+    body.innerHTML = "";
+    navRow.innerHTML = "";
+
+    // Update step label
+    stepLabel.textContent = `${currentTab + 1} of ${questions.length}`;
+
+    // Update tab dots
+    tabDots.forEach((dot, i) => {
+      if (i === currentTab) {
+        dot.style.background = "var(--highlight-primary)";
+        dot.style.color = "#fff";
+        dot.style.borderColor = "var(--highlight-primary)";
+      } else if (selections.has(i) && selections.get(i)!.length > 0) {
+        dot.style.background = "var(--accent-green, #34C759)";
+        dot.style.color = "#fff";
+        dot.style.borderColor = "var(--accent-green, #34C759)";
+      } else {
+        dot.style.background = "var(--background-primary)";
+        dot.style.color = "var(--text-secondary)";
+        dot.style.borderColor = "var(--border-primary)";
+      }
+    });
+
+    const q = questions[currentTab];
+
+    const qHeader = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    qHeader.style.cssText =
+      "font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;";
+    qHeader.textContent = q.header || "";
+    body.appendChild(qHeader);
+
+    const qText = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    qText.style.cssText =
+      "font-size: 12px; color: var(--text-secondary); margin-bottom: 10px; line-height: 1.4;";
+    qText.textContent = q.question || "";
+    body.appendChild(qText);
+
+    if (q.options && Array.isArray(q.options) && q.options.length > 0) {
+      const optsContainer = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+      optsContainer.style.cssText =
+        "display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px;";
+
+      const prevSelection = selections.get(currentTab) || [];
+
+      for (const opt of q.options) {
+        const optBtn = doc.createElementNS(HTML_NS, "button") as HTMLElement;
+        optBtn.textContent = opt.label;
+        optBtn.style.cssText = `
+          padding: 5px 12px;
+          font-size: 12px;
+          border: 1.5px solid var(--border-primary);
+          border-radius: 16px;
+          background: var(--background-primary);
+          color: var(--text-primary);
+          cursor: pointer;
+          transition: all 0.15s;
+        `;
+        if (opt.description) {
+          optBtn.title = opt.description;
+        }
+        if (prevSelection.includes(opt.label)) {
+          optBtn.style.background = "var(--highlight-primary)";
+          optBtn.style.color = "#fff";
+          optBtn.style.borderColor = "var(--highlight-primary)";
+        }
+        optBtn.addEventListener("click", () => {
+          const cur = selections.get(currentTab) || [];
+          if (q.multiple) {
+            const idx = cur.indexOf(opt.label);
+            if (idx >= 0) {
+              cur.splice(idx, 1);
+              optBtn.style.background = "var(--background-primary)";
+              optBtn.style.color = "var(--text-primary)";
+              optBtn.style.borderColor = "var(--border-primary)";
+            } else {
+              cur.push(opt.label);
+              optBtn.style.background = "var(--highlight-primary)";
+              optBtn.style.color = "#fff";
+              optBtn.style.borderColor = "var(--highlight-primary)";
+            }
+          } else {
+            cur.length = 0;
+            cur.push(opt.label);
+            optsContainer.querySelectorAll("button").forEach((s: Element) => {
+              const btn = s as HTMLElement;
+              btn.style.background = "var(--background-primary)";
+              btn.style.color = "var(--text-primary)";
+              btn.style.borderColor = "var(--border-primary)";
+            });
+            optBtn.style.background = "var(--highlight-primary)";
+            optBtn.style.color = "#fff";
+            optBtn.style.borderColor = "var(--highlight-primary)";
+          }
+          selections.set(currentTab, cur.length > 0 ? cur : []);
+          renderTab();
+        });
+        optsContainer.appendChild(optBtn);
+      }
+      body.appendChild(optsContainer);
+    }
+
+    // Navigation buttons
+    if (currentTab > 0) {
+      const backBtn = doc.createElementNS(HTML_NS, "button") as HTMLElement;
+      backBtn.textContent = "\u2190 Back";
+      backBtn.style.cssText = `
+        padding: 6px 14px;
+        font-size: 12px;
+        border: 1px solid var(--border-primary);
+        border-radius: 6px;
+        background: var(--background-primary);
+        color: var(--text-primary);
+        cursor: pointer;
+      `;
+      backBtn.addEventListener("click", () => {
+        currentTab--;
+        renderTab();
+      });
+      navRow.appendChild(backBtn);
+    } else {
+      navRow.appendChild(doc.createElementNS(HTML_NS, "span") as HTMLElement);
+    }
+
+    if (currentTab < questions.length - 1) {
+      const continueBtn = doc.createElementNS(HTML_NS, "button") as HTMLElement;
+      continueBtn.textContent = "Continue \u2192";
+      continueBtn.style.cssText = `
+        padding: 6px 16px;
+        font-size: 12px;
+        font-weight: 600;
+        border: none;
+        border-radius: 6px;
+        background: var(--highlight-primary);
+        color: #fff;
+        cursor: pointer;
+      `;
+      continueBtn.addEventListener("click", () => {
+        currentTab++;
+        renderTab();
+      });
+      // Allow Enter to advance
+      continueBtn.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (e.key === "Enter") {
+          currentTab++;
+          renderTab();
+        }
+      });
+      navRow.appendChild(continueBtn);
+    } else {
+      const completeBtn = doc.createElementNS(HTML_NS, "button") as HTMLElement;
+      completeBtn.textContent = "\u2713 Complete";
+      completeBtn.style.cssText = `
+        padding: 6px 16px;
+        font-size: 12px;
+        font-weight: 600;
+        border: none;
+        border-radius: 6px;
+        background: var(--accent-green, #34C759);
+        color: #fff;
+        cursor: pointer;
+      `;
+      completeBtn.addEventListener("click", () => {
+        triggerSend();
+      });
+      navRow.appendChild(completeBtn);
+    }
+  }
+
+  renderTab();
+  return panel;
+}
+
 export function createToolProcessUI(doc: Document): {
   container: HTMLElement;
   setThinking: () => void;
@@ -64,6 +573,16 @@ export function createToolProcessUI(doc: Document): {
   setCompleted: (count: number, toolCount?: number) => void;
   updateProgress: (count: number, toolCount?: number) => void;
   setFailed: (error: string) => void;
+  updateStats: (stats: {
+    turns: number;
+    totalTools: number;
+    estimatedTokens: number;
+    completedTodos: number;
+    totalTodos: number;
+    lastToolName: string;
+    lastToolSummary: string;
+    isThinking: boolean;
+  }) => void;
 } {
   const details = doc.createElementNS(HTML_NS, "details") as HTMLDetailsElement;
   details.className = "tool-process-container";
@@ -169,6 +688,33 @@ export function createToolProcessUI(doc: Document): {
 
   details.appendChild(summary);
 
+  const statsBar = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+  statsBar.className = "agent-stats-bar";
+  statsBar.style.cssText = `
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+    padding: 4px 12px;
+    font-size: 11px;
+    color: var(--text-tertiary, #999);
+    border-bottom: 1px solid var(--border-secondary, #e0e0e0);
+    line-height: 1.4;
+  `;
+
+  const statsTurns = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  const statsTools = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  const statsTokens = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  const statsTodos = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  const statsLast = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+
+  statsBar.appendChild(statsTurns);
+  statsBar.appendChild(statsTools);
+  statsBar.appendChild(statsTokens);
+  statsBar.appendChild(statsTodos);
+  statsBar.appendChild(statsLast);
+  details.appendChild(statsBar);
+
   // Container for card list
   const listContainer = doc.createElementNS(HTML_NS, "div") as HTMLElement;
   listContainer.className = "tool-list-container";
@@ -200,8 +746,7 @@ export function createToolProcessUI(doc: Document): {
     icon.textContent = "🔧";
     icon.style.filter = "none";
     icon.style.animation = "pulse 1s infinite";
-    icon.style.animation = "pulse 1s infinite";
-    // Do NOT force open here if we want to respect user's choice,
+    // Do NOT force open here
     // BUT user often wants to see new tools.
     // Letting persistence handle this in assistant.ts is better.
     // details.open = true;
@@ -244,6 +789,55 @@ export function createToolProcessUI(doc: Document): {
     details.open = true; // Auto-expand on failure
   };
 
+  const updateStats = (stats: {
+    turns: number;
+    totalTools: number;
+    estimatedTokens: number;
+    completedTodos: number;
+    totalTodos: number;
+    lastToolName: string;
+    lastToolSummary: string;
+    isThinking: boolean;
+  }) => {
+    const maxIterations =
+      getAgentConfigFromPrefs().maxAgentIterations || Infinity;
+    const maxLabel =
+      maxIterations === Infinity ? "\u221E" : String(maxIterations);
+
+    statsTurns.textContent = `Turns: ${stats.turns}/${maxLabel}`;
+
+    statsTools.textContent = `Tools: ${stats.totalTools}`;
+
+    if (stats.estimatedTokens >= 1000) {
+      statsTokens.textContent = `Tokens: ~${(stats.estimatedTokens / 1000).toFixed(1)}K`;
+    } else {
+      statsTokens.textContent = `Tokens: ~${stats.estimatedTokens}`;
+    }
+
+    if (stats.totalTodos > 0) {
+      statsTodos.textContent = `TODOs: ${stats.completedTodos}/${stats.totalTodos}`;
+      statsTodos.style.display = "";
+    } else {
+      statsTodos.style.display = "none";
+    }
+
+    if (stats.lastToolName) {
+      const displayName = stats.lastToolName.replace(/_/g, " ");
+      const summary = stats.lastToolSummary
+        ? ` \u2192 ${stats.lastToolSummary}`
+        : "";
+      statsLast.textContent = `Last: ${displayName}${summary}`;
+      statsLast.style.display = "";
+    } else {
+      statsLast.style.display = "none";
+    }
+
+    if (stats.isThinking) {
+      statsLast.textContent = "Status: thinking";
+      statsLast.style.display = "";
+    }
+  };
+
   return {
     container: details,
     setThinking,
@@ -251,6 +845,7 @@ export function createToolProcessUI(doc: Document): {
     setCompleted,
     updateProgress,
     setFailed,
+    updateStats,
   };
 }
 
@@ -266,8 +861,15 @@ export function createToolExecutionUI(
   details.className = "tool-execution-card";
   details.setAttribute("data-tool-id", toolCall.id);
 
-  // Auto-expand if it failed
+  // Auto-expand if it failed, or if it's an interactive workspace_question
   if (result && !result.success) {
+    details.open = true;
+  }
+  if (
+    result &&
+    result.success &&
+    toolCall.function.name === "workspace_question"
+  ) {
     details.open = true;
   }
 
@@ -290,7 +892,6 @@ export function createToolExecutionUI(
         align-items: center;
         gap: 8px;
         font-size: 12px;
-        font-weight: 500;
         font-weight: 500;
         color: var(--text-primary);
         list-style: none; /* Hide default triangle */
@@ -395,12 +996,29 @@ export function createToolExecutionUI(
     if (result.success) {
       // Check if data is complex object or simple text
       if (result.data) {
-        resDiv.textContent = JSON.stringify(result.data, null, 2);
-        resDiv.style.color = "var(--text-primary)";
-        // Truncate if extremely long
-        if (resDiv.textContent.length > 2000) {
-          resDiv.textContent =
-            resDiv.textContent.slice(0, 2000) + "... (truncated)";
+        // Interactive question form for workspace_question tool
+        // The interactive panel is rendered as a standalone element in the chat -
+        // here we just show a compact note
+        if (toolCall.function.name === "workspace_question") {
+          const data = result.data as Record<string, unknown>;
+          if (data.questions && Array.isArray(data.questions)) {
+            const questions = data.questions as any[];
+            const noteDiv = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+            noteDiv.style.cssText =
+              "font-size: 11px; font-style: italic; color: var(--text-secondary);";
+            noteDiv.textContent = `${questions.length} question(s) asked — see interactive panel above`;
+            resDiv.style.whiteSpace = "normal";
+            resDiv.style.color = "var(--text-primary)";
+            resDiv.appendChild(noteDiv);
+          }
+        } else {
+          resDiv.textContent = JSON.stringify(result.data, null, 2);
+          resDiv.style.color = "var(--text-primary)";
+          // Truncate if extremely long
+          if (resDiv.textContent.length > 2000) {
+            resDiv.textContent =
+              resDiv.textContent.slice(0, 2000) + "... (truncated)";
+          }
         }
       } else {
         resDiv.textContent = result.summary || "Success";
@@ -432,6 +1050,7 @@ export interface AgentUIObserver {
   onComplete: (content: string, iterationCount?: number) => void;
   onError: (error: Error) => void;
   onIterationStarted?: (iteration: number) => void;
+  onPreApiCall?: (estimatedInputTokens: number) => void;
 }
 
 /**
@@ -451,9 +1070,10 @@ export async function handleAgenticChat(
       options.libraryScope || getAgentConfigFromPrefs().libraryScope,
   };
 
-  // Get tools if enabled
+  // Get tools if enabled, filtered by permission settings
+  const allFilteredTools = getFilteredAgentTools();
   const tools: ToolDefinition[] | undefined = options.enableTools
-    ? agentTools
+    ? allFilteredTools
     : undefined;
 
   // Build initial messages
@@ -506,7 +1126,13 @@ export async function handleAgenticChat(
 
   let fullResponse = "";
   let iteration = 0;
-  const isFirstToken = true;
+  let noToolRetryCount = 0;
+  let continuationToken = options.continuation || "";
+  const MAX_NO_TOOL_RETRIES = 2;
+
+  const compactionState: CompactionState = { count: 0, lastCompactAt: 0 };
+  const modelContextLength = activeModel?.contextLength || 128000;
+  const outputBudget = configOverride?.max_tokens || 16384;
 
   // Start tracing session (agentic.md Section 7.1)
   const sessionId = `agent_${Date.now()}`;
@@ -529,11 +1155,11 @@ export async function handleAgenticChat(
     observer.onIterationStarted?.(iteration);
 
     // Inject a hidden internal system hint to help the model maintain context
-    // This ensures the model knows the current turn number for internal tracking
+    // This ensures the model knows the current turn number and task expectations
     if (iteration > 1) {
       messages.push({
         role: "system",
-        content: `[System Update: Reasoning turn ${iteration}. Continue your task concisely.]`,
+        content: `[Reasoning turn ${iteration}. When your work is complete and the user's request is fully answered, provide a text response with no tool calls to end the conversation.]`,
       });
     }
 
@@ -541,43 +1167,199 @@ export async function handleAgenticChat(
     let iterationContent = "";
 
     try {
-      await openAIService.chatCompletionStream(
+      await maybeCompactContext(
         messages,
-        {
-          onToken: (token) => {
-            iterationContent += token;
-            fullResponse += token;
-
-            observer.onToken(token, fullResponse);
-          },
-          onToolCalls: (toolCalls) => {
-            Zotero.debug(`[seerai] Received ${toolCalls.length} tool call(s)`);
-            toolCallsReceived = toolCalls;
-          },
-          onComplete: (content) => {
-            Zotero.debug(
-              `[seerai] Iteration ${iteration} complete, content length: ${content.length}`,
-            );
-          },
-          onError: (error) => {
-            throw error;
-          },
-        },
-        configOverride,
-        tools,
+        modelContextLength,
+        outputBudget,
+        compactionState,
+        sessionId,
       );
 
-      // If no tool calls, we're done
+      const estimatedInputTokens = messages.reduce((sum, m) => {
+        const content =
+          typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+        return sum + ChatStateManager.countTokens(content);
+      }, 0);
+
+      agentTracer.setIterationTokens(sessionId, estimatedInputTokens);
+      observer.onPreApiCall?.(estimatedInputTokens);
+
+      const provider = createProvider();
+      const query = provider.query({
+        messages,
+        tools,
+        configOverride,
+        continuation: continuationToken || undefined,
+      });
+
+      try {
+        for await (const event of query.events) {
+          switch (event.type) {
+            case "init":
+              if (event.continuation) {
+                continuationToken = event.continuation;
+              }
+              break;
+            case "token":
+              iterationContent += event.text;
+              fullResponse += event.text;
+              observer.onToken(event.text, fullResponse);
+              break;
+            case "tool_calls":
+              Zotero.debug(
+                `[seerai] Received ${event.toolCalls.length} tool call(s)`,
+              );
+              toolCallsReceived = event.toolCalls;
+              break;
+            case "done":
+              Zotero.debug(
+                `[seerai] Iteration ${iteration} complete, content length: ${event.content.length}`,
+              );
+              break;
+            case "error":
+              throw new Error(event.message);
+          }
+
+          if (openAIService.isAbortedState()) {
+            query.abort();
+            throw new Error("Request was cancelled");
+          }
+        }
+      } catch (err) {
+        if (
+          err instanceof Error &&
+          (err.message.includes("cancelled") || err.message.includes("abort"))
+        ) {
+          throw err;
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        Zotero.debug(`[seerai] Provider stream error: ${msg}`);
+        throw err;
+      }
+
+      // If no tool calls, check if task is complete or we should retry
       if (toolCallsReceived.length === 0) {
-        Zotero.debug(`[seerai] No tool calls, agent loop complete`);
-        break;
+        if (taskExplicitlyCompleted) {
+          Zotero.debug(
+            `[seerai] Task was completed via task_complete tool, agent loop done`,
+          );
+          break;
+        }
+
+        const hasActiveTodos = await hasIncompleteTodos();
+
+        if (!hasActiveTodos && productiveToolCalls === 0) {
+          Zotero.debug(
+            `[seerai] No tool calls, no active todos, no prior work — treating as conversational response`,
+          );
+          break;
+        }
+
+        if (!hasActiveTodos) {
+          Zotero.debug(
+            `[seerai] No tool calls and no active todos — task appears complete`,
+          );
+          break;
+        }
+
+        noToolRetryCount++;
+        Zotero.debug(
+          `[seerai] No tool calls but has active todos (retry ${noToolRetryCount}/${MAX_NO_TOOL_RETRIES})`,
+        );
+
+        if (noToolRetryCount > MAX_NO_TOOL_RETRIES) {
+          Zotero.debug(`[seerai] Max no-tool retries reached, stopping`);
+          const stopHint = `\n\n*[Agent paused after ${iteration} turns — task may be incomplete. You can ask it to continue.]*`;
+          fullResponse += stopHint;
+          observer.onMessageUpdate(fullResponse);
+          break;
+        }
+
+        if (iterationContent) {
+          messages.push({
+            role: "assistant",
+            content: iterationContent,
+          });
+        }
+        messages.push({
+          role: "system",
+          content:
+            `You have active TODO items that are not yet completed. ` +
+            `Call 'todoread' to check status, then execute the next pending tool call. ` +
+            `Do NOT produce more text — take ACTION with a tool call.`,
+        });
+        continue;
+      }
+
+      // Reset no-tool retry counter on successful tool calls
+      noToolRetryCount = 0;
+
+      let batchHasProductive = false;
+      let batchHasTaskComplete = false;
+
+      for (const tc of toolCallsReceived) {
+        if (tc.function.name === "task_complete") {
+          batchHasTaskComplete = true;
+        } else if (PRODUCTIVE_TOOLS.has(tc.function.name)) {
+          batchHasProductive = true;
+        }
+      }
+
+      // Reject premature task_complete: must have done productive work first
+      if (
+        batchHasTaskComplete &&
+        productiveToolCalls === 0 &&
+        !batchHasProductive
+      ) {
+        Zotero.debug(
+          "[seerai] Rejecting premature task_complete — no productive tool calls made",
+        );
+        const rejectionMessage = JSON.stringify({
+          success: false,
+          error:
+            "ERROR: You called task_complete without having DONE any actual work. " +
+            "You must EXECUTE tools (search, read, write files, generate output, etc.) before calling task_complete. " +
+            "If this is a multi-step task, call todowrite first to plan, then work through each step. " +
+            "Calling task_complete as your first action is NOT allowed.",
+        });
+        messages.push({
+          role: "assistant",
+          content: iterationContent || null,
+          tool_calls: toolCallsReceived,
+        });
+        messages.push({
+          role: "tool",
+          tool_call_id:
+            toolCallsReceived.find((tc) => tc.function.name === "task_complete")
+              ?.id || "unknown",
+          content: rejectionMessage,
+        });
+        continue;
+      }
+
+      if (batchHasTaskComplete) {
+        taskExplicitlyCompleted = true;
+        Zotero.debug(
+          "[seerai] task_complete tool called, will finish after this iteration",
+        );
+      }
+
+      // Filter out invalid tool calls (empty name, etc.) that would crash the API
+      const validToolCalls = toolCallsReceived.filter(
+        (tc) => tc.function.name && tc.function.name.length > 0,
+      );
+      const invalidCount = toolCallsReceived.length - validToolCalls.length;
+      if (invalidCount > 0) {
+        Zotero.debug(
+          `[seerai] Filtered ${invalidCount} invalid tool call(s) with empty name`,
+        );
       }
 
       // Add assistant message with tool calls to history
       const assistantToolMessage: ToolCallMessage = {
         role: "assistant",
         content: iterationContent || null,
-        tool_calls: toolCallsReceived,
+        tool_calls: validToolCalls,
       };
       messages.push(assistantToolMessage);
 
@@ -586,12 +1368,18 @@ export async function handleAgenticChat(
       const toolResults: { toolCall: ToolCall; result: ToolResult }[] = [];
 
       await Promise.all(
-        toolCallsReceived.map(async (toolCall) => {
+        validToolCalls.map(async (toolCall) => {
           // Inform observer tool call started
           observer.onToolCallStarted(toolCall);
 
-          // Start tool span for tracing
-          const parsedArgs = JSON.parse(toolCall.function.arguments || "{}");
+          // Start tool span for tracing (parse gracefully — malformed JSON
+          // is handled by executeToolCall's self-correction below)
+          let parsedArgs: Record<string, unknown> = {};
+          try {
+            parsedArgs = JSON.parse(toolCall.function.arguments || "{}");
+          } catch {
+            // Malformed JSON — executeToolCall will return a proper error
+          }
           agentTracer.startToolSpan(
             sessionId,
             toolCall.id,
@@ -624,6 +1412,10 @@ export async function handleAgenticChat(
 
       // Add results to history with enhanced error feedback (Reflexion pattern - agentic.md Section 2.1)
       for (const { toolCall, result } of toolResults) {
+        if (result.success && PRODUCTIVE_TOOLS.has(toolCall.function.name)) {
+          productiveToolCalls++;
+        }
+
         let resultContent: string;
 
         if (!result.success && result.error) {
@@ -678,6 +1470,13 @@ export async function handleAgenticChat(
     Zotero.debug(
       `[seerai][trace] Summary: ${agentTracer.getExecutionSummary(trace)}`,
     );
+  }
+
+  try {
+    const { getMessageStore } = await import("./messageStore");
+    await getMessageStore().setContinuation(continuationToken || undefined);
+  } catch (e) {
+    Zotero.debug(`[seerai] Error saving continuation: ${e}`);
   }
 
   observer.onComplete(fullResponse, iteration);

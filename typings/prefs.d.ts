@@ -54,6 +54,10 @@ declare namespace _ZoteroTypes {
       "ragChunkSize": number;
       "ragChunkOverlap": number;
       "tableGenerationSound": boolean;
+      "historySidebarWidth": number;
+      "workspaceSidebarWidth": number;
+      "workspaceSidebarCollapsed": boolean;
+      "workspaceEditorHeight": number;
     };
   }
 }

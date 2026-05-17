@@ -3,6 +3,8 @@
  * Inline autocomplete dropdown triggered by placeholder characters
  */
 
+const HTML_NS = "http://www.w3.org/1999/xhtml";
+
 import {
   detectTrigger,
   getAutocompleteResults,
@@ -592,7 +594,7 @@ export function createPlaceholderMenuButton(
   const container = doc.createElement("div");
   container.style.cssText = "position: relative;";
 
-  const button = doc.createElement("button");
+  const button = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
   button.type = "button";
   button.title = "Insert placeholder";
   button.style.cssText = `
@@ -649,7 +651,7 @@ export function createPlaceholderMenuButton(
 
     for (const [trigger, type] of placeholderTypes) {
       const info = PLACEHOLDER_INFO[type];
-      const item = doc.createElement("button");
+      const item = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
       item.type = "button";
       item.style.cssText = `
                 display: flex;

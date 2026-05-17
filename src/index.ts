@@ -16,12 +16,14 @@ if (!basicTool.getGlobal("Zotero")[config.addonInstance]) {
   // Expose API for detached window (lazy loaded)
   Object.defineProperty(addon.api, "Assistant", {
     get() {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { Assistant } = require("./modules/assistant");
       return Assistant;
     },
   });
   Object.defineProperty(addon.api, "DetachedWindowManager", {
     get() {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { DetachedWindowManager } = require("./modules/ui/windowManager");
       return DetachedWindowManager;
     },
@@ -31,8 +33,16 @@ if (!basicTool.getGlobal("Zotero")[config.addonInstance]) {
       const {
         exportAllData,
         importAllData,
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
       } = require("./modules/chat/configManager");
       return { exportAllData, importAllData };
+    },
+  });
+  Object.defineProperty(addon.api, "debugGitCli", {
+    get() {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { debugGitCli } = require("./modules/chat/workspace/gitCli");
+      return debugGitCli;
     },
   });
 }

@@ -43,6 +43,7 @@ import { executeCollection } from "./collectionTool";
 import { executeWeb } from "./webTool";
 import { executeRelatedPapers } from "./citationTool";
 import { executeGenerateItemTags } from "./tagTool";
+import { executeWorkspaceTool } from "../workspace/tools";
 
 /**
  * Parse a tool call from API format to typed format
@@ -173,6 +174,21 @@ export async function executeToolCall(
 
       case TOOL_NAMES.WEB:
         return await executeWeb(validatedArgs as WebParams, config);
+
+      // ==================== Workspace Tools ====================
+      case TOOL_NAMES.WORKSPACE_READ_FILE:
+      case TOOL_NAMES.WORKSPACE_WRITE_FILE:
+      case TOOL_NAMES.WORKSPACE_EDIT_FILE:
+      case TOOL_NAMES.WORKSPACE_GLOB:
+      case TOOL_NAMES.WORKSPACE_GREP:
+      case TOOL_NAMES.WORKSPACE_QUESTION:
+      case TOOL_NAMES.WORKSPACE_BASH:
+      case TOOL_NAMES.WORKSPACE_DIFF:
+      case TOOL_NAMES.WORKSPACE_LOG:
+        return await executeWorkspaceTool(
+          parsed.name,
+          validatedArgs as Record<string, unknown>,
+        );
 
       default:
         return {

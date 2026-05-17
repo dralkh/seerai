@@ -9,6 +9,39 @@
 
 import { handleApiRequest, ApiRequest } from "./handlers";
 import { TOOL_NAMES } from "../chat/tools/toolTypes";
+import { getWorkspaceStore } from "../chat/workspace/store";
+import { getMessageStore } from "../chat/messageStore";
+
+registerWorkspaceInfoEndpoint();
+
+function registerWorkspaceInfoEndpoint(): void {
+  Zotero.Server.Endpoints["/seerai/workspace_info"] = function () {
+    return {
+      supportedMethods: ["GET"],
+      supportedDataTypes: ["application/json"],
+      permitBookmarklet: false,
+      init: async function (_requestData: any) {
+        try {
+          const store = getWorkspaceStore();
+          return [
+            200,
+            "application/json",
+            JSON.stringify({
+              workspaceDir: store.workspaceDir,
+              conversationId: getMessageStore().getConversationId(),
+            }),
+          ];
+        } catch (e: any) {
+          return [
+            500,
+            "application/json",
+            JSON.stringify({ error: e?.message || String(e) }),
+          ];
+        }
+      },
+    };
+  };
+}
 
 // All tool endpoints
 const ENDPOINTS = [
@@ -27,6 +60,24 @@ const ENDPOINTS = [
   TOOL_NAMES.NOTE,
   TOOL_NAMES.RELATED_PAPERS,
   TOOL_NAMES.WEB,
+
+  // TODO management
+  TOOL_NAMES.TODO_WRITE,
+  TOOL_NAMES.TODO_READ,
+
+  // Completion signal
+  TOOL_NAMES.TASK_COMPLETE,
+
+  // Workspace tools
+  TOOL_NAMES.WORKSPACE_READ_FILE,
+  TOOL_NAMES.WORKSPACE_WRITE_FILE,
+  TOOL_NAMES.WORKSPACE_EDIT_FILE,
+  TOOL_NAMES.WORKSPACE_GLOB,
+  TOOL_NAMES.WORKSPACE_GREP,
+  TOOL_NAMES.WORKSPACE_QUESTION,
+  TOOL_NAMES.WORKSPACE_BASH,
+  TOOL_NAMES.WORKSPACE_DIFF,
+  TOOL_NAMES.WORKSPACE_LOG,
 ] as const;
 
 /**

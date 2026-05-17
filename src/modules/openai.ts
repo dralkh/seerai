@@ -71,6 +71,43 @@ export interface StreamCallbacks {
   onToolCalls?: (toolCalls: ToolCall[]) => void;
 }
 
+// ── Agent Provider Abstraction ──────────────────────────────────────
+// Decouples the agentic loop from direct chatCompletionStream callbacks,
+// enabling future multi-provider support and cleaner streaming lifecycle.
+// Inspired by nanoclaw's AgentProvider pattern.
+
+export interface QueryInput {
+  messages: AnyOpenAIMessage[];
+  tools?: ToolDefinition[];
+  configOverride?: {
+    apiURL?: string;
+    apiKey?: string;
+    model?: string;
+    temperature?: number;
+    max_tokens?: number;
+  };
+  continuation?: string;
+}
+
+export type ProviderEvent =
+  | { type: "init"; continuation: string }
+  | { type: "token"; text: string }
+  | { type: "tool_calls"; toolCalls: ToolCall[] }
+  | { type: "done"; content: string }
+  | { type: "error"; message: string; retryable: boolean };
+
+export interface AgentQuery {
+  push(message: string): void;
+  end(): void;
+  events: AsyncIterable<ProviderEvent>;
+  abort(): void;
+}
+
+export interface AgentProvider {
+  query(input: QueryInput): AgentQuery;
+  isSessionInvalid(err: unknown): boolean;
+}
+
 import { RateLimiter } from "../utils/rateLimiter";
 import { getActiveModelConfig } from "./chat/modelConfig";
 import { MODEL_TYPE_ENDPOINTS } from "./chat/types";
@@ -378,12 +415,13 @@ export class OpenAIService {
         reasoningEffort: effectiveConfig?.reasoningEffort,
       });
 
-      // Add tools if provided (reasoning models from OpenAI currently have limited tool support,
-      // but we follow the standard pattern here unless explicitly restricted)
+      // Add tools if provided
+      // NOTE: reasoning_effort is incompatible with function tools on some models
+      // (e.g. gpt-5.4-nano). Strip it when tools are present.
       if (tools && tools.length > 0) {
         requestBody.tools = tools;
-        // Allow the model to choose whether to call tools
         requestBody.tool_choice = "auto";
+        delete requestBody.reasoning_effort;
       }
 
       const response = await fetch(endpoint, {
@@ -1541,6 +1579,156 @@ export class OpenAIService {
       `Video generation timed out after ${(maxAttempts * intervalMs) / 1000}s. runId=${runId}`,
     );
   }
+}
+
+// ── Push-based async queue for follow-up messages ──
+
+class AsyncQueue<T> {
+  private queue: T[] = [];
+  private waiting: ((value: IteratorResult<T>) => void) | null = null;
+  private _done = false;
+
+  push = (item: T): void => {
+    if (this._done) return;
+    this.queue.push(item);
+    if (this.waiting) {
+      this.waiting(this.shiftResult());
+      this.waiting = null;
+    }
+  };
+
+  end = (): void => {
+    this._done = true;
+    if (this.waiting) {
+      this.waiting({ value: undefined, done: true } as IteratorResult<T>);
+      this.waiting = null;
+    }
+  };
+
+  private shiftResult(): IteratorResult<T> {
+    const value = this.queue.shift()!;
+    return { value, done: false };
+  }
+
+  [Symbol.asyncIterator](): AsyncIterableIterator<T> {
+    const queue = this.queue;
+    const getDone = () => this._done;
+    const setDone = () => {
+      this._done = true;
+    };
+    const setWaiting = (w: ((value: IteratorResult<T>) => void) | null) => {
+      this.waiting = w;
+    };
+
+    const inner: AsyncIterableIterator<T> = {
+      [Symbol.asyncIterator]() {
+        return inner;
+      },
+      async next(): Promise<IteratorResult<T>> {
+        if (queue.length > 0) {
+          const value = queue.shift()!;
+          return { value, done: false };
+        }
+        if (getDone()) {
+          return { value: undefined, done: true } as IteratorResult<T>;
+        }
+        return new Promise<IteratorResult<T>>((resolve) => {
+          setWaiting(resolve);
+        });
+      },
+      return(): Promise<IteratorResult<T>> {
+        setDone();
+        return Promise.resolve({
+          value: undefined,
+          done: true,
+        } as IteratorResult<T>);
+      },
+    };
+    return inner;
+  }
+}
+
+// ── OpenAI Provider ──
+
+export class OpenAIProvider implements AgentProvider {
+  isSessionInvalid(_err: unknown): boolean {
+    return false;
+  }
+
+  query(input: QueryInput): AgentQuery {
+    const eventQueue = new AsyncQueue<ProviderEvent>();
+    const pendingPush: string[] = [];
+    let ended = false;
+
+    const emit = (event: ProviderEvent) => {
+      eventQueue.push(event);
+    };
+
+    const runStream = async () => {
+      try {
+        const allMessages = [...input.messages];
+
+        for (const pushed of pendingPush) {
+          allMessages.push({
+            role: "system",
+            content: pushed,
+          } as OpenAIMessage);
+        }
+
+        await openAIService.chatCompletionStream(
+          allMessages,
+          {
+            onToken: (token) => emit({ type: "token", text: token }),
+            onToolCalls: (toolCalls) => emit({ type: "tool_calls", toolCalls }),
+            onComplete: (content) => emit({ type: "done", content }),
+            onError: (error) =>
+              emit({
+                type: "error",
+                message: error.message || String(error),
+                retryable: false,
+              }),
+          },
+          input.configOverride,
+          input.tools,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const isAbort = msg.includes("cancelled") || msg.includes("abort");
+        if (!isAbort) {
+          emit({ type: "error", message: msg, retryable: false });
+        }
+      } finally {
+        eventQueue.end();
+      }
+    };
+
+    emit({ type: "init", continuation: input.continuation || "" });
+
+    const streamPromise = runStream();
+
+    return {
+      push(message: string) {
+        if (ended) return;
+        pendingPush.push(message);
+      },
+      end() {
+        ended = true;
+        eventQueue.end();
+      },
+      events: eventQueue,
+      abort() {
+        ended = true;
+        openAIService.abortRequest();
+        eventQueue.end();
+      },
+    };
+  }
+}
+
+export const openAIProvider = new OpenAIProvider();
+
+export function createProvider(_name?: string): AgentProvider {
+  return openAIProvider;
 }
 
 export const openAIService = new OpenAIService();
