@@ -215,6 +215,7 @@ export interface AIModelConfig {
   ragTopK?: number; // Max passages to retrieve from vector search (default: 20)
   ragMinScore?: number; // Minimum similarity score 0-100 for RAG results (default: 30)
   contextLength?: number; // Model context window in tokens (e.g., 200000 for gemini-2.5-pro)
+  toolChoice?: "auto" | "required" | "none"; // Force tool calling behavior (default: "auto")
   createdAt?: string; // ISO date string
   updatedAt?: string; // ISO date string
 }

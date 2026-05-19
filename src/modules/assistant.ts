@@ -72,6 +72,7 @@ import {
   isActiveProviderConfigured,
 } from "./webSearchProvider";
 import { getTheme } from "../utils/theme";
+import { getPref, setPref } from "../utils/prefs";
 import {
   runConcurrentTasks,
   formatTaskStats,
@@ -306,7 +307,7 @@ async function buildWorkspaceTreePrompt(): Promise<string> {
 
     if (!entries || entries.length === 0) return "";
 
-    const SKIP_DIRS = new Set([".git", ".agent"]);
+    const SKIP_DIRS = new Set([".git", ".agent", ".agents", ".conversations"]);
     const filtered = entries.filter((e) => !SKIP_DIRS.has(e.name));
 
     if (filtered.length === 0) return "";
@@ -3016,13 +3017,118 @@ export class Assistant {
       font-size: 11px;
       transition: all 0.2s;
     `;
-    newFolderBtn.onclick = async () => {
-      const name = (doc.defaultView?.prompt("Folder name:", "") || "").trim();
-      if (!name) return;
-      const currentId = store.getConversationId();
-      await store.moveConversationToFolder(currentId, name);
-      await this.loadHistory();
-      await this.renderInterfaceSidebarsOnly();
+    newFolderBtn.onclick = () => {
+      // Remove any existing inline form
+      const existing = doc.getElementById("folder-creation-form");
+      if (existing) {
+        existing.remove();
+        return;
+      }
+
+      // Also remove the new-file inline if present
+      const commitDropdown = doc.getElementById("commit-dropdown");
+      if (commitDropdown) commitDropdown.remove();
+
+      const form = doc.createElement("div");
+      form.id = "folder-creation-form";
+      form.style.cssText = `
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--border-primary);
+        background: var(--background-secondary);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        flex-shrink: 0;
+      `;
+
+      const nameInput = doc.createElement("input");
+      nameInput.type = "text";
+      nameInput.placeholder = "Folder name";
+      nameInput.style.cssText = `
+        width: 100%; padding: 4px 6px; font-size: 11px; font-family: inherit;
+        border: 1px solid var(--border-primary); border-radius: 4px;
+        background: var(--background-primary); color: var(--text-primary);
+        outline: none; box-sizing: border-box;
+      `;
+
+      const pathInput = doc.createElement("input");
+      pathInput.type = "text";
+      pathInput.placeholder =
+        "Workspace path (optional, defaults to folder name)";
+      pathInput.style.cssText = `
+        width: 100%; padding: 4px 6px; font-size: 10px; font-family: inherit;
+        border: 1px solid var(--border-primary); border-radius: 4px;
+        background: var(--background-primary); color: var(--text-secondary);
+        outline: none; box-sizing: border-box;
+      `;
+
+      const btnRow = doc.createElement("div");
+      btnRow.style.cssText =
+        "display: flex; gap: 4px; justify-content: flex-end;";
+
+      const cancelBtn = doc.createElementNS(
+        HTML_NS,
+        "button",
+      ) as HTMLButtonElement;
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.style.cssText = `
+        padding: 2px 8px; font-size: 10px;
+        border: 1px solid var(--border-primary); border-radius: 3px;
+        background: transparent; color: var(--text-secondary); cursor: pointer;
+      `;
+      cancelBtn.addEventListener("click", () => form.remove());
+
+      const createBtn = doc.createElementNS(
+        HTML_NS,
+        "button",
+      ) as HTMLButtonElement;
+      createBtn.textContent = "Create";
+      createBtn.style.cssText = `
+        padding: 2px 8px; font-size: 10px;
+        border: 1px solid var(--border-primary); border-radius: 3px;
+        background: var(--highlight-primary); color: white; cursor: pointer;
+      `;
+
+      const doCreate = async () => {
+        const name = nameInput.value.trim();
+        if (!name) return;
+        const workspacePath = pathInput.value.trim() || undefined;
+        const currentId = store.getConversationId();
+        await store.moveConversationToFolder(currentId, name);
+        if (workspacePath) {
+          try {
+            const { getWorkspaceStore } =
+              await import("./chat/workspace/store");
+            getWorkspaceStore().setFolderCustomPath(name, workspacePath);
+          } catch (e) {
+            Zotero.debug(`[seerai] Error saving workspace path mapping: ${e}`);
+          }
+        }
+        form.remove();
+        await this.loadHistory();
+        await this.renderInterfaceSidebarsOnly();
+      };
+
+      nameInput.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (e.key === "Enter") doCreate();
+        if (e.key === "Escape") form.remove();
+      });
+      createBtn.addEventListener("click", doCreate);
+
+      btnRow.appendChild(cancelBtn);
+      btnRow.appendChild(createBtn);
+      form.appendChild(nameInput);
+      form.appendChild(pathInput);
+      form.appendChild(btnRow);
+
+      // Insert after newChatBar, before list
+      if (newChatBar.nextSibling) {
+        sidebar.insertBefore(form, newChatBar.nextSibling);
+      } else {
+        sidebar.appendChild(form);
+      }
+
+      nameInput.focus();
     };
     newChatBar.appendChild(newFolderBtn);
 
@@ -3609,27 +3715,90 @@ export class Assistant {
         "font-size: 12px; cursor: pointer; opacity: 0.5; padding: 0 4px;";
       renameFolderBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
-        const newName = (
-          doc.defaultView?.prompt("Rename folder:", folderName) || ""
-        ).trim();
-        if (!newName || newName === folderName) return;
-        const store = getMessageStore();
-        const history = await store.getHistory();
-        for (const conv of history) {
-          if (conv.folder === folderName) {
-            await store.moveConversationToFolder(conv.id, newName);
+        // Inline rename: turn label into an input
+        const currentText = label.textContent || "";
+        const parenIdx = currentText.lastIndexOf(" (");
+        const bareName =
+          parenIdx > 0 ? currentText.substring(0, parenIdx) : folderName;
+
+        const input = doc.createElement("input");
+        input.type = "text";
+        input.value = bareName;
+        input.style.cssText = `
+          flex: 1; padding: 1px 4px; font-size: 11px; font-family: inherit;
+          border: 1px solid var(--highlight-primary); border-radius: 3px;
+          background: var(--background-primary); color: var(--text-primary);
+          outline: none; min-width: 0;
+        `;
+
+        const originalContent = label.textContent;
+        label.textContent = "";
+        label.appendChild(input);
+        input.focus();
+        input.select();
+
+        const commitRename = async () => {
+          const newName = input.value.trim();
+          if (!newName || newName === bareName) {
+            label.textContent = originalContent;
+            return;
           }
-        }
-        try {
-          const { getWorkspaceStore } = await import("./chat/workspace/store");
-          await getWorkspaceStore().renameWorkspaceFolder(folderName, newName);
-        } catch {
-          // best-effort
-        }
-        await Assistant.loadHistory();
-        if (currentContainer && currentItem) {
-          Assistant.renderInterface(currentContainer, currentItem);
-        }
+          try {
+            const store = getMessageStore();
+            const history = await store.getHistory();
+            for (const conv of history) {
+              if (conv.folder === folderName) {
+                await store.moveConversationToFolder(conv.id, newName);
+              }
+            }
+            try {
+              const { getWorkspaceStore } =
+                await import("./chat/workspace/store");
+              const ws = getWorkspaceStore();
+              // Carry over custom path mapping
+              const paths = JSON.parse(getPref("workspaceFolderPaths") || "{}");
+              const oldSlug = folderName
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, "-")
+                .replace(/^-|-$/g, "");
+              const newSlug = newName
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, "-")
+                .replace(/^-|-$/g, "");
+              if (paths[oldSlug]) {
+                paths[newSlug] = paths[oldSlug];
+                delete paths[oldSlug];
+                setPref("workspaceFolderPaths", JSON.stringify(paths));
+              }
+              await ws.renameWorkspaceFolder(folderName, newName);
+            } catch {
+              // best-effort
+            }
+            Assistant.loadHistory();
+            if (currentContainer && currentItem) {
+              Assistant.renderInterface(currentContainer, currentItem);
+            }
+          } catch (e: any) {
+            Zotero.debug(`[seerai] Error renaming folder: ${e}`);
+            label.textContent = originalContent;
+          }
+        };
+
+        input.addEventListener("keydown", (ev: KeyboardEvent) => {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            commitRename();
+          } else if (ev.key === "Escape") {
+            label.textContent = originalContent;
+          }
+          ev.stopPropagation();
+        });
+        input.addEventListener("blur", () => {
+          // Small delay so click on the input itself works before blur
+          setTimeout(() => {
+            if (input.parentNode) commitRename();
+          }, 150);
+        });
       });
       header.appendChild(renameFolderBtn);
 
@@ -28090,17 +28259,8 @@ Current Library/Folder Scope: ${scopeLabel} (Tools will only find items within t
 
 ${context}${webContext}
 
-Be concise, accurate, and helpful. When referencing papers, cite them by title or author.
+You are a research agent with direct access to the user's Zotero library, web search, and a file workspace. To help the user, call the tools at your disposal — search for papers, read their content, create tables, manage collections, and work with files. Do not describe what you could do; use the tools to actually do it. When you have fully completed the user's request, call the 'task_complete' tool.
 
-CRITICAL WORKFLOW RULE: You MUST use tools to EXECUTE every action requested. Do NOT merely describe what you will do or produce analysis text — you must actually perform the work through tool calls. Continue calling tools until the task is fully COMPLETE, then call the 'task_complete' tool to signal completion. If you receive results from a tool and more work remains, immediately call the next required tool. Do not stop until 'task_complete' is called.
-
-TODO-Driven Task Execution (MANDATORY for multi-step tasks):
-1. When the user gives you a task with multiple steps or actions, your FIRST action MUST be to call 'todowrite' to create a structured plan. Do NOT start executing steps before planning.
-2. Write clear, actionable todos with unique IDs covering every step the user requested.
-3. Mark the first todo as 'in_progress', then execute it using the appropriate tools.
-4. After completing a step, call 'todowrite' again to mark it 'completed' and set the next step to 'in_progress'.
-5. Use 'todoread' to recover your task state if you lose track after context compaction or many tool calls.
-6. You MUST call 'task_complete' ONLY when ALL todos are 'completed' or 'cancelled'. Never call 'task_complete' with pending items remaining.
 ${buildToolPromptSections()}
 ${webContext ? " When using web search results, cite the source URL." : ""}
 
@@ -28949,10 +29109,9 @@ Note: Context was automatically reduced using stricter semantic search due to si
     });
 
     // Copy button (for all messages) with Smart Copy logic
-    let clickTimeout: ReturnType<typeof setTimeout> | null = null;
+    let clickCount = 0;
+    let clickTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // We create the button first, then assign the logic to use the variable reference
-    // Use a temp handler that delegators to the logic defined below
     const copyBtn = this.createActionButton(
       doc,
       "📋",
@@ -28968,13 +29127,16 @@ Note: Context was automatically reduced using stricter semantic search due to si
           contentEl?.getAttribute("data-raw") ||
           text;
 
-        if (clickTimeout) {
-          // Double click: Clear timer and copy all
-          clearTimeout(clickTimeout);
-          clickTimeout = null;
+        clickCount++;
+        if (clickTimer) clearTimeout(clickTimer);
+
+        clickTimer = setTimeout(() => {
+          const isMultiClick = clickCount >= 2;
+          clickCount = 0;
+          clickTimer = null;
 
           let copyText = currentText;
-          if (toolResults && toolResults.length > 0) {
+          if (isMultiClick && toolResults && toolResults.length > 0) {
             const toolLogs = toolResults
               .map((tr) => {
                 const args = tr.toolCall.function.arguments;
@@ -28987,13 +29149,7 @@ Note: Context was automatically reduced using stricter semantic search due to si
             copyText = `${currentText}\n\n--- Tool Executions ---\n${toolLogs}`;
           }
           this.copyToClipboard(copyText, copyBtn as HTMLElement);
-        } else {
-          // First click: Set timer
-          clickTimeout = setTimeout(() => {
-            this.copyToClipboard(currentText, copyBtn as HTMLElement);
-            clickTimeout = null;
-          }, 250);
-        }
+        }, 300);
       },
     );
 
@@ -29025,6 +29181,29 @@ Note: Context was automatically reduced using stricter semantic search due to si
         this.handleEditMessage(container, msgDiv as HTMLElement, msgId || "");
       });
       actionsDiv.appendChild(editBtn);
+    }
+
+    // Retry button (only for assistant messages)
+    if (isAssistant) {
+      const retryBtn = this.createActionButton(doc, "🔄", "Retry", () => {
+        const outerPanel = (msgDiv as HTMLElement).closest(
+          "#assistant-messages-area",
+        )?.parentElement as HTMLElement | undefined;
+        if (!outerPanel) return;
+
+        // Remove this assistant from history so regeneration starts clean
+        if (msgId) {
+          const idx = conversationMessages.findIndex((m) => m.id === msgId);
+          if (idx !== -1) {
+            conversationMessages = conversationMessages.slice(0, idx);
+          }
+        }
+
+        // Remove the DOM bubble and regenerate
+        (msgDiv as HTMLElement).remove();
+        this.regenerateLastResponse(outerPanel);
+      });
+      actionsDiv.appendChild(retryBtn);
     }
 
     headerDiv.appendChild(senderDiv);

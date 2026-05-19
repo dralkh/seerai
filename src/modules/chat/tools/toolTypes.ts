@@ -815,6 +815,34 @@ export const TOOL_NAMES = {
   WORKSPACE_BASH: "workspace_bash",
   WORKSPACE_DIFF: "workspace_diff",
   WORKSPACE_LOG: "workspace_log",
+
+  // TODO & Completion
+  TODO_WRITE: "todowrite",
+  TODO_READ: "todoread",
+  TASK_COMPLETE: "task_complete",
 } as const;
 
 export type ToolName = (typeof TOOL_NAMES)[keyof typeof TOOL_NAMES];
+
+// ==================== TODO Tool Types ====================
+
+export interface TodoItem {
+  id: string;
+  content: string;
+  status: "pending" | "in_progress" | "completed" | "cancelled";
+}
+
+export interface TodoWriteResult {
+  todos: TodoItem[];
+  pending: number;
+  in_progress: number;
+  completed: number;
+}
+
+export interface TodoReadResult {
+  todos: TodoItem[];
+  pending: number;
+  in_progress: number;
+  completed: number;
+  total: number;
+}

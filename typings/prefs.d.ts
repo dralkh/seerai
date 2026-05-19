@@ -58,6 +58,10 @@ declare namespace _ZoteroTypes {
       "workspaceSidebarWidth": number;
       "workspaceSidebarCollapsed": boolean;
       "workspaceEditorHeight": number;
+      "workspaceCustomPath": string;
+      "workspaceFolderPaths": string;
+      "fileViewerEnabled": boolean;
+      "previewExtensions": string;
     };
   }
 }

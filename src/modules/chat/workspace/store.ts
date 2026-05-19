@@ -6,6 +6,7 @@
  */
 import { config } from "../../../../package.json";
 import { getMessageStore } from "../messageStore";
+import { getPref, setPref } from "../../../utils/prefs";
 import {
   WorkspaceFile,
   WorkspaceSnapshot,
@@ -28,7 +29,13 @@ import {
   resetGitAvailability,
 } from "./gitCli";
 
-const METADATA_DIRS = new Set([".git", ".agent", "workspace_snapshot.json"]);
+const METADATA_DIRS = new Set([
+  ".git",
+  ".agent",
+  ".agents",
+  ".conversations",
+  "workspace_snapshot.json",
+]);
 
 function slugifyFolder(name: string): string {
   return name
@@ -104,6 +111,7 @@ export class WorkspaceStore {
   private _lastConversationId: string | null = null;
   private _lastFolder: string | null | undefined = undefined;
   private _gitAvailable: boolean | null = null;
+  private _customPath: string | null = null;
 
   public onWorkspaceChanged: (() => void) | null = null;
 
@@ -140,14 +148,35 @@ export class WorkspaceStore {
   }
 
   private folderWorkspaceDir(folder: string): string {
-    return PathUtils.join(
-      this.workspacesDir,
-      slugifyFolder(folder),
-      "workspace",
-    );
+    const slug = slugifyFolder(folder);
+    const folderPaths = this.getFolderCustomPaths();
+    const customPath = folderPaths[slug];
+    if (customPath) return customPath;
+    return PathUtils.join(this.workspacesDir, slug, "workspace");
+  }
+
+  private getFolderCustomPaths(): Record<string, string> {
+    try {
+      const raw = getPref("workspaceFolderPaths");
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  setFolderCustomPath(folder: string, path: string): void {
+    const slug = slugifyFolder(folder);
+    const paths = this.getFolderCustomPaths();
+    if (path) {
+      paths[slug] = path;
+    } else {
+      delete paths[slug];
+    }
+    setPref("workspaceFolderPaths", JSON.stringify(paths));
   }
 
   get workspaceDir(): string {
+    if (this._customPath) return this._customPath;
     const folder = this._currentFolder;
     if (folder) {
       return this.folderWorkspaceDir(folder);
@@ -170,6 +199,11 @@ export class WorkspaceStore {
   }
 
   async resolveWorkspaceDir(): Promise<string> {
+    const customPath = getPref("workspaceCustomPath");
+    if (customPath) {
+      this._customPath = customPath;
+      return this.workspaceDir;
+    }
     if (this._currentFolder === undefined) {
       const folder = await this.getFolderForCurrentChat();
       this._currentFolder = folder;
@@ -177,11 +211,118 @@ export class WorkspaceStore {
     return this.workspaceDir;
   }
 
+  isCustomPath(): boolean {
+    return !!this._customPath;
+  }
+
+  getCustomPath(): string | null {
+    return this._customPath;
+  }
+
+  getDefaultWorkspaceDir(): string {
+    const folder = this._currentFolder;
+    if (folder) {
+      return this.folderWorkspaceDir(folder);
+    }
+    return this.perChatWorkspaceDir;
+  }
+
+  async setCustomPath(path: string): Promise<boolean> {
+    const oldDir = this.workspaceDir;
+    if (path === oldDir && this._customPath) return false;
+    // If we're in a folder context, save the mapping there instead
+    if (this._currentFolder) {
+      this.setFolderCustomPath(this._currentFolder, path);
+      this._initPromise = null;
+      Zotero.debug(
+        `[seerai] WorkspaceStore: folder "${this._currentFolder}" custom path set to ${path}`,
+      );
+      return true;
+    }
+    this._customPath = path;
+    setPref("workspaceCustomPath", path);
+    this._initPromise = null;
+    await this.ensureInit();
+    Zotero.debug(`[seerai] WorkspaceStore: custom path set to ${path}`);
+    return true;
+  }
+
+  async clearCustomPath(): Promise<void> {
+    if (!this._customPath) return;
+    this._customPath = null;
+    setPref("workspaceCustomPath", "");
+    this._initPromise = null;
+    Zotero.debug(
+      "[seerai] WorkspaceStore: custom path cleared, reverting to default workspace",
+    );
+  }
+
+  async importToWorkspace(srcDir: string): Promise<number> {
+    const destDir = this.workspaceDir;
+    if (srcDir === destDir) return 0;
+    await this.ensureDir(destDir);
+    const count = await this.moveDirContents(srcDir, destDir);
+    this.onWorkspaceChanged?.();
+    return count;
+  }
+
+  async moveFilesFrom(srcDir: string): Promise<number> {
+    const destDir = this.workspaceDir;
+    if (srcDir === destDir) return 0;
+    await this.ensureDir(destDir);
+    let children: string[];
+    try {
+      const raw = await IOUtils.getChildren(srcDir);
+      children = raw.map((fullPath: string) => {
+        const idx = Math.max(
+          fullPath.lastIndexOf("/"),
+          fullPath.lastIndexOf("\\"),
+        );
+        return idx >= 0 ? fullPath.slice(idx + 1) : fullPath;
+      });
+    } catch {
+      return 0;
+    }
+    let count = 0;
+    for (const name of children) {
+      if (METADATA_DIRS.has(name) || name === ".git") continue;
+      const srcPath = PathUtils.join(srcDir, name);
+      const destPath = PathUtils.join(destDir, name);
+      try {
+        await IOUtils.move(srcPath, destPath);
+        count++;
+      } catch (e) {
+        Zotero.debug(
+          `[seerai] WorkspaceStore: Error moving ${srcPath} → ${destPath}: ${e}`,
+        );
+      }
+    }
+    this.onWorkspaceChanged?.();
+    return count;
+  }
+
+  async createFolder(folderPath: string): Promise<boolean> {
+    const normalized = this.normalizePath(folderPath);
+    const absPath = this.absPath(normalized);
+    try {
+      await IOUtils.makeDirectory(absPath, { ignoreExisting: true });
+      this.onWorkspaceChanged?.();
+      return true;
+    } catch (e) {
+      Zotero.debug(
+        `[seerai] WorkspaceStore: Error creating folder ${absPath}: ${e}`,
+      );
+      return false;
+    }
+  }
+
   get isSharedWorkspace(): boolean {
+    if (this._customPath) return true;
     return this._currentFolder !== undefined && this._currentFolder !== null;
   }
 
   get workspaceLabel(): string {
+    if (this._customPath) return this._customPath.split("/").pop() || "Custom";
     if (this._currentFolder === undefined) return "Artifacts";
     return this._currentFolder || "Personal";
   }
@@ -324,6 +465,16 @@ export class WorkspaceStore {
     const newDir = PathUtils.join(this.workspacesDir, slugifyFolder(newName));
     if (!(await IOUtils.exists(oldDir).catch(() => false))) return;
     if (oldDir === newDir) return;
+
+    // Carry over folder custom path mapping
+    const paths = this.getFolderCustomPaths();
+    const oldSlug = slugifyFolder(oldName);
+    const newSlug = slugifyFolder(newName);
+    if (paths[oldSlug]) {
+      paths[newSlug] = paths[oldSlug];
+      delete paths[oldSlug];
+      setPref("workspaceFolderPaths", JSON.stringify(paths));
+    }
     try {
       await IOUtils.makeDirectory(PathUtils.join(this.workspacesDir), {
         ignoreExisting: true,
@@ -347,6 +498,12 @@ export class WorkspaceStore {
   async deleteWorkspaceFolder(folderName: string): Promise<void> {
     const dir = PathUtils.join(this.workspacesDir, slugifyFolder(folderName));
     if (!(await IOUtils.exists(dir).catch(() => false))) return;
+
+    // Clean up folder path mapping
+    const paths = this.getFolderCustomPaths();
+    delete paths[slugifyFolder(folderName)];
+    setPref("workspaceFolderPaths", JSON.stringify(paths));
+
     try {
       await (IOUtils as any).remove(dir, { recursive: true });
       Zotero.debug(`[seerai] WorkspaceStore: Deleted workspace ${dir}`);
@@ -360,7 +517,7 @@ export class WorkspaceStore {
   private async moveDirContents(
     srcDir: string,
     destDir: string,
-  ): Promise<void> {
+  ): Promise<number> {
     await this.ensureDir(destDir);
     let children: string[];
     try {
@@ -373,8 +530,9 @@ export class WorkspaceStore {
         return idx >= 0 ? fullPath.slice(idx + 1) : fullPath;
       });
     } catch {
-      return;
+      return 0;
     }
+    let count = 0;
     for (const name of children) {
       if (METADATA_DIRS.has(name)) continue;
       const srcPath = PathUtils.join(srcDir, name);
@@ -386,11 +544,12 @@ export class WorkspaceStore {
         continue;
       }
       if (isDir) {
-        await this.moveDirContents(srcPath, destPath);
+        count += await this.moveDirContents(srcPath, destPath);
       } else {
         try {
           const bytes = await IOUtils.read(srcPath);
           await IOUtils.write(destPath, bytes);
+          count++;
         } catch (e) {
           Zotero.debug(
             `[seerai] WorkspaceStore: Error copying ${srcPath} → ${destPath}: ${e}`,
@@ -398,6 +557,7 @@ export class WorkspaceStore {
         }
       }
     }
+    return count;
   }
 
   private async withWriteLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -863,6 +1023,7 @@ export class WorkspaceStore {
     const file = await this.readFile(normalized);
     this._stagedContentCache.set(normalized, file?.content ?? "");
     this._trackedSetPromise = null;
+    this._ignoredSetPromise = null;
     this.onWorkspaceChanged?.();
   }
 
@@ -880,6 +1041,7 @@ export class WorkspaceStore {
     await this.ensureInit();
     await execGit(this.workspaceDir, ["add", "-A"]);
     this._trackedSetPromise = null;
+    this._ignoredSetPromise = null;
     this.onWorkspaceChanged?.();
   }
 
@@ -928,6 +1090,7 @@ export class WorkspaceStore {
     const hashResult = await execGit(this.workspaceDir, ["rev-parse", "HEAD"]);
     this._stagedContentCache.clear();
     this._trackedSetPromise = null;
+    this._ignoredSetPromise = null;
     this.onWorkspaceChanged?.();
     return hashResult.exitCode === 0 ? hashResult.stdout.trim() : null;
   }
@@ -954,6 +1117,29 @@ export class WorkspaceStore {
     return this._trackedSetPromise;
   }
 
+  private _ignoredSetPromise: Promise<Set<string>> | null = null;
+
+  private async getIgnoredFileSet(): Promise<Set<string>> {
+    if (this._ignoredSetPromise) return this._ignoredSetPromise;
+    this._ignoredSetPromise = (async () => {
+      const result = await execGit(this.workspaceDir, [
+        "ls-files",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+      ]);
+      const set = new Set<string>();
+      if (result.exitCode === 0 && result.stdout) {
+        for (const line of result.stdout.split("\n")) {
+          const trimmed = line.trim();
+          if (trimmed) set.add(trimmed);
+        }
+      }
+      return set;
+    })();
+    return this._ignoredSetPromise;
+  }
+
   async getGitStatus(): Promise<GitStatusResult> {
     await this.ensureInit();
     const staged: GitStatusResult["staged"] = [];
@@ -974,7 +1160,9 @@ export class WorkspaceStore {
       Zotero.debug(
         `[seerai] getGitStatus: git status failed (exit=${statusResult.exitCode}): stdout=${statusResult.stdout.slice(0, 200)} stderr=${statusResult.stderr.slice(0, 200)}`,
       );
+      const ignoredSet = await this.getIgnoredFileSet();
       for (const f of diskFiles) {
+        if (ignoredSet.has(f.path)) continue;
         const file = await this.readFile(f.path);
         changes.push({
           path: f.path,
@@ -993,6 +1181,9 @@ export class WorkspaceStore {
 
     for (const entry of entries) {
       if (entry.path.startsWith(".git/") || entry.path === ".git") continue;
+      if (entry.path.startsWith(".agent/") || entry.path === ".agent") continue;
+      if (entry.path.startsWith(".agents/") || entry.path === ".agents")
+        continue;
       seen.add(entry.path);
 
       const { x, y } = entry;
@@ -1077,10 +1268,13 @@ export class WorkspaceStore {
       }
     }
 
+    const ignoredSet = await this.getIgnoredFileSet();
+
     for (const f of diskFiles) {
       if (seen.has(f.path)) continue;
       const trackedSet = await this.getTrackedFileSet();
       if (trackedSet.has(f.path)) continue;
+      if (ignoredSet.has(f.path)) continue;
       const file = await this.readFile(f.path);
       const entry: WorkspaceFileEntry = {
         ...f,
@@ -1138,6 +1332,8 @@ export class WorkspaceStore {
       }
     }
 
+    this._trackedSetPromise = null;
+    this._ignoredSetPromise = null;
     this.onWorkspaceChanged?.();
   }
 
@@ -1355,6 +1551,8 @@ export class WorkspaceStore {
     await this.ensureInit();
     await execGit(this.workspaceDir, ["checkout", commitId, "--", "."]);
     this._stagedContentCache.clear();
+    this._trackedSetPromise = null;
+    this._ignoredSetPromise = null;
     this.onWorkspaceChanged?.();
   }
 

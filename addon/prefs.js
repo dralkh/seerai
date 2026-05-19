@@ -38,7 +38,7 @@ pref("agenticMode", true);
 pref("libraryScope", "all"); // "user", "all", "group:ID", or "collection:libID:colID"
 pref("agentMaxResults", 20);
 pref("agentMaxContentLength", 50000);
-pref("agentMaxIterations", 1000);
+pref("agentMaxIterations", 100);
 pref("agentAutoOcr", false);
 pref("selectionMode", "default"); // "lock", "default", or "explore"
 pref("searchAutoAiInsights", true); // Automatically generate AI insights after search
@@ -60,3 +60,7 @@ pref("historySidebarWidth", 120);
 pref("workspaceSidebarWidth", 120);
 pref("workspaceSidebarCollapsed", true);
 pref("workspaceEditorHeight", 300);
+pref("workspaceCustomPath", "");
+pref("workspaceFolderPaths", "{}");
+pref("fileViewerEnabled", true);
+pref("previewExtensions", "{}");

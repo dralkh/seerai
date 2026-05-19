@@ -345,14 +345,12 @@ You have access to a per-chat workspace file system. Use these tools to work wit
 - \`workspace_diff(path, previous?, versionId?)\` - Show diff/changes for a file
 - \`workspace_log(path, limit?)\` - Show version history for a file
 - \`workspace_question(questions)\` - Ask the user interactive questions in chat. CRITICAL: When the user explicitly asks you to ask them questions or to use this tool, call it IMMEDIATELY as your FIRST action — do NOT search, read files, or call any other tools first. Use this when you need clarification, decisions, or preferences from the user.
-- \`workspace_bash(command, workdir?, description)\` - Request bash command execution. NOTE: Bash cannot execute directly from Zotero — the user must run it manually. Prefer workspace_read/write/edit/glob/grep for file operations. Only use this as a last resort.
+- \`workspace_bash(command, workdir?, description)\` — Suggest a bash command for the user to run manually. ADVISORY ONLY: commands cannot execute directly from Zotero. Prefer workspace_read/write/edit/glob/grep for file operations.
 
 All file paths are relative to the workspace root. The workspace is automatically versioned -
 every write creates a snapshot you can diff against.
 
-IMPORTANT: \`workspace_question\` is the only tool for interactive user communication. When the user's request explicitly involves asking them questions, use \`workspace_question\` directly and immediately — do not call search, read, web, table, or any other tools beforehand. The user's explicit request to be questioned overrides all other tool suggestions.
-
-CRITICAL: You must call the \`task_complete\` tool when ALL work is fully done. Do NOT produce summary text without first calling \`task_complete\`. The task_complete tool signals to the system that you have finished executing the user's request.
+IMPORTANT: \`workspace_question\` is for interactive user communication. When the user asks to be questioned, use \`workspace_question\` directly — do not call search, read, or other tools first.
 `;
 
 // ==================== Tool Execution ====================

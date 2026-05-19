@@ -43,6 +43,11 @@ import { executeCollection } from "./collectionTool";
 import { executeWeb } from "./webTool";
 import { executeRelatedPapers } from "./citationTool";
 import { executeGenerateItemTags } from "./tagTool";
+import {
+  executeTodoWrite,
+  executeTodoRead,
+  checkTodosBeforeComplete,
+} from "./todoTool";
 import { executeWorkspaceTool } from "../workspace/tools";
 
 /**
@@ -174,6 +179,27 @@ export async function executeToolCall(
 
       case TOOL_NAMES.WEB:
         return await executeWeb(validatedArgs as WebParams, config);
+
+      // ==================== TODO & Completion ====================
+
+      case TOOL_NAMES.TODO_WRITE:
+        return await executeTodoWrite(
+          validatedArgs as { todos: import("./toolTypes").TodoItem[] },
+        );
+
+      case TOOL_NAMES.TODO_READ:
+        return await executeTodoRead();
+
+      case TOOL_NAMES.TASK_COMPLETE: {
+        const check = await checkTodosBeforeComplete();
+        if (!check.canComplete) {
+          return { success: false, error: check.message };
+        }
+        return {
+          success: true,
+          summary: "Task complete — all TODOs finished.",
+        };
+      }
 
       // ==================== Workspace Tools ====================
       case TOOL_NAMES.WORKSPACE_READ_FILE:

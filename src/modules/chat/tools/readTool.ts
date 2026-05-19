@@ -12,6 +12,11 @@ import {
   AgentConfig,
 } from "./toolTypes";
 import { Assistant } from "../../assistant";
+import {
+  isAttachmentPreviewable,
+  readAttachmentContent,
+  getAttachmentLabel,
+} from "../../fileViewer";
 
 /**
  * Execute get_item_metadata tool
@@ -176,6 +181,43 @@ export async function executeReadItemContent(
     }
 
     if (!item.isRegularItem()) {
+      // Check if it's a previewable attachment (SVG, HTML, text, image)
+      if (item.isAttachment() && isAttachmentPreviewable(item)) {
+        const fileContent = await readAttachmentContent(item);
+        if (fileContent) {
+          const contentStr =
+            fileContent.content.slice(
+              0,
+              max_length || config.maxContentLength,
+            ) || `[${getAttachmentLabel(item)}]`;
+          return {
+            success: true,
+            data: {
+              content: contentStr,
+              source_type: "attachment",
+              notes_count: 0,
+              content_length: fileContent.content.length,
+              truncated:
+                (max_length || config.maxContentLength) > 0 &&
+                fileContent.content.length >=
+                  (max_length || config.maxContentLength),
+            },
+            summary: `Read content from ${getAttachmentLabel(item)}`,
+          };
+        }
+        return {
+          success: true,
+          data: {
+            content: `[Binary attachment: ${getAttachmentLabel(item)}]`,
+            source_type: "attachment",
+            notes_count: 0,
+            content_length: 0,
+            truncated: false,
+          },
+          summary: `Read metadata for ${getAttachmentLabel(item)}`,
+        };
+      }
+
       return {
         success: false,
         error: `Item ${item_id} is not a regular item or note (it's a ${item.itemType})`,

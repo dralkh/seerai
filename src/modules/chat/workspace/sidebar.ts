@@ -109,8 +109,18 @@ export function createWorkspaceSidebar(
   const actions = doc.createElement("div");
   actions.style.cssText = "display: flex; gap: 4px;";
 
-  const newFileBtn = createIconButton(doc, "+", "New file", () => {
-    showNewFileInline(doc, sidebar, callbacks);
+  const newFileBtn = createIconButton(doc, "+", "New file / folder", () => {
+    const strip = sidebar.querySelector(
+      "#workspace-creation-strip",
+    ) as HTMLElement | null;
+    if (strip) {
+      const visible = strip.style.display !== "none";
+      strip.style.display = visible ? "none" : "";
+      if (!visible) {
+        const input = strip.querySelector("input") as HTMLInputElement | null;
+        if (input) setTimeout(() => input.focus(), 0);
+      }
+    }
   });
   actions.appendChild(newFileBtn);
 
@@ -147,6 +157,21 @@ export function createWorkspaceSidebar(
     },
   );
   actions.appendChild(openFolderBtn);
+
+  const workspaceSettingsBtn = createIconButton(
+    doc,
+    "\u2699",
+    "Workspace settings",
+    () => {
+      const existing = doc.getElementById("workspace-path-dropdown");
+      if (existing) {
+        existing.remove();
+        return;
+      }
+      showWorkspacePathDropdown(doc, workspaceSettingsBtn, sidebar, callbacks);
+    },
+  );
+  actions.appendChild(workspaceSettingsBtn);
 
   const collapseBtn = createIconButton(
     doc,
@@ -232,6 +257,11 @@ export function createWorkspaceSidebar(
 
   header.appendChild(actions);
   sidebar.appendChild(header);
+
+  // Persistent creation strip (hidden by default)
+  const creationStrip = createCreationStrip(doc, sidebar, callbacks);
+  creationStrip.style.display = "none";
+  sidebar.appendChild(creationStrip);
 
   // Scrollable content
   const scrollContainer = doc.createElement("div");
@@ -366,13 +396,20 @@ async function _doRefreshWorkspaceSidebar(
       ".workspace-title-label",
     ) as HTMLElement | null;
     if (titleSpan) {
-      const label = store.isSharedWorkspace
-        ? store.workspaceLabel.toUpperCase()
-        : "ARTIFACTS";
+      let label: string;
+      let tooltip: string;
+      if (store.isCustomPath()) {
+        label = "CUSTOM";
+        tooltip = `Custom workspace: ${store.workspaceDir}`;
+      } else if (store.isSharedWorkspace) {
+        label = store.workspaceLabel.toUpperCase();
+        tooltip = `Shared workspace: ${store.workspaceLabel}`;
+      } else {
+        label = "ARTIFACTS";
+        tooltip = "Personal workspace";
+      }
       titleSpan.textContent = label;
-      titleSpan.title = store.isSharedWorkspace
-        ? `Shared workspace: ${store.workspaceLabel}`
-        : "Personal workspace";
+      titleSpan.title = tooltip;
     }
 
     while (scrollContainer.firstChild) {
@@ -1713,141 +1750,296 @@ function showCommitDropdown(
   }, 0);
 }
 
-function showNewFileInline(
+let _creationMode: "file" | "folder" = "file";
+
+function createCreationStrip(
   doc: Document,
   sidebar: HTMLElement,
   callbacks: WorkspaceSidebarCallbacks,
+): HTMLElement {
+  const strip = doc.createElement("div");
+  strip.id = "workspace-creation-strip";
+  strip.style.cssText = `
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border-primary);
+    background: var(--background-secondary);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-shrink: 0;
+  `;
+
+  // Mode toggle row
+  const modeRow = doc.createElement("div");
+  modeRow.style.cssText = "display: flex; gap: 4px;";
+
+  const filePill = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+  filePill.textContent = "File";
+  filePill.style.cssText = `
+    flex: 1; padding: 2px 0; font-size: 10px; font-weight: 600;
+    border: 1px solid var(--border-primary); border-radius: 4px;
+    background: var(--highlight-primary); color: white; cursor: pointer;
+    text-align: center; line-height: normal;
+  `;
+
+  const folderPill = doc.createElementNS(
+    HTML_NS,
+    "button",
+  ) as HTMLButtonElement;
+  folderPill.textContent = "Folder";
+  folderPill.style.cssText = `
+    flex: 1; padding: 2px 0; font-size: 10px; font-weight: 600;
+    border: 1px solid var(--border-primary); border-radius: 4px;
+    background: transparent; color: var(--text-secondary); cursor: pointer;
+    text-align: center; line-height: normal;
+  `;
+
+  const setMode = (newMode: "file" | "folder") => {
+    _creationMode = newMode;
+    filePill.style.background =
+      newMode === "file" ? "var(--highlight-primary)" : "transparent";
+    filePill.style.color =
+      newMode === "file" ? "white" : "var(--text-secondary)";
+    folderPill.style.background =
+      newMode === "folder" ? "var(--highlight-primary)" : "transparent";
+    folderPill.style.color =
+      newMode === "folder" ? "white" : "var(--text-secondary)";
+    pathInput.placeholder =
+      newMode === "file" ? "path/to/file.ts" : "path/to/folder";
+  };
+
+  filePill.addEventListener("click", () => setMode("file"));
+  folderPill.addEventListener("click", () => setMode("folder"));
+
+  modeRow.appendChild(filePill);
+  modeRow.appendChild(folderPill);
+  strip.appendChild(modeRow);
+
+  // Input row
+  const inputRow = doc.createElement("div");
+  inputRow.style.cssText = "display: flex; gap: 4px;";
+
+  const pathInput = doc.createElement("input");
+  pathInput.type = "text";
+  pathInput.placeholder = "path/to/file.ts";
+  pathInput.style.cssText = `
+    flex: 1; padding: 4px 6px; font-size: 11px; font-family: inherit;
+    border: 1px solid var(--border-primary); border-radius: 4px;
+    background: var(--background-primary); color: var(--text-primary);
+    outline: none; box-sizing: border-box;
+  `;
+
+  const createBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+  createBtn.textContent = "+";
+  createBtn.title = "Create file / folder";
+  createBtn.style.cssText = `
+    width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border-primary); border-radius: 4px;
+    background: var(--highlight-primary); color: white; cursor: pointer;
+    font-size: 14px; font-weight: 700; padding: 0; flex-shrink: 0; line-height: normal;
+  `;
+
+  const doCreate = async () => {
+    const name = pathInput.value.trim();
+    if (!name) return;
+    try {
+      const store = getWorkspaceStore();
+      if (_creationMode === "folder") {
+        await store.createFolder(name);
+      } else {
+        await store.writeFile(name, "", `Created ${name}`, "user");
+      }
+      pathInput.value = "";
+      pathInput.focus();
+      await refreshWorkspaceSidebar(sidebar, callbacks);
+    } catch (e: any) {
+      Zotero.debug(`[seerai] Create ${_creationMode} failed: ${e}`);
+    }
+  };
+
+  pathInput.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      doCreate();
+    } else if (e.key === "Escape") {
+      pathInput.value = "";
+      strip.style.display = "none";
+    }
+  });
+
+  createBtn.addEventListener("click", doCreate);
+
+  inputRow.appendChild(pathInput);
+  inputRow.appendChild(createBtn);
+  strip.appendChild(inputRow);
+
+  return strip;
+}
+
+function showWorkspacePathDropdown(
+  doc: Document,
+  anchor: HTMLElement,
+  sidebar: HTMLElement,
+  callbacks: WorkspaceSidebarCallbacks,
 ): void {
-  const existing = doc.getElementById("new-file-inline");
+  const existing = doc.getElementById("workspace-path-dropdown");
   if (existing) {
     existing.remove();
     return;
   }
 
-  const commitDropdown = doc.getElementById("commit-dropdown");
-  if (commitDropdown) commitDropdown.remove();
+  const store = getWorkspaceStore();
 
-  const form = doc.createElement("div");
-  form.id = "new-file-inline";
-  form.style.cssText = `
-    padding: 8px;
+  const dropdown = doc.createElement("div");
+  dropdown.id = "workspace-path-dropdown";
+  dropdown.style.cssText = `
+    padding: 6px 8px;
     border-bottom: 1px solid var(--border-primary);
     background: var(--background-secondary);
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
     flex-shrink: 0;
   `;
 
-  const input = doc.createElement("input");
-  input.type = "text";
-  input.placeholder = "path/to/file.ts";
-  input.style.cssText = `
-    width: 100%;
-    padding: 6px 8px;
-    font-size: 12px;
-    font-family: system-ui, -apple-system, sans-serif;
-    border: 1px solid var(--border-primary);
-    border-radius: 4px;
-    background: var(--background-primary);
-    color: var(--text-primary);
-    box-sizing: border-box;
-    outline: none;
+  const pathLabel = doc.createElement("div");
+  pathLabel.style.cssText =
+    "font-size: 10px; color: var(--text-tertiary); padding: 2px 4px; word-break: break-all;";
+  const currentDir = store.workspaceDir;
+  pathLabel.textContent = store.isCustomPath()
+    ? `Custom: ${currentDir}`
+    : `Default: ${currentDir}`;
+  dropdown.appendChild(pathLabel);
+
+  // Inline set-path form
+  const inputRow = doc.createElement("div");
+  inputRow.style.cssText = "display: flex; gap: 4px;";
+
+  const pathInput = doc.createElement("input");
+  pathInput.type = "text";
+  pathInput.placeholder = "/home/user/my-project";
+  pathInput.value = store.isCustomPath() ? currentDir : "";
+  pathInput.style.cssText = `
+    flex: 1; padding: 4px 6px; font-size: 11px;
+    border: 1px solid var(--border-primary); border-radius: 3px;
+    background: var(--background-primary); color: var(--text-primary);
+    outline: none; box-sizing: border-box;
   `;
 
-  const submitAction = async () => {
-    const name = input.value.trim();
-    if (!name) return;
-    try {
-      form.remove();
-      const store = getWorkspaceStore();
-      await store.writeFile(name, "", `Created ${name}`, "user");
-      await refreshWorkspaceSidebar(sidebar, callbacks);
-    } catch (e: any) {
-      Zotero.debug(`[seerai] Create file failed: ${e}`);
+  const setBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+  setBtn.textContent = "Set";
+  setBtn.style.cssText = `
+    padding: 4px 8px; font-size: 11px; white-space: nowrap;
+    border: 1px solid var(--border-primary); border-radius: 3px;
+    background: var(--background-primary); color: var(--highlight-primary);
+    cursor: pointer; line-height: normal;
+  `;
+
+  const doSetPath = async () => {
+    const dir = pathInput.value.trim();
+    if (!dir) return;
+    dropdown.remove();
+    const oldDir = store.workspaceDir;
+    if (dir === oldDir && store.isCustomPath()) return;
+    const hasContent = await store.hasContent();
+    if (hasContent && oldDir !== dir) {
+      const shouldMove = doc.defaultView?.confirm(
+        `Switch workspace to:\n${dir}\n\nFiles currently exist at:\n${oldDir}\n\nClick OK to MOVE them to the new path.\nClick Cancel to switch without moving files (they stay at the old location).`,
+      );
+      await store.setCustomPath(dir);
+      if (shouldMove) {
+        const count = await store.moveFilesFrom(oldDir);
+        Zotero.debug(
+          `[seerai] Moved ${count} files from old workspace to new path`,
+        );
+      }
+    } else {
+      await store.setCustomPath(dir);
     }
+    await refreshWorkspaceSidebar(sidebar, callbacks);
   };
 
-  input.addEventListener("keydown", (e: KeyboardEvent) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      submitAction();
-    } else if (e.key === "Escape") {
-      form.remove();
-    }
+  pathInput.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key === "Enter") doSetPath();
+    if (e.key === "Escape") dropdown.remove();
   });
+  setBtn.addEventListener("click", doSetPath);
 
-  form.appendChild(input);
+  inputRow.appendChild(pathInput);
+  inputRow.appendChild(setBtn);
+  dropdown.appendChild(inputRow);
 
-  const btnsRow = doc.createElement("div");
-  btnsRow.style.cssText = `
-    display: flex;
-    gap: 6px;
-    align-items: center;
-    justify-content: flex-end;
-  `;
+  if (store.isCustomPath()) {
+    const clearPathBtn = createDropdownActionBtn(
+      doc,
+      "Clear custom path",
+      async () => {
+        dropdown.remove();
+        if (
+          !doc.defaultView?.confirm(
+            "Revert to the default per-chat workspace directory?",
+          )
+        )
+          return;
+        await store.clearCustomPath();
+        await refreshWorkspaceSidebar(sidebar, callbacks);
+      },
+    );
+    dropdown.appendChild(clearPathBtn);
+  }
 
-  const hint = doc.createElement("span");
-  hint.textContent = "Enter to create, Esc to cancel";
-  hint.style.cssText =
-    "font-size: 10px; color: var(--text-tertiary); flex: 1 1 auto;";
-
-  const cancelBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-  cancelBtn.textContent = "Cancel";
-  cancelBtn.style.cssText = `
-    padding: 2px 10px;
-    border: 1px solid var(--border-primary);
-    border-radius: 4px;
-    background: var(--background-primary);
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 11px;
-    line-height: 18px;
-  `;
-  cancelBtn.addEventListener("click", () => {
-    form.remove();
-  });
-
-  const createBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-  createBtn.textContent = "Create";
-  createBtn.style.cssText = `
-    padding: 2px 10px;
-    border: 1px solid var(--border-primary);
-    border-radius: 4px;
-    background: var(--highlight-primary, #4a90d9);
-    color: white;
-    cursor: pointer;
-    font-size: 11px;
-    line-height: 18px;
-  `;
-  createBtn.addEventListener("click", async () => {
-    await submitAction();
-  });
-
-  btnsRow.appendChild(hint);
-  btnsRow.appendChild(cancelBtn);
-  btnsRow.appendChild(createBtn);
-  form.appendChild(btnsRow);
-
-  form.addEventListener("contextmenu", (e) => e.preventDefault());
+  dropdown.addEventListener("contextmenu", (e) => e.preventDefault());
 
   const header = sidebar.firstElementChild as HTMLElement | null;
   if (header && header.nextSibling) {
-    sidebar.insertBefore(form, header.nextSibling);
+    sidebar.insertBefore(dropdown, header.nextSibling);
   } else {
-    sidebar.appendChild(form);
+    sidebar.appendChild(dropdown);
   }
 
   const docListener = (e: Event) => {
-    if (!form.contains(e.target as Node)) {
-      form.remove();
+    if (!dropdown.contains(e.target as Node) && e.target !== anchor) {
+      dropdown.remove();
       doc.removeEventListener("click", docListener);
     }
   };
   setTimeout(() => {
     doc.addEventListener("click", docListener);
-    input.focus();
+    pathInput.focus();
   }, 0);
+}
+
+function createDropdownActionBtn(
+  doc: Document,
+  label: string,
+  action: () => void,
+): HTMLElement {
+  const btn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+  btn.textContent = label;
+  btn.style.cssText = `
+    display: block;
+    width: 100%;
+    padding: 5px 8px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 11px;
+    text-align: left;
+    transition: background 0.1s;
+  `;
+  btn.addEventListener("mouseenter", () => {
+    btn.style.backgroundColor = "var(--background-primary)";
+  });
+  btn.addEventListener("mouseleave", () => {
+    btn.style.backgroundColor = "transparent";
+  });
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    action();
+  });
+  return btn;
 }
 
 function formatTimeAgo(isoString: string): string {

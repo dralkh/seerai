@@ -10,6 +10,67 @@ import { workspaceToolDefinitions } from "../workspace/tools";
  * All available tools for the agent
  */
 export const agentTools: ToolDefinition[] = [
+  // ==================== TODO & Completion ====================
+  {
+    type: "function",
+    function: {
+      name: "todowrite",
+      description:
+        "Create or update a structured task list for your current coding session. Use this to plan multi-step tasks. " +
+        "Create items with status 'pending', 'in_progress', 'completed', or 'cancelled'. " +
+        "Always create a plan before starting multi-step work. Update status as you progress.",
+      parameters: {
+        type: "object",
+        properties: {
+          todos: {
+            type: "array",
+            description:
+              "The full task list. Each item must have id, content, and status.",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string", description: "Unique identifier" },
+                content: { type: "string", description: "Task description" },
+                status: {
+                  type: "string",
+                  enum: ["pending", "in_progress", "completed", "cancelled"],
+                },
+              },
+              required: ["id", "content", "status"],
+            },
+          },
+        },
+        required: ["todos"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "todoread",
+      description:
+        "Read the current TODO list to recover task state after context compaction or to check progress.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "task_complete",
+      description:
+        "Signal that ALL work is complete and the user's request has been fully satisfied. " +
+        "Only call this when every TODO item is marked 'completed' or 'cancelled'. " +
+        "This ends the agent loop and returns control to the user.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+
   ...workspaceToolDefinitions,
 
   // ==================== Search & Discovery ====================

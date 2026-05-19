@@ -460,6 +460,9 @@ const sensitivityRegistry: Record<ToolName, SensitivityLevel> = {
   [TOOL_NAMES.WORKSPACE_BASH]: "write",
   [TOOL_NAMES.WORKSPACE_DIFF]: "read",
   [TOOL_NAMES.WORKSPACE_LOG]: "read",
+  [TOOL_NAMES.TODO_WRITE]: "write",
+  [TOOL_NAMES.TODO_READ]: "read",
+  [TOOL_NAMES.TASK_COMPLETE]: "write",
 };
 
 // ==================== UTILITIES ====================

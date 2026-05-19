@@ -6,6 +6,13 @@
 import { getWorkspaceStore } from "./store";
 import { WorkspaceFileEntry, inferLanguage, DiffLine } from "./types";
 import { createDiffResult } from "./diff";
+import {
+  isRenderableExtension,
+  getRenderType,
+  createPreviewElement,
+  setPreviewPreference,
+  getPreviewPreference,
+} from "../../fileViewer";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -199,6 +206,14 @@ interface EditorTab {
   nameLabel: HTMLElement;
   isModified: boolean;
   originalContent: string;
+  viewMode: "edit" | "preview" | "diff";
+  previewPanel: HTMLElement | null;
+  diffContent: HTMLElement | null;
+  blobUrl: string | null;
+  previewBtn: HTMLElement | null;
+  diffBtn: HTMLElement | null;
+  stagedContent?: string;
+  headContent?: string;
 }
 
 export class WorkspaceEditorManager {
@@ -208,7 +223,6 @@ export class WorkspaceEditorManager {
   private container: HTMLElement | null = null;
   private tabBar: HTMLElement | null = null;
   private contentArea: HTMLElement | null = null;
-  private diffOverlay: HTMLElement | null = null;
   private doc: Document | null = null;
 
   static getInstance(): WorkspaceEditorManager {
@@ -219,11 +233,16 @@ export class WorkspaceEditorManager {
   }
 
   closeAll(): void {
+    // Clean up blob URLs
+    for (const tab of this.openTabs.values()) {
+      if (tab.blobUrl) {
+        URL.revokeObjectURL(tab.blobUrl);
+      }
+    }
     this.openTabs.clear();
     this.activePath = null;
     this.tabBar = null;
     this.contentArea = null;
-    this.diffOverlay = null;
     if (this.container) {
       this.container.textContent = "";
       this.container.style.display = "none";
@@ -236,7 +255,6 @@ export class WorkspaceEditorManager {
     this.activePath = null;
     this.tabBar = null;
     this.contentArea = null;
-    this.diffOverlay = null;
 
     this.doc = doc;
     this.container = container;
@@ -260,12 +278,6 @@ export class WorkspaceEditorManager {
         "[seerai] WorkspaceEditor: openFile aborted - no doc or container",
       );
       return;
-    }
-
-    // Clear any active diff overlay when switching files
-    if (this.diffOverlay) {
-      this.diffOverlay.remove();
-      this.diffOverlay = null;
     }
 
     // If already open, just switch to it
@@ -392,6 +404,159 @@ export class WorkspaceEditorManager {
     const toolbarActions = doc.createElement("div");
     toolbarActions.style.cssText = "display: flex; gap: 4px;";
 
+    // ── Unified view mode buttons ──────────────────────────────
+    const ext = entry.extension || entry.path.split(".").pop() || "";
+    const canPreview = isRenderableExtension(ext);
+
+    let previewBtn: HTMLElement | null = null;
+    let diffBtn: HTMLElement | null = null;
+    let previewPanel: HTMLElement | null = null;
+    let diffContent: HTMLElement | null = null;
+    let blobUrl: string | null = null;
+
+    if (canPreview) {
+      previewBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+      previewBtn.textContent = "\u25B6 Preview";
+      previewBtn.title = "Switch to preview mode";
+      previewBtn.style.cssText = createSmallBtnStyle();
+      previewBtn.style.color = "var(--highlight-primary)";
+
+      previewPanel = doc.createElement("div");
+      previewPanel.style.cssText = `
+        display: none; flex: 1 1 0; min-height: 0; max-width: 100%;
+        overflow: auto; background: var(--background-primary);
+        border-radius: 0 0 6px 6px; padding: 8px; box-sizing: border-box;
+        flex-direction: column;
+      `;
+    }
+
+    diffBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+    diffBtn.textContent = "\u2261 Diff";
+    diffBtn.title = "View changes (diff)";
+    diffBtn.style.cssText = createSmallBtnStyle();
+    diffBtn.style.color = "#e5b73b";
+
+    diffContent = doc.createElement("div");
+    diffContent.style.cssText = `
+      display: none; flex: 1 1 0; min-height: 0; overflow: auto;
+      background: var(--background-primary);
+    `;
+
+    // ── Mode switching logic ───────────────────────────────────
+    const buildPreview = () => {
+      if (!previewPanel) return;
+      previewPanel.innerHTML = "";
+      const renderType = getRenderType(ext);
+      const val = textarea.value;
+      if (renderType === "image") {
+        const noteDiv = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+        noteDiv.style.cssText =
+          "display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-tertiary);font-style:italic;font-size:13px;padding:20px;";
+        noteDiv.textContent =
+          "Binary image preview not available for workspace files.";
+        previewPanel.appendChild(noteDiv);
+      } else {
+        const el = createPreviewElement(doc, val, renderType);
+        previewPanel.appendChild(el);
+      }
+    };
+
+    const buildDiff = async () => {
+      diffContent!.innerHTML = "";
+      const store = getWorkspaceStore();
+      let oldContent: string | undefined;
+      try {
+        const gitStatus = await store.getGitStatus();
+        const stagedEntry = gitStatus.staged.find((s) => s.path === entry.path);
+        const changeEntry = gitStatus.changes.find(
+          (c) => c.path === entry.path,
+        );
+        if (stagedEntry) {
+          oldContent = gitStatus.headContent.get(entry.path);
+        } else if (changeEntry) {
+          oldContent =
+            gitStatus.stagedContent.get(entry.path) ||
+            gitStatus.headContent.get(entry.path);
+        }
+      } catch {
+        // fallback: no git status available
+      }
+      const newContent = textarea.value;
+      const { createDiffResult } = await import("./diff");
+      const diff = createDiffResult(entry.path, oldContent || "", newContent);
+      renderDiffInContainer(doc, diff, entry.path, diffContent!);
+    };
+
+    const setViewMode = (mode: "edit" | "preview" | "diff") => {
+      const tab = this.openTabs.get(entry.path);
+      if (!tab) return;
+      const wasPreview = tab.viewMode === "preview";
+      tab.viewMode = mode;
+
+      // Hide all content panes
+      textarea.style.display = "none";
+      if (previewPanel) previewPanel.style.display = "none";
+      diffContent!.style.display = "none";
+
+      // Show the active pane
+      if (mode === "edit") {
+        textarea.style.display = "";
+      } else if (mode === "preview") {
+        previewPanel!.style.display = "flex";
+        buildPreview();
+        setPreviewPreference(ext, true);
+      } else if (mode === "diff") {
+        diffContent!.style.display = "block";
+        setPreviewPreference(ext, false);
+        buildDiff();
+      }
+
+      // Clean up blob URL when leaving preview
+      if (wasPreview && mode !== "preview" && blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+        blobUrl = null;
+      }
+
+      // Update button states
+      if (previewBtn) {
+        const isPreview = mode === "preview";
+        previewBtn.textContent = isPreview ? "\u270F Edit" : "\u25B6 Preview";
+        previewBtn.title = isPreview
+          ? "Switch to edit mode"
+          : "Switch to preview mode";
+        previewBtn.style.backgroundColor = isPreview
+          ? "var(--highlight-primary)"
+          : "";
+        previewBtn.style.color = isPreview
+          ? "#fff"
+          : "var(--highlight-primary)";
+        previewBtn.style.opacity = isPreview ? "1" : "0.5";
+      }
+      const isDiff = mode === "diff";
+      diffBtn!.textContent = isDiff ? "\u270F Edit" : "\u2261 Diff";
+      diffBtn!.title = isDiff ? "Switch to edit mode" : "View changes (diff)";
+      diffBtn!.style.backgroundColor = isDiff ? "#e5b73b" : "";
+      diffBtn!.style.color = isDiff ? "#fff" : "#e5b73b";
+      diffBtn!.style.opacity = isDiff ? "1" : "0.5";
+    };
+
+    if (previewBtn) {
+      previewBtn.addEventListener("click", () => {
+        const tab = this.openTabs.get(entry.path);
+        if (!tab) return;
+        setViewMode(tab.viewMode === "preview" ? "edit" : "preview");
+      });
+      toolbarActions.appendChild(previewBtn);
+    }
+
+    diffBtn.addEventListener("click", () => {
+      const tab = this.openTabs.get(entry.path);
+      if (!tab) return;
+      setViewMode(tab.viewMode === "diff" ? "edit" : "diff");
+    });
+    toolbarActions.appendChild(diffBtn);
+
+    // ── Stage / Revert / Save ──────────────────────────────────
     const stageBtn = doc.createElementNS(
       HTML_NS,
       "button",
@@ -423,27 +588,20 @@ export class WorkspaceEditorManager {
     toolbar.appendChild(toolbarActions);
     editorWrapper.appendChild(toolbar);
 
-    // Textarea editor
+    // ── Textarea ───────────────────────────────────────────────
     const textarea = doc.createElement("textarea") as HTMLTextAreaElement;
     textarea.value = content;
     textarea.spellcheck = false;
     textarea.style.cssText = `
-      flex: 1 1 0;
-      min-height: 0;
-      padding: 12px;
-      border: none;
-      outline: none;
-      resize: none;
+      flex: 1 1 0; min-height: 0; padding: 12px; border: none;
+      outline: none; resize: none;
       font-family: "Menlo", "Monaco", "Consolas", "Courier New", monospace;
-      font-size: 12px;
-      line-height: 1.6;
-      tab-size: 2;
+      font-size: 12px; line-height: 1.6; tab-size: 2;
       color: var(--text-primary);
       background-color: var(--background-primary);
       overflow: auto;
     `;
 
-    // Track modifications
     let isModified = false;
     textarea.addEventListener("input", () => {
       if (!isModified) {
@@ -454,7 +612,6 @@ export class WorkspaceEditorManager {
       }
     });
 
-    // Ctrl+S to save
     textarea.addEventListener("keydown", async (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
@@ -471,7 +628,6 @@ export class WorkspaceEditorManager {
       }
     });
 
-    // Save button handler
     saveBtn.addEventListener("click", async () => {
       await this.saveFile(entry.path, textarea);
       isModified = false;
@@ -485,12 +641,10 @@ export class WorkspaceEditorManager {
       }
     });
 
-    // Stage button handler
     stageBtn.addEventListener("click", async () => {
       try {
         const store = getWorkspaceStore();
         await store.stageFile(entry.path);
-        // Brief feedback
         stageBtn.textContent = "\u2713 Staged";
         setTimeout(() => {
           stageBtn.textContent = "\u2B07 Stage";
@@ -500,7 +654,6 @@ export class WorkspaceEditorManager {
       }
     });
 
-    // Revert button handler
     revertBtn.addEventListener("click", async () => {
       if (
         !doc.defaultView?.confirm(
@@ -511,7 +664,6 @@ export class WorkspaceEditorManager {
       try {
         const store = getWorkspaceStore();
         await store.revertFile(entry.path);
-        // Reload file content
         const file = await store.readFile(entry.path);
         if (file) {
           textarea.value = file.content;
@@ -530,6 +682,11 @@ export class WorkspaceEditorManager {
     });
 
     editorWrapper.appendChild(textarea);
+
+    if (previewPanel) {
+      editorWrapper.appendChild(previewPanel);
+    }
+    editorWrapper.appendChild(diffContent);
     this.contentArea.appendChild(editorWrapper);
 
     const tabData: EditorTab = {
@@ -541,10 +698,24 @@ export class WorkspaceEditorManager {
       nameLabel: tabName,
       isModified: false,
       originalContent: content,
+      viewMode: "edit",
+      previewPanel,
+      diffContent,
+      blobUrl,
+      previewBtn,
+      diffBtn,
     };
 
     this.openTabs.set(entry.path, tabData);
     this.switchTab(entry.path);
+
+    // Auto-activate preview mode if user preferred it previously
+    if (canPreview && getPreviewPreference(ext)) {
+      const storedTab = this.openTabs.get(entry.path);
+      if (storedTab && previewBtn) {
+        previewBtn.click();
+      }
+    }
   }
 
   async openFileWithDiff(
@@ -553,7 +724,13 @@ export class WorkspaceEditorManager {
     newContent: string,
   ): Promise<void> {
     await this.openFile(entry);
-    await this.showDiffPreview(entry.path, oldContent, newContent);
+    // Start in diff view, store old/new for diff building
+    const tab = this.openTabs.get(entry.path);
+    if (tab && tab.diffBtn) {
+      tab.stagedContent = oldContent;
+      tab.headContent = newContent;
+      tab.diffBtn.click();
+    }
   }
 
   private switchTab(path: string): void {
@@ -588,6 +765,10 @@ export class WorkspaceEditorManager {
 
     const tab = this.openTabs.get(path);
     if (tab) {
+      // Clean up blob URL if any
+      if (tab.blobUrl) {
+        URL.revokeObjectURL(tab.blobUrl);
+      }
       this.openTabs.delete(path);
       tab.preview.remove();
 
@@ -643,290 +824,7 @@ export class WorkspaceEditorManager {
     oldContent: string,
     newContent: string,
   ): Promise<void> {
-    const doc = this.doc;
-    if (!doc) return;
-
-    // Remove existing overlay
-    if (this.diffOverlay) {
-      this.diffOverlay.remove();
-    }
-
-    const diff = createDiffResult(path, oldContent, newContent);
-    const name = path.split("/").pop() || path;
-
-    const overlay = doc.createElement("div");
-    overlay.className = "workspace-diff-overlay";
-    overlay.style.cssText = `
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: var(--background-primary);
-      z-index: 1000;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    `;
-
-    // Header
-    const header = doc.createElement("div");
-    header.style.cssText = `
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 12px;
-      border-bottom: 1px solid var(--border-primary);
-      background: var(--background-secondary);
-      flex-shrink: 0;
-    `;
-
-    const isNewFile = !oldContent && newContent;
-    const titleText = isNewFile
-      ? `New file: ${name}`
-      : `Changes: ${name} (+${diff.additions} \u2212${diff.deletions})`;
-    const title = doc.createElement("span");
-    title.textContent = titleText;
-    title.style.cssText =
-      "font-size: 12px; font-weight: 600; color: var(--text-primary);";
-    header.appendChild(title);
-
-    const closeBtn = doc.createElementNS(
-      HTML_NS,
-      "button",
-    ) as HTMLButtonElement;
-    closeBtn.textContent = "\u2715";
-    closeBtn.style.cssText = `
-      background: none;
-      border: none;
-      cursor: pointer;
-      font-size: 14px;
-      color: var(--text-secondary);
-      padding: 2px 6px;
-    `;
-    closeBtn.addEventListener("click", () => overlay.remove());
-    header.appendChild(closeBtn);
-
-    overlay.appendChild(header);
-
-    // Diff content
-    const diffContent = doc.createElement("div");
-    diffContent.style.cssText = `
-      flex: 1 1 0;
-      overflow: auto;
-      font-family: "Menlo", "Monaco", "Consolas", "Courier New", monospace;
-      font-size: 11px;
-      line-height: 1.5;
-      padding: 8px;
-      overflow-x: auto;
-      white-space: pre-wrap;
-      word-break: break-word;
-      user-select: text;
-      cursor: text;
-      background: var(--background-primary);
-    `;
-
-    if (diff.hunks.length === 0) {
-      diffContent.textContent = "No changes between these versions.";
-      diffContent.style.color = "var(--text-tertiary)";
-      diffContent.style.fontStyle = "italic";
-      diffContent.style.padding = "24px";
-    } else {
-      const toast = doc.createElement("div");
-      toast.style.cssText = `
-        position: absolute;
-        bottom: 48px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: var(--background-secondary);
-        color: var(--text-primary);
-        padding: 4px 12px;
-        border-radius: 4px;
-        font-size: 11px;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        border: 1px solid var(--border-primary);
-        opacity: 0;
-        transition: opacity 0.15s ease;
-        pointer-events: none;
-        z-index: 10;
-      `;
-      toast.textContent = "Copied";
-      overlay.appendChild(toast);
-
-      const showToast = () => {
-        toast.style.opacity = "1";
-        setTimeout(() => {
-          toast.style.opacity = "0";
-        }, 1200);
-      };
-
-      const copyLines = (text: string) => {
-        try {
-          const clipboard = doc.defaultView?.navigator?.clipboard;
-          if (clipboard) {
-            void clipboard.writeText(text);
-          }
-        } catch {
-          Zotero.debug("[seerai] clipboard write failed");
-        }
-        try {
-          const sel = doc.defaultView?.getSelection();
-          if (sel) sel.removeAllRanges();
-        } catch {
-          Zotero.debug("[seerai] selection clear failed");
-        }
-        showToast();
-      };
-
-      for (let hi = 0; hi < diff.hunks.length; hi++) {
-        const hunk = diff.hunks[hi];
-        const hunkHeader = doc.createElement("div");
-        hunkHeader.style.cssText =
-          "color: var(--text-tertiary); font-size: 10px; padding: 2px 0; margin-top: 4px;";
-        hunkHeader.textContent = `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`;
-        diffContent.appendChild(hunkHeader);
-
-        let li = 0;
-        while (li < hunk.lines.length) {
-          const line = hunk.lines[li];
-
-          if (line.type === "-") {
-            const delLines: DiffLine[] = [];
-            while (li < hunk.lines.length && hunk.lines[li].type === "-") {
-              delLines.push(hunk.lines[li]);
-              li++;
-            }
-            const addLines: DiffLine[] = [];
-            while (li < hunk.lines.length && hunk.lines[li].type === "+") {
-              addLines.push(hunk.lines[li]);
-              li++;
-            }
-
-            if (addLines.length > 0 && delLines.length === addLines.length) {
-              for (let pi = 0; pi < delLines.length; pi++) {
-                const delRow = createDiffLine(
-                  doc,
-                  delLines[pi],
-                  "rgba(239, 83, 80, 0.2)",
-                  "#ef5350",
-                  computeWordDiff(delLines[pi].content, addLines[pi].content)
-                    .oldParts,
-                );
-                delRow.addEventListener("click", () =>
-                  copyLines(delLines[pi].content),
-                );
-                diffContent.appendChild(delRow);
-
-                const addRow = createDiffLine(
-                  doc,
-                  addLines[pi],
-                  "rgba(76, 175, 80, 0.2)",
-                  "#4caf50",
-                  computeWordDiff(delLines[pi].content, addLines[pi].content)
-                    .newParts,
-                );
-                addRow.addEventListener("click", () =>
-                  copyLines(addLines[pi].content),
-                );
-                diffContent.appendChild(addRow);
-              }
-            } else if (addLines.length > 0) {
-              const groupEl = doc.createElement("div");
-              groupEl.style.cursor = "pointer";
-              for (const delLine of delLines) {
-                const row = createDiffLine(
-                  doc,
-                  delLine,
-                  "rgba(239, 83, 80, 0.2)",
-                  "#ef5350",
-                  null,
-                );
-                groupEl.appendChild(row);
-              }
-              for (let ai = 0; ai < addLines.length; ai++) {
-                const row = createDiffLine(
-                  doc,
-                  addLines[ai],
-                  "rgba(76, 175, 80, 0.2)",
-                  "#4caf50",
-                  null,
-                );
-                groupEl.appendChild(row);
-              }
-              const groupText = [...delLines, ...addLines]
-                .map((l) => l.content)
-                .join("\n");
-              groupEl.addEventListener("click", () => copyLines(groupText));
-              diffContent.appendChild(groupEl);
-            } else {
-              const groupEl = doc.createElement("div");
-              groupEl.style.cursor = "pointer";
-              for (const delLine of delLines) {
-                groupEl.appendChild(
-                  createDiffLine(
-                    doc,
-                    delLine,
-                    "rgba(239, 83, 80, 0.2)",
-                    "#ef5350",
-                    null,
-                  ),
-                );
-              }
-              const groupText = delLines.map((l) => l.content).join("\n");
-              groupEl.addEventListener("click", () => copyLines(groupText));
-              diffContent.appendChild(groupEl);
-            }
-          } else if (line.type === "+") {
-            const row = createDiffLine(
-              doc,
-              line,
-              "rgba(76, 175, 80, 0.2)",
-              "#4caf50",
-              null,
-            );
-            row.addEventListener("click", () => copyLines(line.content));
-            diffContent.appendChild(row);
-            li++;
-          } else {
-            const row = createDiffLine(
-              doc,
-              line,
-              "transparent",
-              "var(--text-secondary)",
-              null,
-            );
-            diffContent.appendChild(row);
-            li++;
-          }
-        }
-      }
-    }
-
-    overlay.appendChild(diffContent);
-
-    // Action buttons
-    const actions = doc.createElement("div");
-    actions.style.cssText = `
-      display: flex;
-      gap: 8px;
-      justify-content: flex-end;
-      padding: 8px 12px;
-      border-top: 1px solid var(--border-primary);
-      flex-shrink: 0;
-    `;
-
-    const doneBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-    doneBtn.textContent = "Close";
-    doneBtn.style.cssText = createSmallBtnStyle();
-    doneBtn.addEventListener("click", () => overlay.remove());
-    actions.appendChild(doneBtn);
-
-    overlay.appendChild(actions);
-
-    // Append to container
-    if (this.container) {
-      this.container.style.position = "relative";
-      this.container.appendChild(overlay);
-    }
-
-    this.diffOverlay = overlay;
+    // unused — diff is now rendered inline via renderDiffInContainer
   }
 
   getActivePath(): string | null {
@@ -935,6 +833,171 @@ export class WorkspaceEditorManager {
 
   getOpenTabsCount(): number {
     return this.openTabs.size;
+  }
+}
+
+/**
+ * Render a diff result into a container element (no header/overlay — the unified
+ * toolbar above handles mode switching).
+ */
+function renderDiffInContainer(
+  doc: Document,
+  diff: import("./types").DiffResult,
+  _path: string,
+  container: HTMLElement,
+): void {
+  container.innerHTML = "";
+  container.style.cssText = `
+    flex: 1 1 0; overflow: auto;
+    font-family: "Menlo", "Monaco", "Consolas", "Courier New", monospace;
+    font-size: 11px; line-height: 1.5; padding: 8px;
+    overflow-x: auto; white-space: pre-wrap; word-break: break-word;
+    user-select: text; cursor: text; background: var(--background-primary);
+  `;
+
+  if (diff.hunks.length === 0) {
+    container.textContent = "No changes between these versions.";
+    container.style.color = "var(--text-tertiary)";
+    container.style.fontStyle = "italic";
+    container.style.padding = "24px";
+    return;
+  }
+
+  const toast = doc.createElement("div");
+  toast.style.cssText = `
+    position: fixed; bottom: 48px; left: 50%; transform: translateX(-50%);
+    background: var(--background-secondary); color: var(--text-primary);
+    padding: 4px 12px; border-radius: 4px; font-size: 11px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    border: 1px solid var(--border-primary); opacity: 0;
+    transition: opacity 0.15s ease; pointer-events: none; z-index: 10;
+  `;
+  toast.textContent = "Copied";
+  doc.body?.appendChild(toast);
+  const showToast = () => {
+    toast.style.opacity = "1";
+    setTimeout(() => {
+      toast.style.opacity = "0";
+    }, 1200);
+  };
+  const copyLines = (text: string) => {
+    try {
+      void doc.defaultView?.navigator?.clipboard?.writeText(text);
+    } catch {}
+    try {
+      doc.defaultView?.getSelection()?.removeAllRanges();
+    } catch {}
+    showToast();
+  };
+
+  for (let hi = 0; hi < diff.hunks.length; hi++) {
+    const hunk = diff.hunks[hi];
+    const hunkHeader = doc.createElement("div");
+    hunkHeader.style.cssText =
+      "color: var(--text-tertiary); font-size: 10px; padding: 2px 0; margin-top: 4px;";
+    hunkHeader.textContent = `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`;
+    container.appendChild(hunkHeader);
+
+    let li = 0;
+    while (li < hunk.lines.length) {
+      const line = hunk.lines[li];
+
+      if (line.type === "-") {
+        const delLines: DiffLine[] = [];
+        while (li < hunk.lines.length && hunk.lines[li].type === "-") {
+          delLines.push(hunk.lines[li]);
+          li++;
+        }
+        const addLines: DiffLine[] = [];
+        while (li < hunk.lines.length && hunk.lines[li].type === "+") {
+          addLines.push(hunk.lines[li]);
+          li++;
+        }
+
+        if (addLines.length > 0 && delLines.length === addLines.length) {
+          for (let pi = 0; pi < delLines.length; pi++) {
+            const delRow = createDiffLine(
+              doc,
+              delLines[pi],
+              "rgba(239,83,80,0.2)",
+              "#ef5350",
+              computeWordDiff(delLines[pi].content, addLines[pi].content)
+                .oldParts,
+            );
+            delRow.addEventListener("click", () =>
+              copyLines(delLines[pi].content),
+            );
+            container.appendChild(delRow);
+            const addRow = createDiffLine(
+              doc,
+              addLines[pi],
+              "rgba(76,175,80,0.2)",
+              "#4caf50",
+              computeWordDiff(delLines[pi].content, addLines[pi].content)
+                .newParts,
+            );
+            addRow.addEventListener("click", () =>
+              copyLines(addLines[pi].content),
+            );
+            container.appendChild(addRow);
+          }
+        } else if (addLines.length > 0) {
+          const groupEl = doc.createElement("div");
+          groupEl.style.cursor = "pointer";
+          for (const dl of delLines)
+            groupEl.appendChild(
+              createDiffLine(doc, dl, "rgba(239,83,80,0.2)", "#ef5350", null),
+            );
+          for (let ai = 0; ai < addLines.length; ai++)
+            groupEl.appendChild(
+              createDiffLine(
+                doc,
+                addLines[ai],
+                "rgba(76,175,80,0.2)",
+                "#4caf50",
+                null,
+              ),
+            );
+          const groupText = [...delLines, ...addLines]
+            .map((l) => l.content)
+            .join("\n");
+          groupEl.addEventListener("click", () => copyLines(groupText));
+          container.appendChild(groupEl);
+        } else {
+          const groupEl = doc.createElement("div");
+          groupEl.style.cursor = "pointer";
+          for (const dl of delLines)
+            groupEl.appendChild(
+              createDiffLine(doc, dl, "rgba(239,83,80,0.2)", "#ef5350", null),
+            );
+          const groupText = delLines.map((l) => l.content).join("\n");
+          groupEl.addEventListener("click", () => copyLines(groupText));
+          container.appendChild(groupEl);
+        }
+      } else if (line.type === "+") {
+        const row = createDiffLine(
+          doc,
+          line,
+          "rgba(76,175,80,0.2)",
+          "#4caf50",
+          null,
+        );
+        row.addEventListener("click", () => copyLines(line.content));
+        container.appendChild(row);
+        li++;
+      } else {
+        container.appendChild(
+          createDiffLine(
+            doc,
+            line,
+            "transparent",
+            "var(--text-secondary)",
+            null,
+          ),
+        );
+        li++;
+      }
+    }
   }
 }
 

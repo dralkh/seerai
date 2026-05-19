@@ -1076,6 +1076,16 @@ export async function handleAgenticChat(
     ? allFilteredTools
     : undefined;
 
+  // Clear stale TODOs from previous crashed session on fresh start
+  if (!options.continuation) {
+    try {
+      const store = getWorkspaceStore();
+      await store.writeFile(".agent/TODO.json", "[]", "Reset stale TODO state");
+    } catch {
+      // Workspace may not be ready yet — ignore
+    }
+  }
+
   // Build initial messages
   const messages: (
     | OpenAIMessage
@@ -1126,19 +1136,21 @@ export async function handleAgenticChat(
 
   let fullResponse = "";
   let iteration = 0;
-  let noToolRetryCount = 0;
+  let taskCompleteCalled = false;
+  let textOnlyStreak = 0;
   let continuationToken = options.continuation || "";
-  const MAX_NO_TOOL_RETRIES = 2;
+  const MAX_TEXT_ONLY = 5;
 
   const compactionState: CompactionState = { count: 0, lastCompactAt: 0 };
   const modelContextLength = activeModel?.contextLength || 128000;
   const outputBudget = configOverride?.max_tokens || 16384;
 
-  // Start tracing session (agentic.md Section 7.1)
+  // Start tracing session
   const sessionId = `agent_${Date.now()}`;
   agentTracer.startSession(sessionId);
 
-  // Agent loop
+  // Agent loop — requires explicit 'task_complete' to signal completion
+  // (same pattern as smolagents' final_answer() / Vercel AI SDK "done tool")
   while (iteration < agentConfig.maxAgentIterations) {
     // Check for abortion at the start of iteration
     if (openAIService.isAbortedState()) {
@@ -1237,114 +1249,52 @@ export async function handleAgenticChat(
         throw err;
       }
 
-      // If no tool calls, check if task is complete or we should retry
+      // Completion protocol: model must explicitly call 'task_complete' to finish.
+      // Text-only responses without task_complete are NOT terminal — the model
+      // may be "thinking out loud" and needs to continue acting.
       if (toolCallsReceived.length === 0) {
-        if (taskExplicitlyCompleted) {
-          Zotero.debug(
-            `[seerai] Task was completed via task_complete tool, agent loop done`,
-          );
+        if (taskCompleteCalled) {
+          Zotero.debug("[seerai] task_complete was called — agent done");
           break;
         }
 
-        const hasActiveTodos = await hasIncompleteTodos();
-
-        if (!hasActiveTodos && productiveToolCalls === 0) {
+        textOnlyStreak++;
+        if (textOnlyStreak > MAX_TEXT_ONLY) {
           Zotero.debug(
-            `[seerai] No tool calls, no active todos, no prior work — treating as conversational response`,
+            "[seerai] Max text-only turns without task_complete — stopping",
           );
-          break;
-        }
-
-        if (!hasActiveTodos) {
-          Zotero.debug(
-            `[seerai] No tool calls and no active todos — task appears complete`,
-          );
-          break;
-        }
-
-        noToolRetryCount++;
-        Zotero.debug(
-          `[seerai] No tool calls but has active todos (retry ${noToolRetryCount}/${MAX_NO_TOOL_RETRIES})`,
-        );
-
-        if (noToolRetryCount > MAX_NO_TOOL_RETRIES) {
-          Zotero.debug(`[seerai] Max no-tool retries reached, stopping`);
-          const stopHint = `\n\n*[Agent paused after ${iteration} turns — task may be incomplete. You can ask it to continue.]*`;
+          const stopHint = `\n\n*[Agent paused — call 'task_complete' to finish, or ask it to continue.]*`;
           fullResponse += stopHint;
           observer.onMessageUpdate(fullResponse);
           break;
         }
 
         if (iterationContent) {
-          messages.push({
-            role: "assistant",
-            content: iterationContent,
-          });
+          messages.push({ role: "assistant", content: iterationContent });
         }
         messages.push({
           role: "system",
           content:
-            `You have active TODO items that are not yet completed. ` +
-            `Call 'todoread' to check status, then execute the next pending tool call. ` +
-            `Do NOT produce more text — take ACTION with a tool call.`,
+            textOnlyStreak === 1
+              ? "If your task is complete, call 'task_complete'. Otherwise, call a tool to continue working."
+              : `Still no tool call after ${textOnlyStreak} turns. Call 'task_complete' to finish, or call a tool to make progress.`,
         });
         continue;
       }
 
-      // Reset no-tool retry counter on successful tool calls
-      noToolRetryCount = 0;
+      textOnlyStreak = 0;
 
-      let batchHasProductive = false;
-      let batchHasTaskComplete = false;
-
-      for (const tc of toolCallsReceived) {
-        if (tc.function.name === "task_complete") {
-          batchHasTaskComplete = true;
-        } else if (PRODUCTIVE_TOOLS.has(tc.function.name)) {
-          batchHasProductive = true;
-        }
-      }
-
-      // Reject premature task_complete: must have done productive work first
+      // Track explicit completion signal
       if (
-        batchHasTaskComplete &&
-        productiveToolCalls === 0 &&
-        !batchHasProductive
+        toolCallsReceived.some((tc) => tc.function.name === "task_complete")
       ) {
+        taskCompleteCalled = true;
         Zotero.debug(
-          "[seerai] Rejecting premature task_complete — no productive tool calls made",
-        );
-        const rejectionMessage = JSON.stringify({
-          success: false,
-          error:
-            "ERROR: You called task_complete without having DONE any actual work. " +
-            "You must EXECUTE tools (search, read, write files, generate output, etc.) before calling task_complete. " +
-            "If this is a multi-step task, call todowrite first to plan, then work through each step. " +
-            "Calling task_complete as your first action is NOT allowed.",
-        });
-        messages.push({
-          role: "assistant",
-          content: iterationContent || null,
-          tool_calls: toolCallsReceived,
-        });
-        messages.push({
-          role: "tool",
-          tool_call_id:
-            toolCallsReceived.find((tc) => tc.function.name === "task_complete")
-              ?.id || "unknown",
-          content: rejectionMessage,
-        });
-        continue;
-      }
-
-      if (batchHasTaskComplete) {
-        taskExplicitlyCompleted = true;
-        Zotero.debug(
-          "[seerai] task_complete tool called, will finish after this iteration",
+          "[seerai] task_complete tool called — will finish after this turn",
         );
       }
 
-      // Filter out invalid tool calls (empty name, etc.) that would crash the API
+      // Filter out invalid tool calls
       const validToolCalls = toolCallsReceived.filter(
         (tc) => tc.function.name && tc.function.name.length > 0,
       );
@@ -1410,12 +1360,8 @@ export async function handleAgenticChat(
         throw new Error("Request was cancelled");
       }
 
-      // Add results to history with enhanced error feedback (Reflexion pattern - agentic.md Section 2.1)
+      // Add results to history with enhanced error feedback
       for (const { toolCall, result } of toolResults) {
-        if (result.success && PRODUCTIVE_TOOLS.has(toolCall.function.name)) {
-          productiveToolCalls++;
-        }
-
         let resultContent: string;
 
         if (!result.success && result.error) {
@@ -1459,7 +1405,7 @@ export async function handleAgenticChat(
     Zotero.debug(
       `[seerai] Agent reached max iterations (${agentConfig.maxAgentIterations})`,
     );
-    const stopMessage = `\n\n*[Agent stopped - reached maximum tool call iterations (${agentConfig.maxAgentIterations})]*`;
+    const stopMessage = `\n\n*[Agent stopped - reached maximum iterations (${agentConfig.maxAgentIterations})]*`;
     fullResponse += stopMessage;
     observer.onMessageUpdate(fullResponse);
   }

@@ -420,7 +420,8 @@ export class OpenAIService {
       // (e.g. gpt-5.4-nano). Strip it when tools are present.
       if (tools && tools.length > 0) {
         requestBody.tools = tools;
-        requestBody.tool_choice = "auto";
+        const activeModel = getActiveModelConfig();
+        requestBody.tool_choice = activeModel?.toolChoice || "auto";
         delete requestBody.reasoning_effort;
       }
 
