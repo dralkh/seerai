@@ -16,7 +16,15 @@
 </p>
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/90f68a0d-fec0-41e7-a988-f557c18bd150" width="600" />
+  <img src="https://github.com/user-attachments/assets/abeee9fa-bea0-4cf5-8e5c-a56cee745a74" width="600" />
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/4ce55ee8-39c5-48ab-96e9-b1c818523b18" width="600" />
+</p>
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/d9525add-3501-4b50-9f8c-b0e482c9c1f6" width="600" />
 </p>
 
 <p align="center">
@@ -33,7 +41,7 @@
   </a>
 </p>
 
-**seerai** is an intelligent research assistant plugin for Zotero 8 that integrates AI-powered chat, advanced search, and data extraction capabilities directly into your research workflow. Chat with your papers, extract structured data, and accelerate your literature review with a local-first, privacy-focused design.
+**seerai** is an intelligent research assistant plugin for Zotero 9 that integrates AI-powered chat, advanced search, and data extraction capabilities directly into your research workflow. Chat with your papers, extract structured data, and accelerate your literature review with a local-first, privacy-focused design.
 
 ---
 
@@ -254,7 +262,7 @@ Enhanced search functionality to help users find relevant literature more effect
 ### Prerequisites
 
 - Node.js 18+
-- Zotero 8
+- Zotero 9
 
 ### Project Structure
 
