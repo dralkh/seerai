@@ -13,10 +13,11 @@ import {
 } from "./firecrawl";
 import { tavilyService, WebSearchResult as TavilyResult } from "./tavily";
 import { nanogptWebService } from "./nanogptWeb";
+import { youdotcomService } from "./youdotcom";
 
 // ==================== Types ====================
 
-export type WebSearchProviderType = "firecrawl" | "tavily" | "nanogpt";
+export type WebSearchProviderType = "firecrawl" | "tavily" | "nanogpt" | "youdotcom";
 
 export interface WebSearchResult {
   url: string;
@@ -265,11 +266,69 @@ class NanogptProviderWrapper implements WebSearchProvider {
   }
 }
 
+/**
+ * Wraps You.com service to conform to WebSearchProvider interface
+ */
+class YoudotcomProviderWrapper implements WebSearchProvider {
+  isConfigured(): boolean {
+    return youdotcomService.isConfigured();
+  }
+
+  async webSearch(query: string, limit?: number): Promise<WebSearchResult[]> {
+    return youdotcomService.webSearch(query, limit);
+  }
+
+  async scrapeUrl(url: string): Promise<WebSearchResult | null> {
+    return youdotcomService.scrapeUrl(url);
+  }
+
+  async researchSearch(
+    title: string,
+    authors?: string[],
+    doi?: string,
+  ): Promise<PdfDiscoveryResult | null> {
+    return youdotcomService.researchSearch(title, authors, doi);
+  }
+
+  async searchForPdf(
+    title: string,
+    authors?: string[],
+    doi?: string,
+  ): Promise<PdfDiscoveryResult> {
+    return youdotcomService.searchForPdf(title, authors, doi);
+  }
+
+  getCachedPdfResult(paperId: string): PdfDiscoveryResult | null | undefined {
+    return youdotcomService.getCachedPdfResult(paperId);
+  }
+
+  setCachedPdfResult(paperId: string, result: PdfDiscoveryResult | null): void {
+    youdotcomService.setCachedPdfResult(paperId, result);
+  }
+
+  clearCache(): void {
+    youdotcomService.clearCache();
+  }
+
+  clearPdfCache(): void {
+    youdotcomService.clearPdfCache();
+  }
+
+  clearPdfCacheForPaper(title: string, authors?: string[], doi?: string): void {
+    youdotcomService.clearPdfCacheForPaper(title, authors, doi);
+  }
+
+  getSearchLimit(): number {
+    return youdotcomService.getSearchLimit();
+  }
+}
+
 // ==================== Singleton Instances ====================
 
 const firecrawlProvider = new FirecrawlProviderWrapper();
 const tavilyProvider = new TavilyProviderWrapper();
 const nanogptProvider = new NanogptProviderWrapper();
+const youdotcomProvider = new YoudotcomProviderWrapper();
 
 // ==================== Provider Selection ====================
 
@@ -282,6 +341,7 @@ export function getActiveProviderType(): WebSearchProviderType {
     `${prefPrefix}.webSearchProvider`,
   ) as string;
   if (provider === "nanogpt") return "nanogpt";
+  if (provider === "youdotcom") return "youdotcom";
   if (provider === "tavily") return "tavily";
   return "firecrawl";
 }
@@ -292,6 +352,7 @@ export function getActiveProviderType(): WebSearchProviderType {
 export function getActiveProvider(): WebSearchProvider {
   const providerType = getActiveProviderType();
   if (providerType === "nanogpt") return nanogptProvider;
+  if (providerType === "youdotcom") return youdotcomProvider;
   if (providerType === "tavily") return tavilyProvider;
   return firecrawlProvider;
 }
@@ -301,6 +362,7 @@ export function getActiveProvider(): WebSearchProvider {
  */
 export function getProvider(type: WebSearchProviderType): WebSearchProvider {
   if (type === "nanogpt") return nanogptProvider;
+  if (type === "youdotcom") return youdotcomProvider;
   if (type === "tavily") return tavilyProvider;
   return firecrawlProvider;
 }
@@ -312,7 +374,8 @@ export function isAnyProviderConfigured(): boolean {
   return (
     nanogptProvider.isConfigured() ||
     firecrawlProvider.isConfigured() ||
-    tavilyProvider.isConfigured()
+    tavilyProvider.isConfigured() ||
+    youdotcomProvider.isConfigured()
   );
 }
 
@@ -331,6 +394,7 @@ export function getConfiguredProviders(): WebSearchProviderType[] {
   if (nanogptProvider.isConfigured()) providers.push("nanogpt");
   if (firecrawlProvider.isConfigured()) providers.push("firecrawl");
   if (tavilyProvider.isConfigured()) providers.push("tavily");
+  if (youdotcomProvider.isConfigured()) providers.push("youdotcom");
   return providers;
 }
 
@@ -345,6 +409,8 @@ export function getProviderDisplayName(type: WebSearchProviderType): string {
       return "Firecrawl";
     case "tavily":
       return "Tavily";
+    case "youdotcom":
+      return "You.com";
     default:
       return type;
   }

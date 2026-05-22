@@ -324,6 +324,32 @@ function bindPrefEvents() {
     });
   }
 
+  // You.com settings
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-youdotcomApiKey`,
+    "youdotcomApiKey",
+  );
+  bindInput(
+    `zotero-prefpane-${config.addonRef}-youdotcomSearchLimit`,
+    "youdotcomSearchLimit",
+  );
+
+  // You.com search mode menulist
+  const youdotcomModeSelect = doc?.querySelector(
+    `#zotero-prefpane-${config.addonRef}-youdotcomSearchMode`,
+  ) as XUL.MenuList;
+  if (youdotcomModeSelect) {
+    youdotcomModeSelect.value =
+      (Zotero.Prefs.get(`${prefPrefix}.youdotcomSearchMode`) as string) ||
+      "normal";
+    youdotcomModeSelect.addEventListener("command", () => {
+      Zotero.Prefs.set(
+        `${prefPrefix}.youdotcomSearchMode`,
+        youdotcomModeSelect.value,
+      );
+    });
+  }
+
   // Web Search Provider selection with show/hide logic
   function updateWebSearchProviderVisibility(provider: string) {
     const firecrawlSettings = doc?.querySelector(
@@ -332,12 +358,18 @@ function bindPrefEvents() {
     const tavilySettings = doc?.querySelector(
       `#zotero-prefpane-${config.addonRef}-tavilySettings`,
     ) as HTMLElement;
+    const youdotcomSettings = doc?.querySelector(
+      `#zotero-prefpane-${config.addonRef}-youdotcomSettings`,
+    ) as HTMLElement;
 
     if (firecrawlSettings) {
       firecrawlSettings.style.display = provider === "firecrawl" ? "" : "none";
     }
     if (tavilySettings) {
       tavilySettings.style.display = provider === "tavily" ? "" : "none";
+    }
+    if (youdotcomSettings) {
+      youdotcomSettings.style.display = provider === "youdotcom" ? "" : "none";
     }
   }
 

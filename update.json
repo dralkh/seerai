@@ -1,0 +1,19 @@
+{
+  "addons": {
+    "seerai@zotero.org": {
+      "updates": [
+        {
+          "version": "1.8.1",
+          "update_link": "https://github.com/dralkh/seerai/releases/download/1.8.1/seerai.xpi",
+          "update_hash": "sha512:efb15d7999f5eaf593badc33f9abdd6a87f9535fefc9b362866e17a9f8d474dcb76cc308e8b917ef0127008b53f2754f055e18556c181e56abb5cba1073aea84",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "8.0",
+              "strict_max_version": "9.*"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

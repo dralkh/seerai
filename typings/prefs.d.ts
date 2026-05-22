@@ -36,6 +36,9 @@ declare namespace _ZoteroTypes {
       "tavilyApiKey": string;
       "tavilySearchLimit": number;
       "tavilySearchDepth": string;
+      "youdotcomApiKey": string;
+      "youdotcomSearchMode": string;
+      "youdotcomSearchLimit": number;
       "agenticMode": boolean;
       "libraryScope": string;
       "agentMaxResults": number;

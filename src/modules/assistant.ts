@@ -28773,7 +28773,13 @@ Rules:
 
       // Web Search Context
       let webContext = "";
-      if (options.webSearchEnabled && isActiveProviderConfigured()) {
+      
+      const isAgentic = isAgenticModeEnabled();
+      const isSearchOnly = !isAgentic && options.webSearchEnabled;
+      const willUseTools = isAgentic || isSearchOnly;
+
+      // Only do background search if tools are COMPLETELY disabled and we want search
+      if (options.webSearchEnabled && !willUseTools && isActiveProviderConfigured()) {
         try {
           const provider = getActiveProvider();
           Zotero.debug(`[seerai] Fetching web search context for: ${text}`);
@@ -28834,21 +28840,25 @@ Rules:
 
       const workspaceTree = await buildWorkspaceTreePrompt();
 
+      let agentInstructions = "";
+      if (willUseTools) {
+        agentInstructions = `You are a research agent with direct access to ${isAgentic ? "the user's Zotero library, web search, and a file workspace" : "web search"}. To help the user, call the tools at your disposal. Do not describe what you could do; use the tools to actually do it. When the task is complete, simply provide a text-only response with your final answer — the conversation will end naturally. If you need to explicitly signal completion after tool work, you can call the 'task_complete' tool instead.
+
+${isAgentic ? buildToolPromptSections() : "Web Search (use the 'web' tool with the 'action' parameter):\n- web({ action: \"search\", query: \"...\" }) — search the web\n- web({ action: \"read\", url: \"...\" }) — read a specific webpage"}
+${webContext ? " When using web search results, cite the source URL." : ""}`;
+      }
+
       const systemPrompt =
         customPromptPrefix +
         `You are a helpful research assistant for Zotero. You help users understand and analyze their academic papers, notes, and research data tables.
 
-Current Library/Folder Scope: ${scopeLabel} (Tools will only find items within this scope).
+Current Library/Folder Scope: ${scopeLabel} ${isAgentic ? "(Tools will only find items within this scope)." : ""}
 
 ${context}${webContext}
 
-You are a research agent with direct access to the user's Zotero library, web search, and a file workspace. To help the user, call the tools at your disposal — search for papers, read their content, create tables, manage collections, and work with files. Do not describe what you could do; use the tools to actually do it. When the task is complete, simply provide a text-only response with your final answer — the conversation will end naturally. If you need to explicitly signal completion after tool work, you can call the 'task_complete' tool instead.
-
-${buildToolPromptSections()}
-${webContext ? " When using web search results, cite the source URL." : ""}
-
-${isAgenticModeEnabled() ? WORKSPACE_SYSTEM_PROMPT : ""}
-${workspaceTree}`;
+${agentInstructions}
+${isAgentic ? WORKSPACE_SYSTEM_PROMPT : ""}
+${isAgentic ? workspaceTree : ""}`;
 
       // Merge pasted images with Zotero item images
       const manuallyPastedParts: VisionMessageContentPart[] = pastedImages.map(
@@ -29018,10 +29028,9 @@ ${workspaceTree}`;
         : undefined;
 
       // Check if agentic mode is enabled
-      const agenticEnabled = isAgenticModeEnabled();
-      Zotero.debug(`[seerai] Agentic mode: ${agenticEnabled}`);
+      Zotero.debug(`[seerai] Agentic mode: ${isAgentic}, Search-only mode: ${isSearchOnly}`);
 
-      if (agenticEnabled) {
+      if (willUseTools) {
         const continuation = await getMessageStore().getContinuation();
         await handleAgenticChat(
           text,
@@ -29029,6 +29038,7 @@ ${workspaceTree}`;
           conversationMessages.slice(0, -1), // Exclude current user message (already in text)
           {
             enableTools: true,
+            allowedTools: isSearchOnly ? ["web"] : undefined,
             includeImages:
               options.includeImages || manuallyPastedParts.length > 0,
             pastedImages: pastedImages,
@@ -29199,14 +29209,25 @@ ${workspaceTree}`;
             // Rebuild system prompt with RAG context
             const scopePref = this.getScopePref();
             const scopeLabel = this.getScopeLabel(scopePref);
+            
+            const retryAgenticEnabled = isAgenticModeEnabled();
+            const retryChatOptions = getChatStateManager().getOptions();
+            const retrySearchOnly = !retryAgenticEnabled && retryChatOptions.webSearchEnabled;
+            const retryWillUseTools = retryAgenticEnabled || retrySearchOnly;
+            
+            let retryAgentInstructions = "";
+            if (retryWillUseTools) {
+              retryAgentInstructions = `\n\nYou are a research agent with direct access to ${retryAgenticEnabled ? "the user's Zotero library, web search, and a file workspace" : "web search"}. To help the user, call the tools at your disposal. Do not describe what you could do; use the tools to actually do it. When the task is complete, simply provide a text-only response with your final answer.\n\n${retryAgenticEnabled ? buildToolPromptSections() : "Web Search (use the 'web' tool with the 'action' parameter):\n- web({ action: \"search\", query: \"...\" }) — search the web\n- web({ action: \"read\", url: \"...\" }) — read a specific webpage"}`;
+            }
+            
             const ragSystemPrompt = `You are a helpful research assistant for Zotero. You help users understand and analyze their academic papers, notes, and research data tables.
 
-Current Library/Folder Scope: ${scopeLabel} (Tools will only find items within this scope).
+Current Library/Folder Scope: ${scopeLabel} ${retryAgenticEnabled ? "(Tools will only find items within this scope)." : ""}
 
 ${ragResult.context}
 
 Be concise, accurate, and helpful. When referencing papers, cite them by title or author.
-Note: Context was automatically reduced using semantic search due to size constraints.`;
+Note: Context was automatically reduced using semantic search due to size constraints.${retryAgentInstructions}`;
 
             const retryMessages: (OpenAIMessage | VisionMessage)[] = [
               { role: "system", content: ragSystemPrompt },
@@ -29219,7 +29240,6 @@ Note: Context was automatically reduced using semantic search due to size constr
             ];
 
             const retryActiveModel = getActiveModelConfig();
-            const retryChatOptions = getChatStateManager().getOptions();
             const retryConfigOverride = retryActiveModel
               ? {
                   apiURL: retryActiveModel.apiURL,
@@ -29234,8 +29254,7 @@ Note: Context was automatically reduced using semantic search due to size constr
               `[seerai] RAG retry: ${ragResult.stats.chunksRetrieved} chunks, ${ragResult.stats.tokensUsed} tokens`,
             );
 
-            const retryAgenticEnabled = isAgenticModeEnabled();
-            if (retryAgenticEnabled) {
+            if (retryWillUseTools) {
               const continuation = await getMessageStore().getContinuation();
               await handleAgenticChat(
                 text,
@@ -29243,6 +29262,7 @@ Note: Context was automatically reduced using semantic search due to size constr
                 conversationMessages.slice(0, -1),
                 {
                   enableTools: true,
+                  allowedTools: retrySearchOnly ? ["web"] : undefined,
                   includeImages: false,
                   pastedImages: [],
                   permissionHandler: Assistant.handleInlinePermissionRequest,
@@ -29412,14 +29432,25 @@ Note: Context was automatically reduced using semantic search due to size constr
           ) {
             const scopePref = this.getScopePref();
             const scopeLabel = this.getScopeLabel(scopePref);
+
+            const retryAgenticEnabled = isAgenticModeEnabled();
+            const retryChatOptions = getChatStateManager().getOptions();
+            const retrySearchOnly = !retryAgenticEnabled && retryChatOptions.webSearchEnabled;
+            const retryWillUseTools = retryAgenticEnabled || retrySearchOnly;
+            
+            let retryAgentInstructions = "";
+            if (retryWillUseTools) {
+              retryAgentInstructions = `\n\nYou are a research agent with direct access to ${retryAgenticEnabled ? "the user's Zotero library, web search, and a file workspace" : "web search"}. To help the user, call the tools at your disposal. Do not describe what you could do; use the tools to actually do it. When the task is complete, simply provide a text-only response with your final answer.\n\n${retryAgenticEnabled ? buildToolPromptSections() : "Web Search (use the 'web' tool with the 'action' parameter):\n- web({ action: \"search\", query: \"...\" }) — search the web\n- web({ action: \"read\", url: \"...\" }) — read a specific webpage"}`;
+            }
+
             const ragSystemPrompt = `You are a helpful research assistant for Zotero. You help users understand and analyze their academic papers, notes, and research data tables.
 
-Current Library/Folder Scope: ${scopeLabel} (Tools will only find items within this scope).
+Current Library/Folder Scope: ${scopeLabel} ${retryAgenticEnabled ? "(Tools will only find items within this scope)." : ""}
 
 ${ragResult.context}
 
 Be concise, accurate, and helpful. When referencing papers, cite them by title or author.
-Note: Context was automatically reduced using stricter semantic search due to size constraints.`;
+Note: Context was automatically reduced using stricter semantic search due to size constraints.${retryAgentInstructions}`;
 
             // Budget history for retry
             const dHistoryMsgs = conversationMessages.filter(
@@ -29476,7 +29507,6 @@ Note: Context was automatically reduced using stricter semantic search due to si
             }
 
             const retryActiveModel = getActiveModelConfig();
-            const retryChatOptions = getChatStateManager().getOptions();
             const retryConfigOverride = retryActiveModel
               ? {
                   apiURL: retryActiveModel.apiURL,
@@ -29492,8 +29522,7 @@ Note: Context was automatically reduced using stricter semantic search due to si
                 `${ragResult.stats.tokensUsed} tokens, total=${dTotalTokens}`,
             );
 
-            const retryAgenticEnabled = isAgenticModeEnabled();
-            if (retryAgenticEnabled) {
+            if (retryWillUseTools) {
               const continuation = await getMessageStore().getContinuation();
               await handleAgenticChat(
                 text,
@@ -29501,6 +29530,7 @@ Note: Context was automatically reduced using stricter semantic search due to si
                 dBudgetedHist.slice(0, -1),
                 {
                   enableTools: true,
+                  allowedTools: retrySearchOnly ? ["web"] : undefined,
                   includeImages: false,
                   pastedImages: [],
                   permissionHandler: Assistant.handleInlinePermissionRequest,

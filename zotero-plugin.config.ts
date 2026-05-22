@@ -19,7 +19,14 @@ export default defineConfig({
     pkg.version.includes("-") ? "update-beta.json" : "update.json"
   }`,
   xpiDownloadLink:
-    "https://github.com/{{owner}}/{{repo}}/releases/download/v{{version}}/{{xpiName}}.xpi",
+    "https://github.com/{{owner}}/{{repo}}/releases/download/{{version}}/{{xpiName}}.xpi",
+
+  release: {
+    bumpp: {
+      tag: "%s",
+      commit: "chore(publish): release %s",
+    },
+  },
 
   build: {
     assets: ["addon/**/*.*"],

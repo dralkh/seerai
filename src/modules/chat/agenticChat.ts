@@ -20,6 +20,7 @@ import {
   type AgentQuery,
   type ProviderEvent,
 } from "../openai";
+import { config } from "../../../package.json";
 import {
   getFilteredAgentTools,
   executeToolCall,
@@ -281,6 +282,7 @@ async function maybeCompactContext(
  */
 export interface AgenticChatOptions {
   enableTools: boolean;
+  allowedTools?: string[];
   includeImages: boolean;
   pastedImages?: { id: string; image: string; mimeType: string }[];
   permissionHandler?: (
@@ -1101,7 +1103,10 @@ export async function handleAgenticChat(
   };
 
   // Get tools if enabled, filtered by permission settings
-  const allFilteredTools = getFilteredAgentTools();
+  let allFilteredTools = getFilteredAgentTools();
+  if (options.allowedTools) {
+    allFilteredTools = allFilteredTools.filter(t => options.allowedTools!.includes(t.function.name));
+  }
   const tools: ToolDefinition[] | undefined = options.enableTools
     ? allFilteredTools
     : undefined;
@@ -1459,7 +1464,8 @@ export async function handleAgenticChat(
  */
 export function isAgenticModeEnabled(): boolean {
   try {
-    const enabled = Zotero.Prefs.get("extensions.seerai.agenticMode");
+    const prefPrefix = config.prefsPrefix;
+    const enabled = Zotero.Prefs.get(`${prefPrefix}.agenticMode`);
     return enabled === true; // Default to false
   } catch (e) {
     return false;
