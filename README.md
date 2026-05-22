@@ -74,7 +74,7 @@
 ### Semantic Search & Discovery
 
 - **RAG (Retrieval-Augmented Generation)**: Per-context embeddings with chunking, vector store, and semantic retrieval for large documents.
-- **Web Search**: Integrated Firecrawl & Tavily support for finding high-quality full-text content.
+- **Web Search**: Integrated Firecrawl, Tavily, and You.com support for finding high-quality full-text content.
 - **Semantic Scholar Agent**: Advanced paper search with:
   - **Advanced Filters**: Fine-tune results by Year, Venue, and Citation Count.
   - **AI Insights Config**: Configure insight generation directly from the search panel.
@@ -88,7 +88,8 @@
 
 ### Agentic Chat & Tool Use
 
-- **Autonomous Agents**: AI can now use tools to interact with your Zotero library and the web.
+- **Autonomous Agents**: AI can use tools to interact with your Zotero library, the web, and your workspace.
+- **Research Mode**: You.com research mode for multi-source answer synthesis.
 - **Rich Tool Suite**:
   - **Search Tool**: Search through your library with advanced filters.
   - **Collection Tool**: Manage collections and move items.
@@ -97,8 +98,11 @@
   - **Read Tool**: Extract text from PDFs and items for deep analysis.
   - **Citation Tool**: Generate citations and bibliographies.
   - **Table Tool**: Interact with and generate data for your Paper Tables.
-  - **Web Tool**: Search the web and fetch content using Firecrawl or Tavily.
-- **Advanced Orchestration**: Improved tool calling logic and iteration tracking for more robust agent performance.
+  - **Web Tool**: Search the web and fetch content using Firecrawl, Tavily, or You.com.
+  - **Workspace Tools**: Create, read, edit, and delete files directly in your workspace.
+  - **Todo Tool**: Create and manage task lists for complex multi-step research workflows.
+- **Task Completion Signaling**: Agents signal completion explicitly for clean multi-step workflows.
+- **Advanced Orchestration**: Improved tool calling logic with tool filtering, iteration tracking, and observability tracing.
 - **Model-as-a-Tool**: Seamless integration with LLM tool-calling capabilities.
 
 ### Papers Tables
@@ -109,6 +113,25 @@
 - **One-Click Generation**: Generate data for individual cells or entire columns instantly.
 - **Bulk Actions**: Regenerate content or add selected papers to collections in bulk.
 - **Side Strip Actions**: Unified controls for adding, removing columns, generating triggers, and settings.
+
+### Workspace & File Management
+
+- **Built-in File Workspace**: A persistent file system workspace accessible to you and your AI agent.
+- **File Tree Navigation**: Sidebar with full file tree for browsing, creating, and organizing files and folders.
+- **Code Editor**: Built-in Monaco-inspired editor with syntax highlighting, line numbers, and auto-save.
+- **Git Integration**: Initialize repos, stage changes, commit, and view diffs directly within the workspace.
+- **Diff Viewer**: Side-by-side or unified diff view for reviewing file changes.
+- **File Viewer**: Render workspace files with syntax highlighting across multiple formats.
+- **DOCX Converter**: Convert documents to/from DOCX format for interoperability with word processors.
+- **Custom Workspace Paths**: Configure a custom directory for your workspace files.
+
+### Cloud Storage Integration
+
+- **Multi-Provider Support**: Connect to Google Drive, Dropbox, Box, OneDrive, or Nextcloud.
+- **OAuth 2.0 + PKCE**: Secure authentication flow for all cloud providers.
+- **Cloud Drive Tab**: Browse, search, and manage cloud files directly within Zotero.
+- **Cloud Context**: Include cloud-stored files as context in your AI conversations.
+- **File Sync**: Upload and download files between workspace and cloud storage seamlessly.
 
 ### OCR & Text Extraction
 
@@ -192,8 +215,21 @@ Choose your preferred text extraction engine:
 - **Semantic Scholar**: Add your [API Key](https://www.semanticscholar.org/product/api) for higher rate limits and faster searches.
 - **Firecrawl**: Add [API Key](https://firecrawl.dev) to enable deep web search capabilities - local instance with ([GitHub](https://github.com/firecrawl/firecrawl)).
 - **Tavily**: Add [API Key](https://tavily.com/) for optimized search results tailored for AI agents.
+- **You.com**: Add [API Key](https://api.you.com) for web search and research mode.
 
-### 4. MCP Server & API
+### 4. Workspace
+
+- **Local Path**: Configure a custom directory path for your workspace files (Settings → seerai → Workspace).
+- **Git Integration**: Enable Git version control for automatic versioning and collaboration.
+- Files created in the workspace are accessible to your AI agent via workspace tools.
+
+### 5. Cloud Storage
+
+- **Supported Providers**: Google Drive, Dropbox, Box, OneDrive, Nextcloud.
+- **Authentication**: Secure OAuth 2.0 with PKCE flow — no passwords stored.
+- Connect via the **Cloud tab** in the workspace sidebar to browse, sync, and use cloud files as AI context.
+
+### 6. MCP Server & API
 
 Seer-AI now includes a Model Context Protocol (MCP) server and a local API for external integrations.
 
@@ -242,18 +278,24 @@ This mode requires sophisticated models with strong tool/function-calling capabi
   - `@`: Authors
   - `#`: Topics
 
+### Using the Workspace
+
+1. Open the workspace sidebar using the folder icon in the chat panel.
+2. Create files and folders with the `+` button or via AI agent commands.
+3. Edit files using the built-in code editor with syntax highlighting.
+4. Enable Git integration in Settings → seerai → Workspace for version control.
+5. Connect cloud storage (Google Drive, Dropbox, etc.) via the Cloud tab.
+6. The AI agent can read, write, and modify workspace files as part of its tool suite.
+
 ---
 
 ## Future Implementations Ideas
-
-Enhanced search functionality to help users find relevant literature more effectively.
 
 - **Autocomplete**: Intelligent suggestions for tags, creators, and collections as you type.
 - **Complex Queries**: Support for boolean logic (AND/OR) and nested search conditions (e.g., "Title contains X AND Year > 2020").
 - **Field-Specific Search**: Dedicated filters for titles, authors, years, and tags.
 - **Citation References**: Inline citations within tables and chat during generation.
 - **Internal MCP Presets**: Custom support for MCP JSON presets for streamlined integrations.
-- **Connectors**: External service connectors for extended workflows.
 
 ---
 
@@ -274,13 +316,21 @@ seerai/
 ├── src/
 │   ├── modules/           # Core feature modules
 │   │   ├── chat/          # Chat engine & state
-│   │   │   └── rag/       # RAG pipeline (chunker, embeddings, retrieval, vector store)
+│   │   │   ├── rag/       # RAG pipeline (chunker, embeddings, retrieval, vector store)
+│   │   │   ├── tools/     # Agentic tool system (search, note, table, web, workspace, etc.)
+│   │   │   └── workspace/ # File workspace (editor, sidebar, git CLI, diff viewer, store)
+│   │   ├── cloud/         # Cloud storage tab
+│   │   ├── drive/         # Cloud providers (Google, Dropbox, Box, OneDrive, Nextcloud)
 │   │   ├── assistant.ts   # Main assistant logic
 │   │   ├── firecrawl.ts   # Firecrawl integration
 │   │   ├── tavily.ts      # Tavily search integration
+│   │   ├── youdotcom.ts   # You.com search & research integration
 │   │   ├── ocr.ts         # OCR implementation
 │   │   ├── openai.ts      # LLM & multimodal client
 │   │   ├── semanticScholar.ts # Semantic Scholar integration
+│   │   ├── fileViewer.ts  # File rendering & viewing
+│   │   ├── docxConverter.ts # Document format conversion
+│   │   ├── webSearchProvider.ts # Provider abstraction (Firecrawl/Tavily/You.com)
 │   │   └── preferenceScript.ts # Preferences logic
 │   ├── utils/             # Utility functions
 │   └── hooks.ts           # Zotero event listeners
