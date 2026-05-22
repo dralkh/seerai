@@ -13,7 +13,8 @@ export type PlaceholderType =
   | "tag"
   | "year"
   | "table"
-  | "prompt";
+  | "prompt"
+  | "workspace";
 export type PromptCategory =
   | "analysis"
   | "comparative"
@@ -51,6 +52,7 @@ export const PLACEHOLDER_TRIGGERS: Record<string, PlaceholderType> = {
   "~": "tag",
   $: "table",
   "!": "prompt",
+  "%": "workspace",
 };
 
 // Placeholder patterns for parsing

@@ -34,7 +34,7 @@ pref("tavilyApiKey", "");
 pref("tavilySearchLimit", 5);
 pref("tavilySearchDepth", "basic");
 // Agentic mode preferences
-pref("agenticMode", true);
+pref("agenticMode", false);
 pref("libraryScope", "all"); // "user", "all", "group:ID", or "collection:libID:colID"
 pref("agentMaxResults", 20);
 pref("agentMaxContentLength", 50000);
@@ -64,3 +64,37 @@ pref("workspaceCustomPath", "");
 pref("workspaceFolderPaths", "{}");
 pref("fileViewerEnabled", true);
 pref("previewExtensions", "{}");
+// Google Drive integration
+pref("driveClientId", "");
+pref("driveClientSecret", "");
+pref("driveRefreshToken", "");
+pref("driveAccessToken", "");
+pref("driveTokenExpiry", "0");
+
+// Dropbox integration
+pref("cloud.dropbox.clientId", "");
+pref("cloud.dropbox.refreshToken", "");
+pref("cloud.dropbox.accessToken", "");
+pref("cloud.dropbox.tokenExpiry", "0");
+
+// Nextcloud integration
+pref("cloud.nextcloud.serverUrl", "");
+pref("cloud.nextcloud.username", "");
+pref("cloud.nextcloud.appPassword", "");
+
+// Box integration
+pref("cloud.box.clientId", "");
+pref("cloud.box.clientSecret", "");
+pref("cloud.box.refreshToken", "");
+pref("cloud.box.accessToken", "");
+pref("cloud.box.tokenExpiry", "0");
+
+// OneDrive integration
+pref("cloud.onedrive.clientId", "");
+pref("cloud.onedrive.siteId", "");
+pref("cloud.onedrive.refreshToken", "");
+pref("cloud.onedrive.accessToken", "");
+pref("cloud.onedrive.tokenExpiry", "0");
+
+// Cloud provider selection
+pref("cloud.activeProvider", "google");

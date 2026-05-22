@@ -12,6 +12,12 @@ import {
   GitStatusResult,
   FileGitStatus,
 } from "./types";
+import {
+  isDocxFile,
+  isDocFile,
+  convertDocxToMarkdown,
+} from "../../docxConverter";
+import { ChatContextManager } from "../context/contextManager";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -533,10 +539,18 @@ async function _doRefreshWorkspaceSidebar(
             arrowEl.textContent = isCollapsed ? "\u25BE" : "\u25B8";
           });
 
-          dirRow.addEventListener("contextmenu", (e) => {
+          dirRow.addEventListener("contextmenu", (e: MouseEvent) => {
             e.preventDefault();
             e.stopPropagation();
-            showFolderInlineMenu(doc, dirRow, entry, sidebar, callbacks);
+            showFolderDropdown(
+              doc,
+              dirRow,
+              e.currentTarget as HTMLElement,
+              entry,
+              sidebar,
+              callbacks,
+              { clientX: e.clientX, clientY: e.clientY },
+            );
           });
 
           const menuBtn = createSmallActionBtn(
@@ -554,13 +568,13 @@ async function _doRefreshWorkspaceSidebar(
               );
             },
           );
-          menuBtn.style.opacity = "0";
+          menuBtn.style.opacity = "0.4";
           menuBtn.style.transition = "opacity 0.1s";
           dirRow.addEventListener("mouseenter", () => {
             menuBtn.style.opacity = "1";
           });
           dirRow.addEventListener("mouseleave", () => {
-            menuBtn.style.opacity = "0";
+            menuBtn.style.opacity = "0.4";
           });
           dirRow.appendChild(menuBtn);
 
@@ -584,10 +598,18 @@ async function _doRefreshWorkspaceSidebar(
             callbacks.onFileClick(entry);
           });
 
-          row.addEventListener("contextmenu", (e) => {
+          row.addEventListener("contextmenu", (e: MouseEvent) => {
             e.preventDefault();
             e.stopPropagation();
-            showEntryContextMenu(doc, row, entry, callbacks, sidebar);
+            showEntryDropdown(
+              doc,
+              row,
+              e.currentTarget as HTMLElement,
+              entry,
+              sidebar,
+              callbacks,
+              { clientX: e.clientX, clientY: e.clientY },
+            );
           });
 
           const menuBtn = createSmallActionBtn(
@@ -598,13 +620,13 @@ async function _doRefreshWorkspaceSidebar(
               showEntryDropdown(doc, row, menuBtn, entry, sidebar, callbacks);
             },
           );
-          menuBtn.style.opacity = "0";
+          menuBtn.style.opacity = "0.4";
           menuBtn.style.transition = "opacity 0.1s";
           row.addEventListener("mouseenter", () => {
             menuBtn.style.opacity = "1";
           });
           row.addEventListener("mouseleave", () => {
-            menuBtn.style.opacity = "0";
+            menuBtn.style.opacity = "0.4";
           });
           row.appendChild(menuBtn);
 
@@ -1071,6 +1093,7 @@ function createFolderRow(
   depth: number,
 ): HTMLElement {
   const row = doc.createElement("div");
+  row.setAttribute("tabindex", "0");
   row.style.cssText = `
     display: flex;
     align-items: center;
@@ -1119,6 +1142,7 @@ function createFileRowWithIndent(
   depth: number,
 ): HTMLElement {
   const row = doc.createElement("div");
+  row.setAttribute("tabindex", "0");
   row.style.cssText = `
     display: flex;
     align-items: center;
@@ -1360,83 +1384,14 @@ export function createIconButton(
   return btn;
 }
 
-function showInlineActionRow(
-  doc: Document,
-  row: HTMLElement,
-  items: { text: string; action: () => void; danger?: boolean }[],
-): void {
-  const existing = doc.querySelector("[data-workspace-inline-menu]");
-  if (existing) existing.remove();
-
-  const menu = doc.createElement("div");
-  menu.setAttribute("data-workspace-inline-menu", "true");
-  menu.style.cssText = `
-    display: flex;
-    gap: 4px;
-    padding: 4px 8px 4px 28px;
-    border-bottom: 1px solid var(--border-primary);
-    background: var(--background-secondary);
-  `;
-
-  for (const item of items) {
-    const btn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-    btn.textContent = item.text;
-    btn.style.cssText = `
-      padding: 2px 10px;
-      border: 1px solid var(--border-primary);
-      border-radius: 4px;
-      background: var(--background-primary);
-      color: ${item.danger ? "#ef5350" : "var(--text-primary)"};
-      cursor: pointer;
-      font-size: 11px;
-      line-height: 18px;
-    `;
-    btn.addEventListener("click", () => {
-      menu.remove();
-      item.action();
-    });
-    menu.appendChild(btn);
-  }
-
-  menu.addEventListener("contextmenu", (e) => e.preventDefault());
-
-  if (row.parentElement) {
-    row.parentElement.insertBefore(menu, row.nextSibling);
-  }
-
-  const closeListener = (e: Event) => {
-    if (!menu.contains(e.target as Node)) {
-      menu.remove();
-      doc.removeEventListener("click", closeListener);
-    }
-  };
-  setTimeout(() => doc.addEventListener("click", closeListener), 0);
-}
-
-function showEntryContextMenu(
-  doc: Document,
-  row: HTMLElement,
-  entry: WorkspaceFileEntry,
-  callbacks: WorkspaceSidebarCallbacks,
-  _sidebar?: HTMLElement,
-): void {
-  showInlineActionRow(doc, row, [
-    { text: "Rename...", action: () => callbacks.onFileRename(entry) },
-    {
-      text: "Delete",
-      action: () => callbacks.onFileDelete(entry),
-      danger: true,
-    },
-  ]);
-}
-
 function showEntryDropdown(
   doc: Document,
   row: HTMLElement,
-  _anchor: HTMLElement,
+  anchor: HTMLElement,
   entry: WorkspaceFileEntry,
   sidebar: HTMLElement,
   callbacks: WorkspaceSidebarCallbacks,
+  cursor?: { clientX: number; clientY: number },
 ): void {
   const existing = doc.getElementById("workspace-file-dropdown");
   if (existing) {
@@ -1447,60 +1402,152 @@ function showEntryDropdown(
   const menu = doc.createElement("div");
   menu.id = "workspace-file-dropdown";
   menu.style.cssText = `
-    display: flex;
-    gap: 4px;
-    padding: 4px 8px 4px 28px;
-    border-bottom: 1px solid var(--border-primary);
+    position: fixed;
+    z-index: 99999;
+    min-width: 180px;
+    padding: 6px 0;
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
     background: var(--background-secondary);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    display: flex;
+    flex-direction: column;
   `;
 
-  const renameBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-  renameBtn.textContent = "Rename...";
-  renameBtn.style.cssText = `
-    padding: 2px 10px;
-    border: 1px solid var(--border-primary);
-    border-radius: 4px;
-    background: var(--background-primary);
-    color: var(--text-primary);
-    cursor: pointer;
-    font-size: 11px;
-    line-height: 18px;
-  `;
-  renameBtn.addEventListener("click", () => {
-    menu.remove();
-    callbacks.onFileRename(entry);
+  if (cursor) {
+    menu.style.left = `${cursor.clientX}px`;
+    menu.style.top = `${cursor.clientY}px`;
+  } else {
+    const rect = anchor.getBoundingClientRect();
+    menu.style.left = `${rect.left}px`;
+    menu.style.top = `${rect.bottom + 4}px`;
+  }
+
+  const addMenuItem = (
+    label: string,
+    onClick: () => void,
+    opts?: { danger?: boolean; disabled?: boolean },
+  ) => {
+    const item = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    item.textContent = label;
+    item.style.cssText = `
+      padding: 8px 16px;
+      font-size: 12px;
+      color: ${opts?.danger ? "#ef5350" : opts?.disabled ? "var(--text-tertiary)" : "var(--text-primary)"};
+      cursor: ${opts?.disabled ? "default" : "pointer"};
+      white-space: nowrap;
+      transition: background 0.1s;
+    `;
+    if (!opts?.disabled) {
+      item.addEventListener("mouseenter", () => {
+        item.style.backgroundColor =
+          "var(--background-hover, rgba(0,0,0,0.05))";
+      });
+      item.addEventListener("mouseleave", () => {
+        item.style.backgroundColor = "transparent";
+      });
+      item.addEventListener("click", () => {
+        menu.remove();
+        onClick();
+      });
+    }
+    menu.appendChild(item);
+  };
+
+  const addSeparator = () => {
+    const sep = doc.createElement("div");
+    sep.style.cssText =
+      "height: 1px; background: var(--border-primary); margin: 4px 0;";
+    menu.appendChild(sep);
+  };
+
+  addMenuItem("Rename", () => callbacks.onFileRename(entry));
+  addMenuItem("Copy", async () => {
+    try {
+      const s = getWorkspaceStore();
+      const p = PathUtils.join(s.workspaceDir, entry.path);
+      const d = await IOUtils.read(p);
+      await navigator.clipboard?.writeText(new TextDecoder().decode(d));
+    } catch (e) {
+      Zotero.debug(`[seerai] Copy failed: ${e}`);
+    }
   });
-  menu.appendChild(renameBtn);
+  addMenuItem("Clone", async () => {
+    try {
+      const s = getWorkspaceStore();
+      const p = PathUtils.join(s.workspaceDir, entry.path);
+      const d = await IOUtils.read(p);
+      const c = new TextDecoder().decode(d);
+      const dot = entry.path.lastIndexOf(".");
+      const np =
+        dot > 0
+          ? entry.path.slice(0, dot) + " copy" + entry.path.slice(dot)
+          : entry.path + " copy";
+      await s.writeFile(np, c, `Cloned from ${entry.path}`);
+      await refreshWorkspaceSidebar(sidebar, callbacks);
+    } catch (e) {
+      Zotero.debug(`[seerai] Clone failed: ${e}`);
+    }
+  });
+  addMenuItem("Add to Context", async () => {
+    try {
+      ChatContextManager.getInstance().addItem(
+        `workspace-file-${entry.path}`,
+        "file",
+        entry.name,
+        "toolbar",
+        { workspacePath: entry.path },
+      );
+    } catch (e) {
+      Zotero.debug(`[seerai] Add to context failed: ${e}`);
+    }
+  });
 
-  const deleteBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-  deleteBtn.textContent = "Delete";
-  deleteBtn.style.cssText = `
-    padding: 2px 10px;
-    border: 1px solid var(--border-primary);
-    border-radius: 4px;
-    background: var(--background-primary);
-    color: #ef5350;
-    cursor: pointer;
-    font-size: 11px;
-    line-height: 18px;
-  `;
-  deleteBtn.addEventListener("click", async () => {
-    if (
-      !doc.defaultView?.confirm(
-        `Delete "${entry.path}"? This cannot be undone.`,
+  if (isDocxFile(entry.path)) {
+    addMenuItem("Convert to Markdown", async () => {
+      await convertWorkspaceDocxToMd(doc, entry);
+    });
+  } else if (isDocFile(entry.path)) {
+    addMenuItem(".doc not supported", () => {}, { disabled: true });
+  }
+
+  addSeparator();
+  addMenuItem(
+    "Delete",
+    async () => {
+      if (
+        !doc.defaultView?.confirm(
+          `Delete "${entry.path}"? This cannot be undone.`,
+        )
       )
-    )
-      return;
-    menu.remove();
-    await getWorkspaceStore().deleteFile(entry.path);
-    await refreshWorkspaceSidebar(sidebar, callbacks);
-  });
-  menu.appendChild(deleteBtn);
+        return;
+      await getWorkspaceStore().deleteFile(entry.path);
+      await refreshWorkspaceSidebar(sidebar, callbacks);
+    },
+    { danger: true },
+  );
 
   menu.addEventListener("contextmenu", (e) => e.preventDefault());
 
-  if (row.parentElement) {
-    row.parentElement.insertBefore(menu, row.nextSibling);
+  sidebar.appendChild(menu);
+
+  const win = doc.defaultView || { innerWidth: 1200, innerHeight: 800 };
+  const mr = menu.getBoundingClientRect();
+  if (mr.right > win.innerWidth) {
+    if (cursor) {
+      menu.style.left = `${Math.max(0, cursor.clientX - mr.width)}px`;
+    } else {
+      const r = anchor.getBoundingClientRect();
+      menu.style.left = `${Math.max(0, r.right - mr.width)}px`;
+    }
+  }
+  if (mr.bottom > win.innerHeight) {
+    if (cursor) {
+      menu.style.top = `${Math.max(0, cursor.clientY - mr.height)}px`;
+    } else {
+      const r = anchor.getBoundingClientRect();
+      menu.style.top = `${Math.max(0, r.top - mr.height)}px`;
+    }
   }
 
   const docListener = (e: Event) => {
@@ -1512,29 +1559,51 @@ function showEntryDropdown(
   setTimeout(() => doc.addEventListener("click", docListener), 0);
 }
 
-function showFolderInlineMenu(
+async function convertWorkspaceDocxToMd(
   doc: Document,
-  row: HTMLElement,
   entry: WorkspaceFileEntry,
-  sidebar: HTMLElement,
-  callbacks: WorkspaceSidebarCallbacks,
-): void {
-  showInlineActionRow(doc, row, [
-    {
-      text: "Delete",
-      action: async () => {
-        if (
-          !doc.defaultView?.confirm(
-            `Delete folder "${entry.path}" and all its contents? This cannot be undone.`,
-          )
-        )
-          return;
-        await getWorkspaceStore().deleteFolder(entry.path);
-        await refreshWorkspaceSidebar(sidebar, callbacks);
-      },
-      danger: true,
-    },
-  ]);
+): Promise<void> {
+  try {
+    const store = getWorkspaceStore();
+    const fileAbsPath = PathUtils.join(store.workspaceDir, entry.path);
+    const raw = await Zotero.File.getBinaryContentsAsync(fileAbsPath);
+    const arrayBuffer = raw as unknown as ArrayBuffer;
+    const { markdown, images, warnings } =
+      await convertDocxToMarkdown(arrayBuffer);
+    const baseName = entry.path.replace(/\.docx$/i, "");
+    const mdFileName = baseName + ".md";
+
+    await store.writeFile(
+      mdFileName,
+      markdown,
+      `Converted from ${entry.path}`,
+      "user",
+    );
+
+    for (const img of images) {
+      const absPath = PathUtils.join(store.workspaceDir, img.path);
+      const lastSlash = absPath.lastIndexOf("/");
+      if (lastSlash > 0) {
+        try {
+          await IOUtils.makeDirectory(absPath.substring(0, lastSlash), {
+            createAncestors: true,
+          });
+        } catch {
+          // directory may already exist
+        }
+      }
+      await IOUtils.write(absPath, img.bytes);
+    }
+
+    if (warnings.length > 0) {
+      Zotero.debug(`[seerai] DOCX conversion warnings: ${warnings.join(", ")}`);
+    }
+    Zotero.debug(
+      `[seerai] Converted ${entry.path} to ${mdFileName} with ${images.length} images`,
+    );
+  } catch (e) {
+    Zotero.debug(`[seerai] Workspace DOCX conversion failed: ${e}`);
+  }
 }
 
 function showFolderDropdown(
@@ -1544,6 +1613,7 @@ function showFolderDropdown(
   entry: WorkspaceFileEntry,
   sidebar: HTMLElement,
   callbacks: WorkspaceSidebarCallbacks,
+  cursor?: { clientX: number; clientY: number },
 ): void {
   const existing = doc.getElementById("workspace-folder-dropdown");
   if (existing) {
@@ -1554,42 +1624,98 @@ function showFolderDropdown(
   const menu = doc.createElement("div");
   menu.id = "workspace-folder-dropdown";
   menu.style.cssText = `
-    display: flex;
-    gap: 4px;
-    padding: 4px 8px 4px 28px;
-    border-bottom: 1px solid var(--border-primary);
+    position: fixed;
+    z-index: 99999;
+    min-width: 180px;
+    padding: 6px 0;
+    border: 1px solid var(--border-primary);
+    border-radius: 8px;
     background: var(--background-secondary);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    display: flex;
+    flex-direction: column;
   `;
 
-  const deleteBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-  deleteBtn.textContent = "Delete Folder";
-  deleteBtn.style.cssText = `
-    padding: 2px 10px;
-    border: 1px solid var(--border-primary);
-    border-radius: 4px;
-    background: var(--background-primary);
-    color: #ef5350;
-    cursor: pointer;
-    font-size: 11px;
-    line-height: 18px;
-  `;
-  deleteBtn.addEventListener("click", async () => {
-    if (
-      !doc.defaultView?.confirm(
-        `Delete folder "${entry.path}" and all its contents? This cannot be undone.`,
+  if (cursor) {
+    menu.style.left = `${cursor.clientX}px`;
+    menu.style.top = `${cursor.clientY}px`;
+  } else {
+    const rect = _anchor.getBoundingClientRect();
+    menu.style.left = `${rect.left}px`;
+    menu.style.top = `${rect.bottom + 4}px`;
+  }
+
+  const addMenuItem = (
+    label: string,
+    onClick: () => void,
+    opts?: { danger?: boolean },
+  ) => {
+    const item = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    item.textContent = label;
+    item.style.cssText = `
+      padding: 8px 16px;
+      font-size: 12px;
+      color: ${opts?.danger ? "#ef5350" : "var(--text-primary)"};
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.1s;
+    `;
+    item.addEventListener("mouseenter", () => {
+      item.style.backgroundColor = "var(--background-hover, rgba(0,0,0,0.05))";
+    });
+    item.addEventListener("mouseleave", () => {
+      item.style.backgroundColor = "transparent";
+    });
+    item.addEventListener("click", () => {
+      menu.remove();
+      onClick();
+    });
+    menu.appendChild(item);
+  };
+
+  addMenuItem("Rename", () => callbacks.onFileRename(entry));
+
+  const sep = doc.createElement("div");
+  sep.style.cssText =
+    "height: 1px; background: var(--border-primary); margin: 4px 0;";
+  menu.appendChild(sep);
+
+  addMenuItem(
+    "Delete Folder",
+    async () => {
+      if (
+        !doc.defaultView?.confirm(
+          `Delete folder "${entry.path}" and all its contents? This cannot be undone.`,
+        )
       )
-    )
-      return;
-    menu.remove();
-    await getWorkspaceStore().deleteFolder(entry.path);
-    await refreshWorkspaceSidebar(sidebar, callbacks);
-  });
-  menu.appendChild(deleteBtn);
+        return;
+      await getWorkspaceStore().deleteFolder(entry.path);
+      await refreshWorkspaceSidebar(sidebar, callbacks);
+    },
+    { danger: true },
+  );
 
   menu.addEventListener("contextmenu", (e) => e.preventDefault());
 
-  if (row.parentElement) {
-    row.parentElement.insertBefore(menu, row.nextSibling);
+  sidebar.appendChild(menu);
+
+  const win = doc.defaultView || { innerWidth: 1200, innerHeight: 800 };
+  const mr = menu.getBoundingClientRect();
+  if (mr.right > win.innerWidth) {
+    if (cursor) {
+      menu.style.left = `${Math.max(0, cursor.clientX - mr.width)}px`;
+    } else {
+      const r = _anchor.getBoundingClientRect();
+      menu.style.left = `${Math.max(0, r.right - mr.width)}px`;
+    }
+  }
+  if (mr.bottom > win.innerHeight) {
+    if (cursor) {
+      menu.style.top = `${Math.max(0, cursor.clientY - mr.height)}px`;
+    } else {
+      const r = _anchor.getBoundingClientRect();
+      menu.style.top = `${Math.max(0, r.top - mr.height)}px`;
+    }
   }
 
   const docListener = (e: Event) => {

@@ -14,6 +14,7 @@ import {
   resetChatStateManager,
   ChatStateManager,
 } from "./chat/stateManager";
+import { wireCodePreviewButtons } from "./chat/ui/messageRenderer";
 import {
   SelectedItem,
   SelectedNote,
@@ -38,6 +39,7 @@ import { getMessageStore } from "./chat/messageStore";
 import {
   createImageContentParts,
   countImageAttachments,
+  stripBase64Data,
 } from "./chat/imageUtils";
 import { getTableStore } from "./chat/tableStore";
 import { advancedSearch } from "./searchUtils";
@@ -102,8 +104,16 @@ import {
   createRAGProgressUI,
 } from "./chat/ui/messageRenderer";
 import { ChatContextManager } from "./chat/context/contextManager";
+import { convertDocxToMarkdown } from "./docxConverter";
 import { createContextChipsArea } from "./chat/context/contextUI";
 import { ContextItem, ContextItemType } from "./chat/context/contextTypes";
+import {
+  showDriveModal,
+  loadDriveContextForChat,
+  inheritAndLoadDriveContext,
+  clearDriveContextForChat,
+  refreshDriveContextForChat,
+} from "./drive";
 import {
   handleAgenticChat,
   isAgenticModeEnabled,
@@ -132,6 +142,7 @@ import {
 } from "./chat/workspace";
 import { getWorkspaceStore } from "./chat/workspace/store";
 import { WORKSPACE_SYSTEM_PROMPT } from "./chat/workspace/tools";
+import { createCloudTabContent } from "./cloud/cloudTab";
 
 // Debounce timer for autocomplete
 const autocompleteTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1605,23 +1616,51 @@ export class Assistant {
           );
         }
       } else if (item.type === "file") {
-        // Uploaded files: include extracted content as passthrough
         const filename =
           (item.metadata?.filename as string) || item.displayName;
+        const workspacePath = item.metadata?.workspacePath as
+          | string
+          | undefined;
+
+        let resolvedContent: string | undefined;
+        if (workspacePath) {
+          try {
+            const store = getWorkspaceStore();
+            const absPath = PathUtils.join(store.workspaceDir, workspacePath);
+            if (absPath.toLowerCase().endsWith(".docx")) {
+              const raw = await Zotero.File.getBinaryContentsAsync(absPath);
+              const ab = raw as unknown as ArrayBuffer;
+              const result = await convertDocxToMarkdown(ab);
+              resolvedContent = stripBase64Data(result.markdown);
+            } else {
+              const raw = await IOUtils.read(absPath);
+              resolvedContent = stripBase64Data(new TextDecoder().decode(raw));
+            }
+          } catch (e) {
+            Zotero.debug(
+              `[seerai] Failed to resolve workspace file for passthrough: ${e}`,
+            );
+          }
+        }
+
+        const category = item.metadata?.fileCategory as string | undefined;
         const extractedContent = item.metadata?.extractedContent as
           | string
           | undefined;
-        const category = item.metadata?.fileCategory as string | undefined;
         const extractionError = item.metadata?.extractionError as
           | string
           | undefined;
 
+        const safeContent =
+          resolvedContent ??
+          (extractedContent ? stripBase64Data(extractedContent) : undefined);
+
         let filePart = `\n--- File: ${filename} ---`;
-        if (extractedContent && extractedContent.length > 0) {
+        if (safeContent && safeContent.length > 0) {
           if (category === "audio") {
-            filePart += `\n[Transcribed audio: ${filename}]\n${extractedContent}`;
+            filePart += `\n[Transcribed audio: ${filename}]\n${safeContent}`;
           } else {
-            filePart += `\n${extractedContent}`;
+            filePart += `\n${safeContent}`;
           }
         } else if (extractionError) {
           filePart += `\n(${extractionError})`;
@@ -2097,7 +2136,7 @@ export class Assistant {
         if (tableConfig) {
           // Header + column definitions
           const columnNames = tableConfig.columns
-            .map((c: any) => c.name || c.title || c.id)
+            .map((c: any) => c.name || c.id)
             .join(", ");
           total += ChatStateManager.countTokens(
             `Table: ${tableConfig.name}\nColumns: ${columnNames}\nTotal papers: ${tableConfig.addedPaperIds.length}`,
@@ -2145,10 +2184,51 @@ export class Assistant {
           }
         }
       } else if (item.type === "file") {
-        // Uploaded file — token estimate was computed at upload time and stored in metadata
-        const fileTokens = item.metadata?.estimatedTokens as number | undefined;
-        if (fileTokens && fileTokens > 0) {
-          total += fileTokens;
+        const workspacePath = item.metadata?.workspacePath as
+          | string
+          | undefined;
+        if (workspacePath) {
+          try {
+            const store = getWorkspaceStore();
+            const absPath = PathUtils.join(store.workspaceDir, workspacePath);
+            if (absPath.toLowerCase().endsWith(".docx")) {
+              const raw = await Zotero.File.getBinaryContentsAsync(absPath);
+              const ab = raw as unknown as ArrayBuffer;
+              const result = await convertDocxToMarkdown(ab);
+              const safe = stripBase64Data(result.markdown);
+              total += ChatStateManager.countTokens(safe);
+            } else {
+              const raw = await IOUtils.read(absPath);
+              const txt = stripBase64Data(new TextDecoder().decode(raw));
+              total += ChatStateManager.countTokens(txt);
+            }
+          } catch (e) {
+            Zotero.debug(
+              `[seerai] Failed to estimate tokens for workspace file: ${e}`,
+            );
+            total += 100; // rough fallback
+          }
+        } else {
+          // Uploaded file — token estimate was computed at upload time and stored in metadata
+          const fileTokens = item.metadata?.estimatedTokens as
+            | number
+            | undefined;
+          if (fileTokens && fileTokens > 0) {
+            total += fileTokens;
+          } else {
+            // Fallback: compute from extractedContent or charCount
+            const content = item.metadata?.extractedContent as
+              | string
+              | undefined;
+            if (content) {
+              total += ChatStateManager.countTokens(content);
+            } else {
+              const charCount = item.metadata?.charCount as number | undefined;
+              if (charCount) {
+                total += Math.ceil(charCount / 4);
+              }
+            }
+          }
         }
       } else if (
         item.type === "collection" ||
@@ -2344,6 +2424,7 @@ export class Assistant {
     getWorkspaceStore().switchChatContext(newId, folder);
     conversationMessages = [];
     resetChatStateManager();
+    ChatContextManager.getInstance().clearAll();
     await store.setContinuation(undefined);
 
     // Initial history entry for the new chat
@@ -2358,11 +2439,18 @@ export class Assistant {
       await store.moveConversationToFolder(newId, folder);
     }
 
+    // Inherit drive context from previous chat
+    if (currentId && currentId !== newId) {
+      await inheritAndLoadDriveContext(currentId, newId);
+    }
+
     await this.loadHistory();
 
     if (currentContainer && currentItem) {
       this.renderInterface(currentContainer, currentItem);
     }
+
+    return newId;
   }
 
   public static async loadChat(id: string) {
@@ -2376,6 +2464,9 @@ export class Assistant {
         stateManager.getOptions(),
       );
     }
+
+    // Clear context for the new chat
+    ChatContextManager.getInstance().clearAll();
 
     store.setConversationId(id);
     const history = await store.getHistory();
@@ -2393,6 +2484,9 @@ export class Assistant {
       stateManager.fromJSON(savedState);
     }
 
+    // Load drive context files for this chat
+    await loadDriveContextForChat(id);
+
     if (currentContainer && currentItem) {
       this.renderInterface(currentContainer, currentItem);
     }
@@ -2401,6 +2495,8 @@ export class Assistant {
   public static async createNewChatInFolder(folder: string) {
     const store = getMessageStore();
     const newId = `chat_${Date.now()}`;
+
+    const currentId = store.getConversationId();
 
     if (conversationMessages.length > 0) {
       const stateManager = getChatStateManager();
@@ -2414,6 +2510,7 @@ export class Assistant {
     getWorkspaceStore().switchChatContext(newId, folder);
     conversationMessages = [];
     resetChatStateManager();
+    ChatContextManager.getInstance().clearAll();
     await store.setContinuation(undefined);
 
     await store.updateConversationMetadata({
@@ -2424,6 +2521,11 @@ export class Assistant {
     });
 
     await store.moveConversationToFolder(newId, folder);
+
+    // Inherit drive context from previous chat
+    if (currentId && currentId !== newId) {
+      await inheritAndLoadDriveContext(currentId, newId);
+    }
 
     await this.loadHistory();
 
@@ -2438,6 +2540,7 @@ export class Assistant {
     const wasCurrentChat = store.getConversationId() === id;
 
     await store.deleteConversation(id);
+    await clearDriveContextForChat(id);
 
     await this.loadHistory();
 
@@ -2682,6 +2785,9 @@ export class Assistant {
               stateManager,
             );
             tabContent.appendChild(chatTabContent);
+          } else if (activeTab === "cloud") {
+            const cloudTabContent = await createCloudTabContent(doc, item);
+            tabContent.appendChild(cloudTabContent);
           } else if (activeTab === "table") {
             const tableTabContent = await this.createTableTabContent(doc, item);
             tabContent.appendChild(tableTabContent);
@@ -2767,6 +2873,7 @@ export class Assistant {
       { id: "chat", label: "Chat", icon: "💬" },
       { id: "table", label: "Table", icon: "📊" },
       { id: "search", label: "Search", icon: "🔍" },
+      { id: "cloud", label: "Cloud", icon: "☁️" },
     ];
 
     tabs.forEach((tab) => {
@@ -2800,9 +2907,9 @@ export class Assistant {
           {
             type: "click",
             listener: () => {
-              if (activeTab !== tab.id) {
+              if (activeTab !== tab.id && currentItem) {
                 activeTab = tab.id;
-                this.renderInterface(container, item);
+                this.renderInterface(container, currentItem);
               }
             },
           },
@@ -4123,26 +4230,6 @@ export class Assistant {
         setTimeout(() => Assistant.loadChat(newId), 100);
       } catch (e) {
         Zotero.debug(`[seerai] Clone failed: ${e}`);
-      }
-    });
-
-    // Download as JSON
-    addItem("Download", async () => {
-      try {
-        const exported = await store.exportConversation(conv.id);
-        const fileName = `${conv.title || "chat"}.json`.replace(
-          /[^a-zA-Z0-9._-]/g,
-          "_",
-        );
-        const downloadDir = PathUtils.join(
-          (Zotero.Prefs as any).get("browser.download.dir") ||
-            PathUtils.join(Zotero.DataDirectory.dir, "downloads"),
-          fileName,
-        );
-        const encoder = new TextEncoder();
-        await IOUtils.write(downloadDir, encoder.encode(exported));
-      } catch (e) {
-        Zotero.debug(`[seerai] Download failed: ${e}`);
       }
     });
 
@@ -11990,6 +12077,31 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       ],
     });
     toolbar.appendChild(copyAllBtn);
+
+    // Export to Workspace button
+    const exportWsBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
+      properties: { className: "table-btn", innerText: "📁 Workspace" },
+      attributes: { title: "Export table to workspace" },
+      styles: {
+        padding: "6px 10px",
+        fontSize: "11px",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "4px",
+        backgroundColor: "var(--background-primary)",
+        color: "var(--text-primary)",
+        cursor: "pointer",
+      },
+      listeners: [
+        {
+          type: "click",
+          listener: async () => {
+            await this.showExportToWorkspacePopup(doc, exportWsBtn);
+          },
+        },
+      ],
+    });
+    toolbar.appendChild(exportWsBtn);
 
     // History button
     const historyBtn = ztoolkit.UI.createElement(doc, "button", {
@@ -22642,6 +22754,215 @@ ${lengthConstraint}`;
   }
 
   /**
+   * Show popup near the button asking user to pick MD or CSV, then export table to workspace
+   */
+  private static async showExportToWorkspacePopup(
+    doc: Document,
+    anchorBtn: HTMLElement,
+  ): Promise<void> {
+    const existing = doc.getElementById("export-workspace-popup");
+    if (existing) {
+      existing.remove();
+      return;
+    }
+
+    const tableData = await this.loadTableData();
+    if (tableData.rows.length === 0) {
+      doc.defaultView?.alert("No papers in table to export.");
+      return;
+    }
+
+    const columns =
+      currentTableConfig?.columns.filter((c) => c.visible) ||
+      defaultColumns.filter((c) => c.visible);
+
+    const popup = ztoolkit.UI.createElement(doc, "div", {
+      properties: { id: "export-workspace-popup" },
+      styles: {
+        position: "fixed",
+        backgroundColor: "var(--background-primary)",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "8px",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+        padding: "16px",
+        zIndex: "10000",
+        minWidth: "220px",
+      },
+    });
+
+    const rect = anchorBtn.getBoundingClientRect();
+    popup.style.top = `${rect.bottom + 4}px`;
+    popup.style.left = `${rect.left}px`;
+
+    const header = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        fontSize: "12px",
+        fontWeight: "600",
+        marginBottom: "12px",
+        color: "var(--text-primary)",
+      },
+    });
+    header.textContent = `Export ${tableData.rows.length} rows as:`;
+    popup.appendChild(header);
+
+    const doExport = async (format: "md" | "csv") => {
+      popup.remove();
+      const tableName = currentTableConfig?.name || "Untitled Workspace";
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const safeName = tableName.replace(/[^a-zA-Z0-9_\- ]/g, "_");
+      const filename = `tables/${safeName}_${timestamp}.${format}`;
+
+      const content =
+        format === "md"
+          ? this.buildTableMarkdown(tableData, columns, tableName)
+          : this.buildTableCSV(tableData, columns);
+
+      try {
+        const store = getWorkspaceStore();
+        await store.writeFile(filename, content);
+        const progressWindow = new Zotero.ProgressWindow({
+          closeOnClick: true,
+        });
+        progressWindow.changeHeadline("Exported to Workspace");
+        progressWindow.addDescription(`Table saved to workspace → ${filename}`);
+        progressWindow.show();
+        progressWindow.startCloseTimer(3000);
+      } catch (e) {
+        Zotero.debug(`[seerai] Error exporting table to workspace: ${e}`);
+        doc.defaultView?.alert(`Failed to export table: ${e}`);
+      }
+    };
+
+    const createBtn = (label: string, format: "md" | "csv"): HTMLElement => {
+      const btn = ztoolkit.UI.createElement(doc, "button", {
+        namespace: "html",
+        properties: { innerText: label },
+        styles: {
+          display: "block",
+          width: "100%",
+          padding: "8px 16px",
+          fontSize: "12px",
+          fontWeight: "500",
+          border: "1px solid var(--border-primary)",
+          borderRadius: "4px",
+          backgroundColor: "var(--background-primary)",
+          color: "var(--text-primary)",
+          cursor: "pointer",
+          textAlign: "left",
+          marginBottom: "4px",
+        },
+        listeners: [
+          {
+            type: "click",
+            listener: () => doExport(format),
+          },
+        ],
+      });
+      return btn;
+    };
+
+    popup.appendChild(createBtn("Markdown (.md)", "md"));
+    popup.appendChild(createBtn("CSV (.csv)", "csv"));
+
+    if (doc.body) {
+      doc.body.appendChild(popup);
+    } else {
+      doc.documentElement?.appendChild(popup);
+    }
+
+    const closeHandler = (e: Event) => {
+      const target = e.target as Node;
+      if (!popup.contains(target)) {
+        popup.remove();
+        doc.removeEventListener("mousedown", closeHandler);
+      }
+    };
+    setTimeout(() => {
+      doc.addEventListener("mousedown", closeHandler);
+    }, 0);
+  }
+
+  /**
+   * Build a markdown table string from table data
+   */
+  private static buildTableMarkdown(
+    tableData: TableData,
+    columns: TableColumn[],
+    tableName: string,
+  ): string {
+    const lines: string[] = [];
+    lines.push(`# ${tableName}`);
+    lines.push("");
+    lines.push(`Total papers: ${tableData.rows.length}`);
+    lines.push("");
+    lines.push("## References");
+    lines.push("");
+
+    const paperDetails: string[] = [];
+
+    tableData.rows.forEach((row, index) => {
+      const refNum = index + 1;
+      const title = row.data["title"] || "Untitled";
+      const author = row.data["author"] || "Unknown";
+      const year = row.data["year"] || "";
+      const zoteroKey = row.data["zoteroKey"] || "";
+
+      lines.push(
+        `[${refNum}]${zoteroKey ? ` ${zoteroKey} —` : ""} ${author}${year ? `, ${year}` : ""} — ${title}`,
+      );
+
+      let paperSection = `### [${refNum}] ${title}\n`;
+      if (author) paperSection += `**Authors:** ${author}\n`;
+      if (year) paperSection += `**Year:** ${year}\n`;
+      if (row.data["zoteroKey"])
+        paperSection += `**Zotero Key:** ${row.data["zoteroKey"]}\n`;
+      if (row.data["DOI"]) paperSection += `**DOI:** ${row.data["DOI"]}\n`;
+
+      columns.forEach((col) => {
+        if (["title", "author", "year", "zoteroKey", "DOI"].includes(col.id))
+          return;
+        const value = row.data[col.id];
+        if (value) {
+          paperSection += `**${col.name}:** ${value}\n`;
+        }
+      });
+
+      paperDetails.push(paperSection);
+    });
+
+    lines.push("");
+    lines.push("## Detailed Data");
+    lines.push("");
+    lines.push(...paperDetails);
+
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  /**
+   * Build a CSV string from table data
+   */
+  private static buildTableCSV(
+    tableData: TableData,
+    columns: TableColumn[],
+  ): string {
+    const header = columns
+      .map((c) => `"${(c.name || c.id).replace(/"/g, '""')}"`)
+      .join(",");
+
+    const rows = tableData.rows.map((row) => {
+      return columns
+        .map((col) => {
+          const value = row.data[col.id] || "";
+          return `"${value.replace(/"/g, '""')}"`;
+        })
+        .join(",");
+    });
+
+    return [header, ...rows].join("\n");
+  }
+
+  /**
    * Find existing "Tables" note for a given paper item
    * Returns the note item if found, null otherwise
    */
@@ -25368,21 +25689,126 @@ ${tableRows}  </tbody>
       doc,
       input,
       (value, itemType, itemId, trigger, data) => {
-        // Add to centralized context manager
         const type = itemType as ContextItemType;
-        contextManager.addItem(
-          itemId || value,
-          type,
-          value,
-          "command",
-          data || { itemKey: String(itemId) }, // Store full metadata if available
-        );
+
+        if (type === "workspace") {
+          const wsDir = (data as any)?.workspaceDir as string | undefined;
+          const wsType = (data as any)?.workspaceType as string | undefined;
+          const convId = (data as any)?.conversationId as string | undefined;
+          if (wsDir) {
+            (async () => {
+              try {
+                // 1. Chat history (if chat workspace)
+                if (wsType === "chat" && convId) {
+                  try {
+                    const msgStore = getMessageStore();
+                    const origId = msgStore.getConversationId();
+                    msgStore.setConversationId(convId);
+                    const msgs = await msgStore.loadMessages();
+                    msgStore.setConversationId(origId);
+
+                    if (msgs.length > 0) {
+                      let transcript = `# Chat History: ${value}\n\n`;
+                      for (const m of msgs) {
+                        const role = m.role === "user" ? "User" : "Assistant";
+                        transcript += `## ${role}\n${m.content}\n\n---\n\n`;
+                      }
+                      contextManager.addItem(
+                        `ws-chat-history-${convId}`,
+                        "file",
+                        `Chat: ${value}`,
+                        "command",
+                        {
+                          filename: `${value}.md`,
+                          extractedContent: transcript,
+                          charCount: transcript.length,
+                          estimatedTokens:
+                            ChatStateManager.countTokens(transcript),
+                          fileCategory: "chat_history",
+                        },
+                      );
+                    }
+                  } catch (e) {
+                    Zotero.debug(`[seerai] Error loading chat history: ${e}`);
+                  }
+                }
+
+                // 2. Scan workspace directory and add each file
+                async function scanDir(
+                  dir: string,
+                  relPath: string,
+                ): Promise<void> {
+                  let children: string[];
+                  try {
+                    children = await IOUtils.getChildren(dir);
+                  } catch {
+                    return;
+                  }
+                  for (const fp of children) {
+                    const name = fp.split("/").pop() || "";
+                    if (name.startsWith(".") || name === "node_modules")
+                      continue;
+                    let isDir = false;
+                    try {
+                      isDir = (await IOUtils.stat(fp)).type === "directory";
+                    } catch {
+                      continue;
+                    }
+                    if (isDir) {
+                      await scanDir(fp, relPath ? `${relPath}/${name}` : name);
+                    } else {
+                      const r = relPath ? `${relPath}/${name}` : name;
+                      try {
+                        const bytes = await IOUtils.read(fp);
+                        let content: string;
+                        if (name.toLowerCase().endsWith(".docx")) {
+                          const ab = bytes.buffer.slice(
+                            bytes.byteOffset,
+                            bytes.byteOffset + bytes.byteLength,
+                          ) as ArrayBuffer;
+                          const { markdown } = await convertDocxToMarkdown(ab);
+                          content = markdown;
+                        } else {
+                          content = new TextDecoder().decode(bytes);
+                        }
+                        const safe = stripBase64Data(content);
+                        contextManager.addItem(
+                          `ws-file-${r}`,
+                          "file",
+                          r,
+                          "command",
+                          {
+                            filename: r,
+                            extractedContent: safe,
+                            charCount: safe.length,
+                            estimatedTokens: ChatStateManager.countTokens(safe),
+                            fileCategory: "workspace_file",
+                          },
+                        );
+                      } catch {
+                        /* skip unreadable */
+                      }
+                    }
+                  }
+                }
+                await scanDir(wsDir, "");
+              } catch (e) {
+                Zotero.debug(`[seerai] Workspace expansion failed: ${e}`);
+              }
+            })();
+          }
+        } else {
+          contextManager.addItem(
+            itemId || value,
+            type,
+            value,
+            "command",
+            data || { itemKey: String(itemId) },
+          );
+        }
 
         // Clear the trigger text from input
-        const currentValue = input.value;
-        // Find and remove the trigger pattern from input
-        const cleanedValue = currentValue.replace(/\[[^\]]+\]\s*$/, "").trim();
-        input.value = cleanedValue;
+        input.value = input.value.replace(/\[[^\]]+\]\s*$/, "").trim();
 
         // Trigger next placeholder
         triggerNextPlaceholder(doc, input);
@@ -25394,6 +25820,43 @@ ${tableRows}  </tbody>
     toolbarLeft.appendChild(settingsContainer);
     toolbarLeft.appendChild(promptsContainer);
     toolbarLeft.appendChild(placeholderBtn);
+
+    // ── ☁️ Google Drive Button ──
+    const driveBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
+      properties: {
+        innerText: "\u2601\uFE0F",
+        title: "Google Drive - browse, load to context, import to workspace",
+      },
+      styles: {
+        padding: "0 10px",
+        height: "32px",
+        fontSize: "13px",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "6px",
+        backgroundColor: "var(--background-secondary)",
+        color: "var(--text-secondary)",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      },
+    }) as HTMLButtonElement;
+
+    driveBtn.addEventListener("click", (e: Event) => {
+      e.stopPropagation();
+      Zotero.debug("[seerai] Drive button clicked");
+      const chatId = getMessageStore().getConversationId();
+      if (!chatId) {
+        Zotero.debug("[seerai] Drive button: no chatId, aborting");
+        return;
+      }
+      showDriveModal(doc, driveBtn as HTMLElement, chatId).catch((err) => {
+        Zotero.debug(`[seerai] Drive modal error: ${err}`);
+      });
+    });
+
+    toolbarLeft.appendChild(driveBtn);
 
     // ── 📎 File Upload Button ──
     // Opens a file picker for PDF/audio/text/markdown, adds to context system
@@ -25815,6 +26278,10 @@ ${tableRows}  </tbody>
             `[seerai] File read error for "${filePath}": ${readErr}`,
           );
         }
+
+        // Strip base64-encoded image data from extracted content
+        // This prevents massive context bloat from embedded images in markdown/HTML files
+        extractedContent = stripBase64Data(extractedContent);
 
         // Estimate tokens (~4 chars per token is a common heuristic)
         const charCount = extractedContent.length;
@@ -27245,6 +27712,16 @@ Rules:
     // Reset abort state for a new request
     openAIService.resetAbortState();
 
+    // Auto-refresh drive context files (check for newer versions on Drive)
+    const activeChatId = getMessageStore().getConversationId();
+    if (activeChatId) {
+      try {
+        await refreshDriveContextForChat(activeChatId);
+      } catch (e) {
+        Zotero.debug(`[seerai] Drive refresh error: ${e}`);
+      }
+    }
+
     const text = input.value.trim();
     // Allow sending with just images
     if ((!text && pastedImages.length === 0) || this.isStreaming) return;
@@ -28001,9 +28478,35 @@ Rules:
           // Topic is a user-specified keyword/focus area
           context += `\n\nFocus Topic: "${item.displayName}" - Please consider this topic when answering.`;
         } else if (item.type === "file") {
-          // Uploaded file — content was pre-extracted at upload time and stored in metadata
           const filename =
             (item.metadata?.filename as string) || item.displayName;
+          const workspacePath = item.metadata?.workspacePath as
+            | string
+            | undefined;
+
+          let resolvedContent: string | undefined;
+          if (workspacePath) {
+            try {
+              const store = getWorkspaceStore();
+              const absPath = PathUtils.join(store.workspaceDir, workspacePath);
+              if (absPath.toLowerCase().endsWith(".docx")) {
+                const raw = await Zotero.File.getBinaryContentsAsync(absPath);
+                const ab = raw as unknown as ArrayBuffer;
+                const result = await convertDocxToMarkdown(ab);
+                resolvedContent = stripBase64Data(result.markdown);
+              } else {
+                const raw = await IOUtils.read(absPath);
+                resolvedContent = stripBase64Data(
+                  new TextDecoder().decode(raw),
+                );
+              }
+            } catch (e) {
+              Zotero.debug(
+                `[seerai] Failed to resolve workspace file ${filename}: ${e}`,
+              );
+            }
+          }
+
           const category = item.metadata?.fileCategory as string | undefined;
           const extractedContent = item.metadata?.extractedContent as
             | string
@@ -28013,21 +28516,101 @@ Rules:
             | string
             | undefined;
 
+          const safeContent =
+            resolvedContent ??
+            (extractedContent ? stripBase64Data(extractedContent) : undefined);
+
           context += `\n\n--- File: ${filename} ---`;
 
-          if (extractedContent && extractedContent.length > 0) {
+          if (safeContent && safeContent.length > 0) {
             if (category === "audio") {
-              context += `\n[Transcribed audio: ${filename}]\n${extractedContent}`;
+              context += `\n[Transcribed audio: ${filename}]\n${safeContent}`;
             } else {
-              context += `\n${extractedContent}`;
+              context += `\n${safeContent}`;
             }
             Zotero.debug(
-              `[seerai] File context injected: ${filename} (${charCount ?? extractedContent.length} chars, ${category})`,
+              `[seerai] File context injected: ${filename} (${charCount ?? safeContent?.length ?? 0} chars, ${category})`,
             );
           } else if (extractionError) {
             context += `\n(${extractionError})`;
           } else {
             context += `\n(No text content could be extracted from this file)`;
+          }
+        } else if (item.type === "workspace") {
+          const workspaceDir = item.metadata?.workspaceDir as
+            | string
+            | undefined;
+          const workspaceType = item.metadata?.workspaceType as
+            | string
+            | undefined;
+          const convId = item.metadata?.conversationId as string | undefined;
+
+          context += `\n\n--- Workspace: ${item.displayName}${workspaceType === "chat" && convId ? ` (chat ${convId.slice(0, 8)})` : ""} ---`;
+
+          if (!workspaceDir) {
+            context += `\n(Workspace directory not found)`;
+          } else {
+            try {
+              const files: Array<{ path: string; content: string }> = [];
+
+              async function scanDir(
+                dir: string,
+                relativePath: string,
+              ): Promise<void> {
+                let children: string[];
+                try {
+                  children = await IOUtils.getChildren(dir);
+                } catch {
+                  return;
+                }
+                for (const fullPath of children) {
+                  const name = fullPath.split("/").pop() || "";
+                  if (name.startsWith(".") || name === "node_modules") continue;
+                  let isDir = false;
+                  try {
+                    isDir = (await IOUtils.stat(fullPath)).type === "directory";
+                  } catch {
+                    continue;
+                  }
+                  if (isDir) {
+                    await scanDir(
+                      fullPath,
+                      relativePath ? `${relativePath}/${name}` : name,
+                    );
+                  } else {
+                    const rel = relativePath ? `${relativePath}/${name}` : name;
+                    try {
+                      const bytes = await IOUtils.read(fullPath);
+                      const text = new TextDecoder().decode(bytes);
+                      files.push({ path: rel, content: text });
+                    } catch {
+                      /* skip unreadable */
+                    }
+                  }
+                }
+              }
+
+              await scanDir(workspaceDir, "");
+
+              if (files.length === 0) {
+                context += `\n(No files in this workspace)`;
+              } else {
+                context += `\nFiles: ${files.length}`;
+                for (const file of files) {
+                  const safe = stripBase64Data(file.content);
+                  const maxChars = 50000;
+                  const truncated =
+                    safe.length > maxChars
+                      ? safe.slice(0, maxChars) +
+                        `\n... [truncated, ${safe.length - maxChars} more chars]`
+                      : safe;
+                  context += `\n\n--- Workspace File: ${file.path} ---\n${truncated}`;
+                }
+              }
+            } catch (e) {
+              Zotero.debug(`[seerai] Error reading workspace files: ${e}`);
+              context += `\n(Error reading workspace files)`;
+            }
           }
         }
       }
@@ -28259,7 +28842,7 @@ Current Library/Folder Scope: ${scopeLabel} (Tools will only find items within t
 
 ${context}${webContext}
 
-You are a research agent with direct access to the user's Zotero library, web search, and a file workspace. To help the user, call the tools at your disposal — search for papers, read their content, create tables, manage collections, and work with files. Do not describe what you could do; use the tools to actually do it. When you have fully completed the user's request, call the 'task_complete' tool.
+You are a research agent with direct access to the user's Zotero library, web search, and a file workspace. To help the user, call the tools at your disposal — search for papers, read their content, create tables, manage collections, and work with files. Do not describe what you could do; use the tools to actually do it. When the task is complete, simply provide a text-only response with your final answer — the conversation will end naturally. If you need to explicitly signal completion after tool work, you can call the 'task_complete' tool instead.
 
 ${buildToolPromptSections()}
 ${webContext ? " When using web search results, cite the source URL." : ""}
@@ -29227,6 +29810,7 @@ Note: Context was automatically reduced using stricter semantic search due to si
     mdContainer.setAttribute("data-raw", text);
     mdContainer.innerHTML = parseMarkdown(text);
     contentDiv.appendChild(mdContainer);
+    wireCodePreviewButtons(contentDiv);
 
     // Bind copy button events for code blocks
     const copyBtns = mdContainer.querySelectorAll(".code-copy-btn");

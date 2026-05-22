@@ -7,6 +7,11 @@ import {
 } from "./contextTypes";
 import { Assistant } from "../../assistant";
 import { getTableStore } from "../tableStore";
+import { getMessageStore } from "../messageStore";
+import { removeDriveContextFileItem } from "../../drive/cloudContext";
+import { getWorkspaceStore } from "../workspace/store";
+import { convertDocxToMarkdown } from "../../docxConverter";
+import { stripBase64Data } from "../imageUtils";
 
 /**
  * Creates the unified context chips area element.
@@ -157,7 +162,12 @@ function updateChips(
     chip.style.boxShadow = "0 1px 2px rgba(0,0,0,0.1)";
 
     // Icon + Name
-    const icon = CONTEXT_ICONS[item.type] || "";
+    const icon =
+      item.type === "file" && item.metadata?.driveFileId
+        ? (item.metadata?.providerIcon as string) ||
+          CONTEXT_ICONS[item.type] ||
+          ""
+        : CONTEXT_ICONS[item.type] || "";
     const nameText =
       item.displayName.length > 25
         ? item.displayName.substring(0, 22) + "..."
@@ -210,7 +220,15 @@ function updateChips(
 
     removeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
+      const driveFileId = item.metadata?.driveFileId as string | undefined;
+      const driveProvider = item.metadata?.provider as string | undefined;
       ChatContextManager.getInstance().removeAtIndex(index);
+      if (driveFileId && driveProvider) {
+        const chatId = getMessageStore().getConversationId();
+        if (chatId) {
+          removeDriveContextFileItem(chatId, driveFileId, driveProvider);
+        }
+      }
     });
 
     removeBtn.addEventListener("mouseenter", () => {
@@ -346,9 +364,34 @@ async function copyContextItemsContent(copyBtn: HTMLElement): Promise<void> {
           parts.push(`*Table not found*`);
         }
       } else if (item.type === "file") {
-        // For files, include the pre-extracted content
+        // For files, include the content (lazy-resolve workspace files from disk)
         const filename =
           (item.metadata?.filename as string) || item.displayName;
+        const workspacePath = item.metadata?.workspacePath as
+          | string
+          | undefined;
+
+        let resolvedContent: string | undefined;
+        if (workspacePath) {
+          try {
+            const store = getWorkspaceStore();
+            const absPath = PathUtils.join(store.workspaceDir, workspacePath);
+            if (absPath.toLowerCase().endsWith(".docx")) {
+              const raw = await Zotero.File.getBinaryContentsAsync(absPath);
+              const ab = raw as unknown as ArrayBuffer;
+              const result = await convertDocxToMarkdown(ab);
+              resolvedContent = stripBase64Data(result.markdown);
+            } else {
+              const raw = await IOUtils.read(absPath);
+              resolvedContent = stripBase64Data(new TextDecoder().decode(raw));
+            }
+          } catch (e) {
+            Zotero.debug(
+              `[seerai] Failed to resolve workspace file for copy: ${e}`,
+            );
+          }
+        }
+
         const charCount = item.metadata?.charCount as number | undefined;
         const extractedContent = item.metadata?.extractedContent as
           | string
@@ -358,13 +401,17 @@ async function copyContextItemsContent(copyBtn: HTMLElement): Promise<void> {
           | undefined;
         const category = item.metadata?.fileCategory as string | undefined;
 
-        if (extractedContent && extractedContent.length > 0) {
+        const content =
+          resolvedContent ??
+          (extractedContent ? stripBase64Data(extractedContent) : undefined);
+
+        if (content && content.length > 0) {
           const typeLabel =
             category === "audio" ? "Audio transcription" : "File";
           parts.push(
-            `*${typeLabel}: ${filename} (${charCount ?? extractedContent.length} chars)*\n`,
+            `*${typeLabel}: ${filename} (${charCount ?? content.length} chars)*\n`,
           );
-          parts.push(`### Content:\n${extractedContent}`);
+          parts.push(`### Content:\n${content}`);
         } else {
           parts.push(
             `*File: ${filename} — ${extractionError || "no content extracted"}*`,

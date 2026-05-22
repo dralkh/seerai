@@ -647,6 +647,7 @@ export function createPlaceholderMenuButton(
       ["^", "collection"],
       ["~", "tag"],
       ["$", "table"],
+      ["%", "workspace"],
     ];
 
     for (const [trigger, type] of placeholderTypes) {

@@ -13,6 +13,12 @@ import {
   setPreviewPreference,
   getPreviewPreference,
 } from "../../fileViewer";
+import {
+  isDocxFile,
+  isDocFile,
+  convertDocxToMarkdown,
+} from "../../docxConverter";
+import * as mammoth from "mammoth";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -406,7 +412,7 @@ export class WorkspaceEditorManager {
 
     // ── Unified view mode buttons ──────────────────────────────
     const ext = entry.extension || entry.path.split(".").pop() || "";
-    const canPreview = isRenderableExtension(ext);
+    const canPreview = isRenderableExtension(ext) || ext === "docx";
 
     let previewBtn: HTMLElement | null = null;
     let diffBtn: HTMLElement | null = null;
@@ -443,11 +449,36 @@ export class WorkspaceEditorManager {
     `;
 
     // ── Mode switching logic ───────────────────────────────────
-    const buildPreview = () => {
+    const buildPreview = async () => {
       if (!previewPanel) return;
       previewPanel.innerHTML = "";
-      const renderType = getRenderType(ext);
       const val = textarea.value;
+
+      if (ext === "docx") {
+        try {
+          const store = getWorkspaceStore();
+          const fileAbsPath = PathUtils.join(store.workspaceDir, entry.path);
+          const data = await Zotero.File.getBinaryContentsAsync(fileAbsPath);
+          const { value: html } = await (mammoth as any).convertToHtml({
+            arrayBuffer: data,
+          });
+          const iframe = doc.createElementNS(
+            HTML_NS,
+            "iframe",
+          ) as HTMLIFrameElement;
+          iframe.style.cssText =
+            "width:100%;height:100%;border:none;flex:1 1 0;min-height:0;";
+          iframe.srcdoc = html;
+          previewPanel.style.display = "flex";
+          previewPanel.style.flexDirection = "column";
+          previewPanel.appendChild(iframe);
+          return;
+        } catch (e) {
+          Zotero.debug(`[seerai] DOCX preview failed: ${e}`);
+        }
+      }
+
+      const renderType = getRenderType(ext);
       if (renderType === "image") {
         const noteDiv = doc.createElementNS(HTML_NS, "div") as HTMLElement;
         noteDiv.style.cssText =
@@ -487,7 +518,7 @@ export class WorkspaceEditorManager {
       renderDiffInContainer(doc, diff, entry.path, diffContent!);
     };
 
-    const setViewMode = (mode: "edit" | "preview" | "diff") => {
+    const setViewMode = async (mode: "edit" | "preview" | "diff") => {
       const tab = this.openTabs.get(entry.path);
       if (!tab) return;
       const wasPreview = tab.viewMode === "preview";
@@ -503,7 +534,7 @@ export class WorkspaceEditorManager {
         textarea.style.display = "";
       } else if (mode === "preview") {
         previewPanel!.style.display = "flex";
-        buildPreview();
+        await buildPreview();
         setPreviewPreference(ext, true);
       } else if (mode === "diff") {
         diffContent!.style.display = "block";
@@ -555,6 +586,133 @@ export class WorkspaceEditorManager {
       setViewMode(tab.viewMode === "diff" ? "edit" : "diff");
     });
     toolbarActions.appendChild(diffBtn);
+
+    // ── Enlarge button ──────────────────────────────────────────
+    if (canPreview) {
+      const enlargeBtn = doc.createElementNS(
+        HTML_NS,
+        "button",
+      ) as HTMLButtonElement;
+      enlargeBtn.textContent = "\u26F6 Enlarge";
+      enlargeBtn.title = "Open preview in full window";
+      enlargeBtn.style.cssText = createSmallBtnStyle();
+      enlargeBtn.style.color = "var(--highlight-primary)";
+
+      enlargeBtn.addEventListener("click", async () => {
+        const tab = this.openTabs.get(entry.path);
+        if (!tab) return;
+        const content = textarea.value;
+        const renderType = getRenderType(ext);
+
+        const backdrop = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+        Object.assign(backdrop.style, {
+          position: "fixed",
+          inset: "0",
+          zIndex: "99999",
+          background: "rgba(0,0,0,0.5)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        });
+
+        const modal = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+        Object.assign(modal.style, {
+          position: "relative",
+          background: "var(--background-primary)",
+          borderRadius: "8px",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+          width: "90vw",
+          height: "85vh",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        });
+
+        const mbar = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+        mbar.style.cssText =
+          "display:flex;align-items:center;justify-content:space-between;padding:8px 14px;border-bottom:1px solid var(--border-primary);flex-shrink:0;";
+        const mtitle = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+        mtitle.textContent = entry.name || entry.path;
+        mtitle.style.cssText =
+          "font-weight:600;font-size:13px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;";
+        const mclose = doc.createElementNS(
+          HTML_NS,
+          "button",
+        ) as HTMLButtonElement;
+        mclose.textContent = "\u2715";
+        mclose.title = "Close preview";
+        Object.assign(mclose.style, {
+          padding: "4px 10px",
+          borderRadius: "4px",
+          border: "1px solid var(--border-primary)",
+          background: "transparent",
+          color: "var(--text-secondary)",
+          cursor: "pointer",
+          fontSize: "13px",
+        });
+        mclose.addEventListener("mouseenter", () => {
+          mclose.style.background = "var(--background-secondary)";
+        });
+        mclose.addEventListener("mouseleave", () => {
+          mclose.style.background = "transparent";
+        });
+        mbar.appendChild(mtitle);
+        mbar.appendChild(mclose);
+
+        const mbody = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+        mbody.style.cssText =
+          "flex:1;overflow:auto;min-height:0;display:flex;flex-direction:column;";
+
+        if (ext === "docx") {
+          try {
+            const store = getWorkspaceStore();
+            const fileAbsPath = PathUtils.join(store.workspaceDir, entry.path);
+            const data = await Zotero.File.getBinaryContentsAsync(fileAbsPath);
+            const { value: html } = await (mammoth as any).convertToHtml({
+              arrayBuffer: data,
+            });
+            const iframe = doc.createElementNS(
+              HTML_NS,
+              "iframe",
+            ) as HTMLIFrameElement;
+            iframe.style.cssText =
+              "width:100%;height:100%;border:none;flex:1 1 0;min-height:0;";
+            iframe.srcdoc = html;
+            mbody.appendChild(iframe);
+          } catch (e) {
+            Zotero.debug(`[seerai] DOCX enlarge preview failed: ${e}`);
+            const errDiv = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+            errDiv.textContent = `Preview failed: ${e}`;
+            mbody.appendChild(errDiv);
+          }
+        } else {
+          const preview = createPreviewElement(doc, content, renderType);
+          preview.style.flex = "1 1 0";
+          preview.style.minHeight = "0";
+          preview.style.height = "auto";
+          mbody.appendChild(preview);
+        }
+
+        modal.appendChild(mbar);
+        modal.appendChild(mbody);
+        backdrop.appendChild(modal);
+        doc.documentElement?.appendChild(backdrop);
+
+        mclose.addEventListener("click", () => backdrop.remove());
+        backdrop.addEventListener("click", (ev) => {
+          if (ev.target === backdrop) backdrop.remove();
+        });
+        const onKey = (ev: KeyboardEvent) => {
+          if (ev.key === "Escape") {
+            backdrop.remove();
+            doc.removeEventListener("keydown", onKey);
+          }
+        };
+        doc.addEventListener("keydown", onKey);
+      });
+
+      toolbarActions.appendChild(enlargeBtn);
+    }
 
     // ── Stage / Revert / Save ──────────────────────────────────
     const stageBtn = doc.createElementNS(
@@ -883,10 +1041,14 @@ function renderDiffInContainer(
   const copyLines = (text: string) => {
     try {
       void doc.defaultView?.navigator?.clipboard?.writeText(text);
-    } catch {}
+    } catch {
+      // clipboard write may fail in some contexts
+    }
     try {
       doc.defaultView?.getSelection()?.removeAllRanges();
-    } catch {}
+    } catch {
+      // selection clear may fail in some contexts
+    }
     showToast();
   };
 

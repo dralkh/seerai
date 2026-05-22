@@ -63,10 +63,17 @@ export const agentTools: ToolDefinition[] = [
       description:
         "Signal that ALL work is complete and the user's request has been fully satisfied. " +
         "Only call this when every TODO item is marked 'completed' or 'cancelled'. " +
-        "This ends the agent loop and returns control to the user.",
+        "This ends the agent loop and returns control to the user. " +
+        "Prefer simply providing a text-only final answer when the task is straightforward; " +
+        "use this tool only when you need to explicitly signal completion after tool work.",
       parameters: {
         type: "object",
-        properties: {},
+        properties: {
+          summary: {
+            type: "string",
+            description: "Brief summary of what was accomplished",
+          },
+        },
       },
     },
   },

@@ -10,7 +10,8 @@ export type ContextItemType =
   | "collection"
   | "topic"
   | "table"
-  | "file";
+  | "file"
+  | "workspace";
 export type ContextSource = "toolbar" | "selection" | "command";
 
 /**
@@ -59,6 +60,7 @@ export const CONTEXT_TRIGGERS: Record<string, ContextItemType> = {
   "^": "collection",
   "#": "topic",
   $: "table",
+  "%": "workspace",
 };
 
 /**
@@ -72,6 +74,7 @@ export const CONTEXT_ICONS: Record<ContextItemType, string> = {
   topic: "#",
   table: "📊",
   file: "📎",
+  workspace: "📂",
 };
 
 /**
@@ -85,6 +88,7 @@ export const CONTEXT_COLORS: Record<ContextItemType, string> = {
   topic: "#FF2D55", // Pink
   table: "#00C7BE", // Teal
   file: "#8E8E93", // Gray
+  workspace: "#AF52DE", // Purple-pink
 };
 
 /**

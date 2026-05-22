@@ -10,6 +10,10 @@ import { executeGenerateItemTags } from "./modules/chat/tools/tagTool";
 import { defaultAgentConfig } from "./modules/chat/tools/toolTypes";
 import { getActiveModelConfig } from "./modules/chat/modelConfig";
 import { DetachedWindowManager } from "./modules/ui/windowManager";
+import {
+  CloudProviderManager,
+  registerCallbackEndpoint,
+} from "./modules/drive";
 
 const ocrService = new OcrService();
 
@@ -27,6 +31,14 @@ async function onStartup() {
 
   // Register MCP API endpoints
   registerApiEndpoints();
+
+  // Register OAuth callback endpoints for all cloud providers
+  const manager = CloudProviderManager.getInstance();
+  for (const provider of manager.getAll()) {
+    if (provider.id !== "nextcloud") {
+      registerCallbackEndpoint(`/seerai/${provider.id}/callback`, provider);
+    }
+  }
 
   // Register global keyboard shortcut for detached window (Ctrl+Shift+S)
   DetachedWindowManager.registerShortcut();

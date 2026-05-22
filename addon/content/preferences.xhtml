@@ -530,6 +530,473 @@
   </hbox>
 </vbox>
 
+<html:hr style="margin: 16px 0" />
+
+<label>
+  <html:h3>Cloud Storage Integration</html:h3>
+</label>
+<vbox
+  style="
+    margin-left: 20px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: 4px;
+  "
+>
+  <!-- Provider Selector -->
+  <hbox align="center" style="margin-bottom: 12px">
+    <label style="width: 100px; font-weight: bold">Provider:</label>
+    <menulist id="seerai-cloud-provider-select" style="min-width: 200px">
+      <menupopup>
+        <menuitem value="nextcloud" label="Nextcloud" />
+        <menuitem value="google" label="Google Drive" />
+        <menuitem value="onedrive" label="OneDrive" />
+        <menuitem value="dropbox" label="Dropbox" />
+        <menuitem value="box" label="Box" />
+      </menupopup>
+    </menulist>
+  </hbox>
+
+  <!-- === Google Drive Settings === -->
+  <vbox id="seerai-cloud-settings-google">
+    <hbox align="center" style="margin-bottom: 8px">
+      <html:span id="seerai-drive-status-icon" style="margin-right: 6px"
+        >⚪</html:span
+      >
+      <html:span id="seerai-drive-status-text">Not connected</html:span>
+    </hbox>
+    <button id="seerai-drive-signin-btn" label="Sign In with Google Drive" />
+    <hbox
+      id="seerai-drive-paste-area"
+      align="center"
+      style="margin-top: 8px; gap: 6px"
+      hidden="true"
+    >
+      <html:input
+        type="text"
+        id="seerai-drive-paste-input"
+        placeholder="Paste auth code or redirect URL"
+        style="flex: 1"
+      />
+      <button id="seerai-drive-paste-verify" label="Verify" />
+      <html:span
+        id="seerai-drive-paste-status"
+        style="font-size: 10px; color: var(--text-secondary); display: none"
+      />
+    </hbox>
+    <html:a
+      id="seerai-drive-custom-oauth-toggle"
+      style="
+        font-size: 11px;
+        cursor: pointer;
+        color: var(--text-secondary);
+        margin-top: 12px;
+        display: inline-block;
+        text-decoration: underline;
+      "
+      >Set Custom OAuth credentials...</html:a
+    >
+    <vbox
+      id="seerai-drive-custom-oauth"
+      hidden="true"
+      style="
+        margin-top: 8px;
+        padding: 10px;
+        background: var(--background-secondary);
+        border-radius: 4px;
+      "
+    >
+      <hbox align="center" style="margin-bottom: 6px">
+        <html:label style="width: 120px">Client ID:</html:label>
+        <html:input
+          type="text"
+          id="seerai-drive-client-id"
+          style="flex: 1"
+          placeholder="Default: 22680022759-6e2lk...apps.googleusercontent.com"
+        />
+      </hbox>
+      <hbox align="center" style="margin-bottom: 10px">
+        <html:label style="width: 120px">Client Secret:</html:label>
+        <html:input
+          type="password"
+          id="seerai-drive-client-secret"
+          style="flex: 1"
+          placeholder="(Required - if empty default used)"
+        />
+      </hbox>
+      <button id="seerai-drive-save-btn" label="Save" disabled="true" />
+    </vbox>
+    <html:p
+      style="
+        font-size: 10px;
+        color: var(--text-tertiary);
+        margin-top: 8px;
+        line-height: 1.4;
+      "
+    >
+      Redirect URI:
+      <html:code>http://localhost:23119/seerai/google/callback</html:code>
+      <br />Need credentials?
+      <html:a
+        href="https://console.cloud.google.com/apis/credentials"
+        style="color: #0066cc; text-decoration: underline; cursor: pointer"
+        onclick="
+          Zotero.launchURL(this.href);
+          return false;
+        "
+        >Google Cloud Console</html:a
+      >
+    </html:p>
+    <button
+      id="seerai-drive-clear-btn"
+      label="Disconnect &amp; Clear"
+      style="margin-top: 12px"
+    />
+  </vbox>
+
+  <!-- === Dropbox Settings === -->
+  <vbox id="seerai-cloud-settings-dropbox" hidden="true">
+    <hbox align="center" style="margin-bottom: 8px">
+      <html:span id="seerai-dropbox-status-icon" style="margin-right: 6px"
+        >⚪</html:span
+      >
+      <html:span id="seerai-dropbox-status-text">Not connected</html:span>
+    </hbox>
+    <button id="seerai-dropbox-signin-btn" label="Sign In with Dropbox" />
+    <hbox
+      id="seerai-dropbox-paste-area"
+      align="center"
+      style="margin-top: 8px; gap: 6px"
+      hidden="true"
+    >
+      <html:input
+        type="text"
+        id="seerai-dropbox-paste-input"
+        placeholder="Paste auth code or redirect URL"
+        style="flex: 1"
+      />
+      <button id="seerai-dropbox-paste-verify" label="Verify" />
+      <html:span
+        id="seerai-dropbox-paste-status"
+        style="font-size: 10px; color: var(--text-secondary); display: none"
+      />
+    </hbox>
+    <html:a
+      id="seerai-dropbox-custom-oauth-toggle"
+      style="
+        font-size: 11px;
+        cursor: pointer;
+        color: var(--text-secondary);
+        margin-top: 12px;
+        display: inline-block;
+        text-decoration: underline;
+      "
+      >Set Custom App Key...</html:a
+    >
+    <vbox
+      id="seerai-dropbox-custom-oauth"
+      hidden="true"
+      style="
+        margin-top: 8px;
+        padding: 10px;
+        background: var(--background-secondary);
+        border-radius: 4px;
+      "
+    >
+      <hbox align="center" style="margin-bottom: 6px">
+        <html:label style="width: 120px">App Key:</html:label>
+        <html:input
+          type="text"
+          id="seerai-dropbox-client-id"
+          style="flex: 1"
+          placeholder="Default: i91subs0zer8bi1"
+        />
+      </hbox>
+      <button id="seerai-dropbox-save-btn" label="Save" disabled="true" />
+    </vbox>
+    <html:p
+      style="
+        font-size: 10px;
+        color: var(--text-tertiary);
+        margin-top: 8px;
+        line-height: 1.4;
+      "
+    >
+      Redirect URI:
+      <html:code>http://localhost:23119/seerai/dropbox/callback</html:code>
+      <br />Permissions: In the Dropbox App Console, check ALL checkboxes under
+      <b>Files and folders</b> (read/write). <br />Need an app?
+      <html:a
+        href="https://www.dropbox.com/developers/apps"
+        style="color: #0066cc; text-decoration: underline; cursor: pointer"
+        onclick="
+          Zotero.launchURL(this.href);
+          return false;
+        "
+        >Dropbox App Console</html:a
+      >
+    </html:p>
+    <button
+      id="seerai-dropbox-clear-btn"
+      label="Disconnect &amp; Clear"
+      style="margin-top: 12px"
+    />
+  </vbox>
+
+  <!-- === Box Settings === -->
+  <vbox id="seerai-cloud-settings-box" hidden="true">
+    <hbox align="center" style="margin-bottom: 8px">
+      <html:span id="seerai-box-status-icon" style="margin-right: 6px"
+        >⚪</html:span
+      >
+      <html:span id="seerai-box-status-text">Not connected</html:span>
+    </hbox>
+    <button id="seerai-box-signin-btn" label="Sign In with Box" />
+    <hbox
+      id="seerai-box-paste-area"
+      align="center"
+      style="margin-top: 8px; gap: 6px"
+      hidden="true"
+    >
+      <html:input
+        type="text"
+        id="seerai-box-paste-input"
+        placeholder="Paste auth code or redirect URL"
+        style="flex: 1"
+      />
+      <button id="seerai-box-paste-verify" label="Verify" />
+      <html:span
+        id="seerai-box-paste-status"
+        style="font-size: 10px; color: var(--text-secondary); display: none"
+      />
+    </hbox>
+    <html:a
+      id="seerai-box-custom-oauth-toggle"
+      style="
+        font-size: 11px;
+        cursor: pointer;
+        color: var(--text-secondary);
+        margin-top: 12px;
+        display: inline-block;
+        text-decoration: underline;
+      "
+      >Set Custom OAuth credentials...</html:a
+    >
+    <vbox
+      id="seerai-box-custom-oauth"
+      hidden="true"
+      style="
+        margin-top: 8px;
+        padding: 10px;
+        background: var(--background-secondary);
+        border-radius: 4px;
+      "
+    >
+      <hbox align="center" style="margin-bottom: 6px">
+        <html:label style="width: 120px">Client ID:</html:label>
+        <html:input
+          type="text"
+          id="seerai-box-client-id"
+          style="flex: 1"
+          placeholder="Default: ozyt20t94vkvr3eu..."
+        />
+      </hbox>
+      <hbox align="center" style="margin-bottom: 10px">
+        <html:label style="width: 120px">Client Secret:</html:label>
+        <html:input
+          type="password"
+          id="seerai-box-client-secret"
+          style="flex: 1"
+          placeholder="(Required - if empty default used)"
+        />
+      </hbox>
+      <button id="seerai-box-save-btn" label="Save" disabled="true" />
+    </vbox>
+    <html:p
+      style="
+        font-size: 10px;
+        color: var(--text-tertiary);
+        margin-top: 8px;
+        line-height: 1.4;
+      "
+    >
+      Redirect URI:
+      <html:code>http://localhost:23119/seerai/box/callback</html:code>
+      <br />Need credentials?
+      <html:a
+        href="https://app.box.com/developers/console"
+        style="color: #0066cc; text-decoration: underline; cursor: pointer"
+        onclick="
+          Zotero.launchURL(this.href);
+          return false;
+        "
+        >Box Developer Console</html:a
+      >
+    </html:p>
+    <button
+      id="seerai-box-clear-btn"
+      label="Disconnect &amp; Clear"
+      style="margin-top: 12px"
+    />
+  </vbox>
+
+  <!-- === OneDrive Settings === -->
+  <vbox id="seerai-cloud-settings-onedrive" hidden="true">
+    <hbox align="center" style="margin-bottom: 8px">
+      <html:span id="seerai-onedrive-status-icon" style="margin-right: 6px"
+        >⚪</html:span
+      >
+      <html:span id="seerai-onedrive-status-text">Not connected</html:span>
+    </hbox>
+    <button id="seerai-onedrive-signin-btn" label="Sign In with OneDrive" />
+    <hbox
+      id="seerai-onedrive-paste-area"
+      align="center"
+      style="margin-top: 8px; gap: 6px"
+      hidden="true"
+    >
+      <html:input
+        type="text"
+        id="seerai-onedrive-paste-input"
+        placeholder="Paste auth code or redirect URL"
+        style="flex: 1"
+      />
+      <button id="seerai-onedrive-paste-verify" label="Verify" />
+      <html:span
+        id="seerai-onedrive-paste-status"
+        style="font-size: 10px; color: var(--text-secondary); display: none"
+      />
+    </hbox>
+    <html:a
+      id="seerai-onedrive-custom-oauth-toggle"
+      style="
+        font-size: 11px;
+        cursor: pointer;
+        color: var(--text-secondary);
+        margin-top: 12px;
+        display: inline-block;
+        text-decoration: underline;
+      "
+      >Set Custom OAuth credentials...</html:a
+    >
+    <vbox
+      id="seerai-onedrive-custom-oauth"
+      hidden="true"
+      style="
+        margin-top: 8px;
+        padding: 10px;
+        background: var(--background-secondary);
+        border-radius: 4px;
+      "
+    >
+      <hbox align="center" style="margin-bottom: 6px">
+        <html:label style="width: 120px">Client ID:</html:label>
+        <html:input
+          type="text"
+          id="seerai-onedrive-client-id"
+          style="flex: 1"
+          placeholder="Default: c1cf27ad-234e-4c44-b233-973eb32846fa"
+        />
+      </hbox>
+      <hbox align="center" style="margin-bottom: 10px">
+        <html:label style="width: 120px">SharePoint Site ID:</html:label>
+        <html:input
+          type="text"
+          id="seerai-onedrive-site-id"
+          style="flex: 1"
+          placeholder="(Leave empty for personal OneDrive)"
+        />
+      </hbox>
+      <button id="seerai-onedrive-save-btn" label="Save" disabled="true" />
+    </vbox>
+    <html:p
+      style="
+        font-size: 10px;
+        color: var(--text-tertiary);
+        margin-top: 8px;
+        line-height: 1.4;
+      "
+    >
+      Redirect URI:
+      <html:code>http://localhost:23119/seerai/onedrive/callback</html:code>
+      <br />Need an app registration?
+      <html:a
+        href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
+        style="color: #0066cc; text-decoration: underline; cursor: pointer"
+        onclick="
+          Zotero.launchURL(this.href);
+          return false;
+        "
+        >Azure App Registrations</html:a
+      >
+      <br />Scopes: Files.Read.All, offline_access
+    </html:p>
+    <button
+      id="seerai-onedrive-clear-btn"
+      label="Disconnect &amp; Clear"
+      style="margin-top: 12px"
+    />
+  </vbox>
+
+  <!-- === Nextcloud Settings === -->
+  <vbox id="seerai-cloud-settings-nextcloud" hidden="true">
+    <hbox align="center" style="margin-bottom: 8px">
+      <html:span id="seerai-nextcloud-status-icon" style="margin-right: 6px"
+        >⚪</html:span
+      >
+      <html:span id="seerai-nextcloud-status-text">Not connected</html:span>
+    </hbox>
+    <hbox align="center" style="margin-bottom: 6px">
+      <html:label style="width: 120px">Server URL:</html:label>
+      <html:input
+        type="text"
+        id="seerai-nextcloud-server-url"
+        style="flex: 1"
+        placeholder="https://cloud.example.com"
+      />
+    </hbox>
+    <hbox align="center" style="margin-bottom: 6px">
+      <html:label style="width: 120px">Username:</html:label>
+      <html:input type="text" id="seerai-nextcloud-username" style="flex: 1" />
+    </hbox>
+    <hbox align="center" style="margin-bottom: 10px">
+      <html:label style="width: 120px">App Password:</html:label>
+      <html:input
+        type="password"
+        id="seerai-nextcloud-app-password"
+        style="flex: 1"
+      />
+    </hbox>
+    <button id="seerai-nextcloud-connect-btn" label="Connect" disabled="true" />
+    <html:p
+      style="
+        font-size: 10px;
+        color: var(--text-tertiary);
+        margin-top: 8px;
+        line-height: 1.4;
+      "
+    >
+      Generate an App Password in your Nextcloud
+      <html:a
+        href="https://docs.nextcloud.com/server/latest/user_manual/en/session_management.html"
+        style="color: #0066cc; text-decoration: underline; cursor: pointer"
+        onclick="
+          Zotero.launchURL(this.href);
+          return false;
+        "
+        >Security Settings</html:a
+      >
+      (Profile → Security → App Passwords).
+      <br />No OAuth -- credentials are used directly for WebDAV access.
+    </html:p>
+    <button
+      id="seerai-nextcloud-clear-btn"
+      label="Disconnect &amp; Clear"
+      style="margin-top: 12px"
+    />
+  </vbox>
+</vbox>
+
 <vbox style="margin-top: 16px">
   <html:label
     data-l10n-id="pref-help"

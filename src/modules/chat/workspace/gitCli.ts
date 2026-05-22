@@ -148,9 +148,9 @@ async function tryExecRedirect(
     exitCode = parseInt(exitStr, 10);
     if (isNaN(exitCode) || exitCode < 0) {
       Zotero.debug(
-        `[seerai] gitCli: unparseable exit code: "${exitStr}", assuming 0 for git ${args.join(" ")}`,
+        `[seerai] gitCli: unparseable exit code: "${exitStr}", treating as failure for git ${args.join(" ")}`,
       );
-      exitCode = 0;
+      exitCode = 1;
     }
     void IOUtils.remove(exitPath).catch(() => {});
   } catch (e) {
@@ -304,6 +304,7 @@ export async function execGit(
     return result;
   }
 
+  _gitAvailable = false;
   return { stdout: "", stderr: "git execution failed", exitCode: 1 };
 }
 

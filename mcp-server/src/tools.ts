@@ -400,7 +400,7 @@ export const TOOL_DEFINITIONS = [
     name: "task_complete",
     description:
       "Signal that the current task is fully complete. Call this ONLY when ALL requested work has been DONE. " +
-      "You MUST call this tool before producing final answer text. If any work remains, do NOT call this tool.",
+      "If any work remains, do NOT call this tool. For simple tasks, just provide a text-only answer instead.",
     inputSchema: taskCompleteParams,
   },
 

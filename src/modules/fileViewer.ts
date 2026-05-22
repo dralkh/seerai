@@ -107,7 +107,7 @@ export function createPreviewElement(
       a { color: var(--highlight-primary, #0066cc); }
       code { background: var(--fill-quaternary, rgba(0,0,0,0.06)); padding: 1px 4px; border-radius: 3px; font-size: 0.9em; color: var(--text-primary); }
       pre { background: var(--fill-quaternary, rgba(0,0,0,0.06)); padding: 8px; border-radius: 4px; overflow-x: auto; }
-      pre code { background: none; padding: 0; }
+      pre code { background: none; padding: 0; color: inherit; }
       blockquote { border-left: 3px solid var(--border-secondary); margin: 0.5em 0; padding: 4px 12px; color: var(--text-secondary); }
       table { border-collapse: collapse; width: 100%; margin: 0.5em 0; }
       th, td { border: 1px solid var(--border-secondary); padding: 6px 10px; text-align: left; }
@@ -251,20 +251,31 @@ function createSandboxedIframe(
 
   const iframe = doc.createElementNS(HTML_NS, "iframe") as HTMLIFrameElement;
 
-  iframe.setAttribute("sandbox", "");
+  iframe.setAttribute("sandbox", "allow-scripts");
 
   Object.assign(iframe.style, {
     width: "100%",
+    height: "100%",
     border: "none",
     background: "transparent",
     flex: "1 1 0",
   });
 
+  const baseCSS = `
+    html, body { height: 100%; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color-scheme: light dark; }
+    pre { margin: 0; overflow: auto; }
+    img { max-width: 100%; height: auto; }
+  `;
+
   if (mimeType === SVG_MIME || mimeType === HTML_MIME) {
-    iframe.srcdoc = content;
+    iframe.srcdoc =
+      content.includes("<style>") || content.includes("<html")
+        ? content
+        : `<html><head><style>${baseCSS}</style></head><body>${content}</body></html>`;
   } else {
     const escaped = escapeHtml(content);
-    iframe.srcdoc = `<!DOCTYPE html><html><body><pre style="
+    iframe.srcdoc = `<!DOCTYPE html><html><head><style>${baseCSS}</style></head><body><pre style="
       font-family: monospace; font-size: 12px; padding: 12px;
       white-space: pre-wrap; word-wrap: break-word;
     ">${escaped}</pre></body></html>`;

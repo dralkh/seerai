@@ -108,6 +108,36 @@ async function hasIncompleteTodos(): Promise<boolean> {
 }
 
 /**
+ * Read TODO progress and return a formatted status string for the model,
+ * or null if no TODO file exists.
+ */
+async function getTodoProgress(): Promise<string | null> {
+  try {
+    const store = getWorkspaceStore();
+    const file = await store.readFile(".agent/TODO.json");
+    if (!file?.content) return null;
+    const todos = JSON.parse(file.content);
+    if (!Array.isArray(todos) || todos.length === 0) return null;
+
+    const lines: string[] = [`[TODO Progress]`];
+    for (const t of todos) {
+      const icon =
+        t.status === "completed"
+          ? "✅"
+          : t.status === "in_progress"
+            ? "🔄"
+            : t.status === "cancelled"
+              ? "❌"
+              : "⬜";
+      lines.push(`  ${icon} ${t.content}`);
+    }
+    return lines.join("\n");
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Summarize conversation for context compaction.
  * Uses a non-streaming call to avoid interfering with the main stream.
  */
@@ -1136,10 +1166,12 @@ export async function handleAgenticChat(
 
   let fullResponse = "";
   let iteration = 0;
-  let taskCompleteCalled = false;
-  let textOnlyStreak = 0;
   let continuationToken = options.continuation || "";
-  const MAX_TEXT_ONLY = 5;
+
+  // Track recent tool calls for loop detection
+  const recentToolCalls: { name: string; args: string }[] = [];
+  const LOOP_DETECTION_WINDOW = 5;
+  const MAX_ITERATIONS = agentConfig.maxAgentIterations;
 
   const compactionState: CompactionState = { count: 0, lastCompactAt: 0 };
   const modelContextLength = activeModel?.contextLength || 128000;
@@ -1149,9 +1181,9 @@ export async function handleAgenticChat(
   const sessionId = `agent_${Date.now()}`;
   agentTracer.startSession(sessionId);
 
-  // Agent loop — requires explicit 'task_complete' to signal completion
-  // (same pattern as smolagents' final_answer() / Vercel AI SDK "done tool")
-  while (iteration < agentConfig.maxAgentIterations) {
+  // Agent loop — model naturally stops by returning text-only (no tool calls).
+  // Explicit task_complete also signals termination.
+  while (iteration < MAX_ITERATIONS) {
     // Check for abortion at the start of iteration
     if (openAIService.isAbortedState()) {
       Zotero.debug("[seerai] Agent loop aborted at start of iteration");
@@ -1163,15 +1195,14 @@ export async function handleAgenticChat(
     agentTracer.startIteration(sessionId, iteration);
 
     // Notify observer that a new iteration (reasoning turn) has started
-    // This allows resetting the UI status from "Calling Tool" back to "Thinking"
     observer.onIterationStarted?.(iteration);
 
-    // Inject a hidden internal system hint to help the model maintain context
-    // This ensures the model knows the current turn number and task expectations
-    if (iteration > 1) {
+    // Inject TODO progress so model can see what's left
+    const todoStatus = await getTodoProgress();
+    if (todoStatus) {
       messages.push({
         role: "system",
-        content: `[Reasoning turn ${iteration}. When your work is complete and the user's request is fully answered, provide a text response with no tool calls to end the conversation.]`,
+        content: todoStatus,
       });
     }
 
@@ -1249,50 +1280,19 @@ export async function handleAgenticChat(
         throw err;
       }
 
-      // Completion protocol: model must explicitly call 'task_complete' to finish.
-      // Text-only responses without task_complete are NOT terminal — the model
-      // may be "thinking out loud" and needs to continue acting.
+      // If model returned text-only with no tool calls, it's done naturally
       if (toolCallsReceived.length === 0) {
-        if (taskCompleteCalled) {
-          Zotero.debug("[seerai] task_complete was called — agent done");
-          break;
-        }
-
-        textOnlyStreak++;
-        if (textOnlyStreak > MAX_TEXT_ONLY) {
-          Zotero.debug(
-            "[seerai] Max text-only turns without task_complete — stopping",
-          );
-          const stopHint = `\n\n*[Agent paused — call 'task_complete' to finish, or ask it to continue.]*`;
-          fullResponse += stopHint;
-          observer.onMessageUpdate(fullResponse);
-          break;
-        }
-
+        Zotero.debug("[seerai] Model returned text-only — agent done");
         if (iterationContent) {
           messages.push({ role: "assistant", content: iterationContent });
         }
-        messages.push({
-          role: "system",
-          content:
-            textOnlyStreak === 1
-              ? "If your task is complete, call 'task_complete'. Otherwise, call a tool to continue working."
-              : `Still no tool call after ${textOnlyStreak} turns. Call 'task_complete' to finish, or call a tool to make progress.`,
-        });
-        continue;
+        break;
       }
 
-      textOnlyStreak = 0;
-
-      // Track explicit completion signal
-      if (
-        toolCallsReceived.some((tc) => tc.function.name === "task_complete")
-      ) {
-        taskCompleteCalled = true;
-        Zotero.debug(
-          "[seerai] task_complete tool called — will finish after this turn",
-        );
-      }
+      // If task_complete was called explicitly, stop after this turn
+      const hasTaskComplete = toolCallsReceived.some(
+        (tc) => tc.function.name === "task_complete",
+      );
 
       // Filter out invalid tool calls
       const validToolCalls = toolCallsReceived.filter(
@@ -1305,6 +1305,11 @@ export async function handleAgenticChat(
         );
       }
 
+      // Filter out task_complete from execution — it's a no-execute signal tool
+      const executableToolCalls = hasTaskComplete
+        ? validToolCalls.filter((tc) => tc.function.name !== "task_complete")
+        : validToolCalls;
+
       // Add assistant message with tool calls to history
       const assistantToolMessage: ToolCallMessage = {
         role: "assistant",
@@ -1313,17 +1318,36 @@ export async function handleAgenticChat(
       };
       messages.push(assistantToolMessage);
 
+      // Loop detection: check for 5+ same consecutive tool calls
+      for (const tc of executableToolCalls) {
+        recentToolCalls.push({
+          name: tc.function.name,
+          args: tc.function.arguments,
+        });
+      }
+      if (recentToolCalls.length >= LOOP_DETECTION_WINDOW) {
+        const recent = recentToolCalls.slice(-LOOP_DETECTION_WINDOW);
+        const allSame = recent.every(
+          (t) => t.name === recent[0].name && t.args === recent[0].args,
+        );
+        if (allSame) {
+          Zotero.debug(
+            `[seerai] Loop detected: ${recent[0].name} called ${LOOP_DETECTION_WINDOW}x with identical args`,
+          );
+          const stopMsg = `\n\n*[Agent stopped — detected repeating the same action. Please rephrase your request if you need to continue.]*`;
+          fullResponse += stopMsg;
+          observer.onMessageUpdate(fullResponse);
+          break;
+        }
+      }
+
       // Execute each tool call
-      // Parallel execution for speed - permission dialogs will queue naturally in Zotero
       const toolResults: { toolCall: ToolCall; result: ToolResult }[] = [];
 
       await Promise.all(
-        validToolCalls.map(async (toolCall) => {
-          // Inform observer tool call started
+        executableToolCalls.map(async (toolCall) => {
           observer.onToolCallStarted(toolCall);
 
-          // Start tool span for tracing (parse gracefully — malformed JSON
-          // is handled by executeToolCall's self-correction below)
           let parsedArgs: Record<string, unknown> = {};
           try {
             parsedArgs = JSON.parse(toolCall.function.arguments || "{}");
@@ -1337,17 +1361,14 @@ export async function handleAgenticChat(
             parsedArgs,
           );
 
-          // Execute the tool
           const result = await executeToolCall(toolCall, agentConfig);
 
-          // End tool span with result
           agentTracer.endToolSpan(sessionId, toolCall.id, {
             success: result.success,
             error: result.error,
             dataSummary: result.summary,
           });
 
-          // Inform observer tool call completed
           observer.onToolCallCompleted(toolCall, result);
 
           toolResults.push({ toolCall, result });
@@ -1365,7 +1386,6 @@ export async function handleAgenticChat(
         let resultContent: string;
 
         if (!result.success && result.error) {
-          // Enhanced error feedback for self-correction
           resultContent = JSON.stringify({
             success: false,
             error: result.error,
@@ -1393,10 +1413,16 @@ export async function handleAgenticChat(
 
       // End iteration for tracing
       agentTracer.endIteration(sessionId);
+
+      // If task_complete was called, end here (don't loop again)
+      if (hasTaskComplete) {
+        Zotero.debug("[seerai] task_complete called — agent done");
+        break;
+      }
     } catch (error) {
       agentTracer.endSession(sessionId, false);
       observer.onError(error as Error);
-      throw error; // Re-throw to allow caller (Assistant) to handle it
+      throw error;
     }
   }
 
@@ -1434,8 +1460,8 @@ export async function handleAgenticChat(
 export function isAgenticModeEnabled(): boolean {
   try {
     const enabled = Zotero.Prefs.get("extensions.seerai.agenticMode");
-    return enabled !== false; // Default to true if not set
+    return enabled === true; // Default to false
   } catch (e) {
-    return true;
+    return false;
   }
 }

@@ -8,6 +8,7 @@ import { parseMarkdown } from "../markdown";
 import { openAIService } from "../../openai";
 import { getActiveModelConfig } from "../modelConfig";
 import type { RAGProgressEvent } from "../rag/types";
+import { ChatContextManager } from "../context/contextManager";
 
 // Global TTS audio state — only one message plays at a time
 let currentTtsAudio: HTMLAudioElement | null = null;
@@ -383,6 +384,7 @@ export function createMessageBubble(
   });
   try {
     contentDiv.innerHTML = parseMarkdown(text);
+    wireCodePreviewButtons(contentDiv);
   } catch (e) {
     Zotero.debug(`[seerai] Error rendering markdown: ${e}`);
     contentDiv.textContent = text; // Fallback to plain text
@@ -462,6 +464,496 @@ export function appendMessage(
   container.appendChild(msgDiv);
   container.scrollTop = container.scrollHeight;
   return msgDiv;
+}
+
+export function wireCodePreviewButtons(contentDiv: HTMLElement): void {
+  const doc = contentDiv.ownerDocument!;
+
+  // Use event delegation on the stable parent (survives innerHTML replacements)
+  if (contentDiv.getAttribute("data-preview-wired")) return;
+  contentDiv.setAttribute("data-preview-wired", "true");
+
+  contentDiv.addEventListener("click", (e: Event) => {
+    const btn = (e.target as HTMLElement).closest(
+      ".code-preview-btn",
+    ) as HTMLElement | null;
+    if (!btn || !contentDiv.contains(btn)) return;
+
+    const wrapper = btn.closest("[data-codeblock-lang]") as HTMLElement | null;
+    if (!wrapper) return;
+    const lang = wrapper.getAttribute("data-codeblock-lang") || "";
+    const pre = wrapper.querySelector("pre") as HTMLElement | null;
+    const code = pre?.querySelector("code") as HTMLElement | null;
+    if (!code) return;
+    const sourceContent = code.textContent || "";
+
+    // If already expanded inline, toggle off
+    const existingSplit = wrapper.querySelector(
+      ".code-preview-split",
+    ) as HTMLElement | null;
+    if (existingSplit) {
+      wrapper.style.flexDirection = "";
+      wrapper.style.height = "";
+      if (pre) pre.style.flex = "";
+      existingSplit.remove();
+      wrapper.querySelector(".code-preview-handle")?.remove();
+      btn.textContent = "\u25B6 Preview";
+      return;
+    }
+
+    btn.textContent = "\u2715";
+    btn.title = "Close preview";
+
+    // ── Build the split pane ────────────────────────────────────
+    const split = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+    split.className = "code-preview-split";
+    split.style.cssText =
+      "flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid var(--border-primary);";
+
+    // Toolbar row
+    const tbar = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+    tbar.style.cssText =
+      "display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--border-primary); flex-shrink: 0; background: var(--background-primary);";
+
+    function makeBtn(
+      text: string,
+      title: string,
+      onClick: () => void,
+    ): HTMLButtonElement {
+      const b = doc.createElementNS(RAG_HTML_NS, "button") as HTMLButtonElement;
+      b.textContent = text;
+      b.title = title;
+      Object.assign(b.style, {
+        padding: "2px 6px",
+        borderRadius: "4px",
+        border: "1px solid var(--border-primary)",
+        background: "transparent",
+        color: "var(--text-secondary)",
+        cursor: "pointer",
+        fontSize: "10px",
+        lineHeight: "1.3",
+        transition: "background 0.1s",
+      });
+      b.addEventListener("mouseenter", () => {
+        b.style.background = "var(--background-secondary)";
+      });
+      b.addEventListener("mouseleave", () => {
+        b.style.background = "transparent";
+      });
+      b.addEventListener("click", (ce: Event) => {
+        ce.stopPropagation();
+        onClick();
+      });
+      return b;
+    }
+
+    // Copy
+    const copyBtn = makeBtn("\uD83D\uDCCC Copy", "Copy code content", () => {
+      try {
+        new ztoolkit.Clipboard().addText(sourceContent, "text/unicode").copy();
+        copyBtn.textContent = "\u2713 Copied";
+        setTimeout(() => {
+          copyBtn.textContent = "\uD83D\uDCCC Copy";
+        }, 1500);
+      } catch {
+        copyBtn.textContent = "\u274C Failed";
+        setTimeout(() => {
+          copyBtn.textContent = "\uD83D\uDCCC Copy";
+        }, 1500);
+      }
+    });
+
+    // Add to Context
+    const ctxBtn = makeBtn("\uD83D\uDCCB Ctx", "Add to chat context", () => {
+      try {
+        ChatContextManager.getInstance().addItem(
+          `code-preview-${Date.now()}`,
+          "file",
+          `${lang.toUpperCase()} code block`,
+          "toolbar",
+          { text: sourceContent, mimeType: `text/${lang}` },
+        );
+        ctxBtn.textContent = "\u2713 Added";
+        setTimeout(() => {
+          ctxBtn.textContent = "\uD83D\uDCCB Ctx";
+        }, 1500);
+      } catch (e) {
+        Zotero.debug(`[seerai] Error adding code to context: ${e}`);
+        ctxBtn.textContent = "\u274C";
+        setTimeout(() => {
+          ctxBtn.textContent = "\uD83D\uDCCB Ctx";
+        }, 1500);
+      }
+    });
+
+    // Enlarge
+    const enlargeBtn = makeBtn(
+      "\u26F6 Enlarge",
+      "Open in full preview window",
+      () => {
+        showCodePreviewModal(doc, lang, sourceContent);
+      },
+    );
+    enlargeBtn.style.marginLeft = "auto";
+    enlargeBtn.style.color = "var(--highlight-primary)";
+
+    tbar.appendChild(copyBtn);
+    tbar.appendChild(ctxBtn);
+    tbar.appendChild(enlargeBtn);
+
+    // Preview content area
+    const previewArea = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+    previewArea.style.cssText = "flex: 1; overflow: auto; min-height: 100px;";
+
+    if (lang === "html" || lang === "svg" || lang === "xml") {
+      const iframe = doc.createElementNS(
+        RAG_HTML_NS,
+        "iframe",
+      ) as HTMLIFrameElement;
+      iframe.style.cssText = "width: 100%; height: 100%; border: none;";
+      iframe.srcdoc = sourceContent;
+      previewArea.appendChild(iframe);
+    } else if (lang === "markdown") {
+      const inner = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+      inner.innerHTML = parseMarkdown(sourceContent);
+      Object.assign(inner.style, {
+        padding: "8px",
+        fontSize: "13px",
+        lineHeight: "1.5",
+        color: "var(--text-primary)",
+      });
+      const style = doc.createElementNS(RAG_HTML_NS, "style") as HTMLElement;
+      style.textContent = `
+        h1,h2,h3,h4,h5,h6{color:var(--text-primary);margin:0.4em 0}
+        h1{font-size:1.4em} h2{font-size:1.2em} h3{font-size:1.1em}
+        p{margin:0.4em 0;color:var(--text-primary)}
+        a{color:var(--highlight-primary,#0066cc)}
+        code{background:var(--fill-quaternary,rgba(0,0,0,0.06));padding:1px 4px;border-radius:3px;font-size:0.9em}
+        pre{background:var(--fill-quaternary,rgba(0,0,0,0.06));padding:6px;border-radius:4px;overflow-x:auto}
+        pre code{color:inherit}
+        blockquote{border-left:3px solid var(--border-secondary);margin:0.4em 0;padding:4px 12px}
+        table{border-collapse:collapse;width:100%;margin:0.4em 0}
+        th,td{border:1px solid var(--border-secondary);padding:4px 8px;text-align:left}
+        ul,ol{padding-left:1.5em;margin:0.4em 0}
+        img{max-width:100%}
+      `;
+      inner.insertBefore(style, inner.firstChild);
+      previewArea.appendChild(inner);
+    } else {
+      previewArea.textContent = "Preview not available for this language";
+      Object.assign(previewArea.style, {
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "var(--text-tertiary)",
+        fontSize: "13px",
+      });
+    }
+
+    split.appendChild(tbar);
+    split.appendChild(previewArea);
+
+    // ── Resize handle ───────────────────────────────────────────
+    const handle = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+    handle.className = "code-preview-handle";
+    handle.style.cssText =
+      "height: 5px; cursor: ns-resize; flex-shrink: 0; background: transparent; position: relative; z-index: 1;";
+    const line = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+    line.style.cssText =
+      "height: 1px; background: var(--border-primary); margin: 2px 4px; border-radius: 1px; pointer-events: none;";
+    handle.appendChild(line);
+
+    handle.addEventListener("mousedown", (md: MouseEvent) => {
+      md.preventDefault();
+      const startY = md.clientY;
+      const startPre = pre ? pre.offsetHeight : 0;
+      const total = wrapper.offsetHeight;
+
+      const onMove = (mm: MouseEvent) => {
+        const dy = mm.clientY - startY;
+        const newPreHeight = Math.max(60, Math.min(total - 60, startPre + dy));
+        if (pre) {
+          pre.style.flex = "none";
+          pre.style.height = `${newPreHeight}px`;
+        }
+        split.style.flex = "1";
+      };
+      const onUp = () => {
+        doc.removeEventListener("mousemove", onMove);
+        doc.removeEventListener("mouseup", onUp);
+      };
+      doc.addEventListener("mousemove", onMove);
+      doc.addEventListener("mouseup", onUp);
+    });
+
+    // ── Convert wrapper to horizontal (top/bottom) split ────────
+    const wrapperHeight = wrapper.offsetHeight;
+    wrapper.style.display = "flex";
+    wrapper.style.flexDirection = "column";
+    wrapper.style.gap = "0";
+    wrapper.style.height = `${wrapperHeight}px`;
+    if (pre) {
+      pre.style.flex = "1 1 0";
+      pre.style.minHeight = "0";
+    }
+    // Order: split (preview) → handle (resize) → pre (code)
+    wrapper.insertBefore(split, pre || null);
+    wrapper.insertBefore(handle, pre || null);
+    wrapper.scrollIntoView({ block: "nearest" });
+  });
+}
+
+function showCodePreviewModal(
+  doc: Document,
+  lang: string,
+  content: string,
+): void {
+  let isExpanded = false;
+
+  const backdrop = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+  Object.assign(backdrop.style, {
+    position: "fixed",
+    inset: "0",
+    zIndex: "99999",
+    background: "rgba(0,0,0,0.5)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  });
+
+  const container = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+  const containerDefaults = () => ({
+    position: "relative" as const,
+    background: "var(--background-primary)",
+    borderRadius: "8px",
+    boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
+    width: isExpanded ? "98vw" : "90vw",
+    height: isExpanded ? "95vh" : "85vh",
+    display: "flex",
+    flexDirection: "column" as const,
+    overflow: "hidden",
+    transition: "width 0.2s, height 0.2s",
+  });
+  Object.assign(container.style, containerDefaults());
+
+  // ── Header row ──────────────────────────────────────────────
+  const header = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+  Object.assign(header.style, {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "6px 12px",
+    borderBottom: "1px solid var(--border-primary)",
+    flexShrink: "0",
+  });
+
+  const title = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
+  title.textContent = lang.toUpperCase();
+  Object.assign(title.style, {
+    fontWeight: "600",
+    fontSize: "12px",
+    textTransform: "uppercase",
+    color: "var(--text-primary)",
+  });
+
+  const closeBtn = doc.createElementNS(
+    RAG_HTML_NS,
+    "button",
+  ) as HTMLButtonElement;
+  closeBtn.textContent = "\u2715";
+  closeBtn.title = "Close preview";
+  Object.assign(closeBtn.style, {
+    background: "none",
+    border: "none",
+    fontSize: "16px",
+    cursor: "pointer",
+    color: "var(--text-secondary)",
+    padding: "2px 6px",
+    borderRadius: "4px",
+  });
+
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+
+  // ── Toolbar ─────────────────────────────────────────────────
+  const toolbar = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+  Object.assign(toolbar.style, {
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+    padding: "4px 12px",
+    borderBottom: "1px solid var(--border-primary)",
+    flexShrink: "0",
+  });
+
+  function toolBtn(
+    text: string,
+    title: string,
+    handler: () => void,
+  ): HTMLButtonElement {
+    const b = doc.createElementNS(RAG_HTML_NS, "button") as HTMLButtonElement;
+    b.textContent = text;
+    b.title = title;
+    Object.assign(b.style, {
+      padding: "3px 8px",
+      borderRadius: "4px",
+      border: "1px solid var(--border-primary)",
+      background: "transparent",
+      color: "var(--text-secondary)",
+      cursor: "pointer",
+      fontSize: "11px",
+      lineHeight: "1.3",
+      transition: "background 0.1s",
+    });
+    b.addEventListener("mouseenter", () => {
+      b.style.background = "var(--background-secondary)";
+    });
+    b.addEventListener("mouseleave", () => {
+      b.style.background = "transparent";
+    });
+    b.addEventListener("click", (e: Event) => {
+      e.stopPropagation();
+      handler();
+    });
+    return b;
+  }
+
+  // Copy button
+  const copyBtn = toolBtn("\uD83D\uDCCC Copy", "Copy code content", () => {
+    try {
+      new ztoolkit.Clipboard().addText(content, "text/unicode").copy();
+      copyBtn.textContent = "\u2713 Copied";
+      setTimeout(() => {
+        copyBtn.textContent = "\uD83D\uDCCC Copy";
+      }, 1500);
+    } catch (e) {
+      copyBtn.textContent = "\u274C Failed";
+      setTimeout(() => {
+        copyBtn.textContent = "\uD83D\uDCCC Copy";
+      }, 1500);
+    }
+  });
+
+  // Add to Context button
+  const ctxBtn = toolBtn(
+    "\uD83D\uDCCB Add to Context",
+    "Add to chat context",
+    () => {
+      try {
+        const cm = ChatContextManager.getInstance();
+        cm.addItem(
+          `code-preview-${Date.now()}`,
+          "file",
+          `${lang.toUpperCase()} code block`,
+          "toolbar",
+          { text: content, mimeType: `text/${lang}` },
+        );
+        ctxBtn.textContent = "\u2713 Added";
+        setTimeout(() => {
+          ctxBtn.textContent = "\uD83D\uDCCB Add to Context";
+        }, 1500);
+      } catch (e) {
+        Zotero.debug(`[seerai] Error adding code to context: ${e}`);
+        ctxBtn.textContent = "\u274C Error";
+        setTimeout(() => {
+          ctxBtn.textContent = "\uD83D\uDCCB Add to Context";
+        }, 1500);
+      }
+    },
+  );
+
+  // Expand button
+  const expandBtn = toolBtn("\u26F6 Expand", "Expand to full window", () => {
+    isExpanded = !isExpanded;
+    Object.assign(container.style, containerDefaults());
+    expandBtn.textContent = isExpanded ? "\u26F6 Collapse" : "\u26F6 Expand";
+    expandBtn.title = isExpanded
+      ? "Collapse to normal size"
+      : "Expand to full window";
+  });
+  expandBtn.style.marginLeft = "auto";
+
+  toolbar.appendChild(copyBtn);
+  toolbar.appendChild(ctxBtn);
+  toolbar.appendChild(expandBtn);
+
+  // ── Content area ────────────────────────────────────────────
+  const contentArea = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+  Object.assign(contentArea.style, {
+    flex: "1",
+    overflow: "auto",
+    minHeight: "0",
+    display: "flex",
+    flexDirection: "column",
+  });
+
+  if (lang === "html" || lang === "svg" || lang === "xml") {
+    const iframe = doc.createElementNS(
+      RAG_HTML_NS,
+      "iframe",
+    ) as HTMLIFrameElement;
+    Object.assign(iframe.style, {
+      width: "100%",
+      flex: "1 1 0",
+      minHeight: "0",
+      border: "none",
+    });
+    iframe.srcdoc = content;
+    contentArea.appendChild(iframe);
+  } else if (lang === "markdown") {
+    const inner = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+    inner.innerHTML = parseMarkdown(content);
+    Object.assign(inner.style, {
+      padding: "16px",
+      fontSize: "14px",
+      lineHeight: "1.6",
+      color: "var(--text-primary)",
+    });
+    const style = doc.createElementNS(RAG_HTML_NS, "style") as HTMLElement;
+    style.textContent = `
+      h1,h2,h3,h4,h5,h6{color:var(--text-primary);margin:0.5em 0}
+      h1{font-size:1.5em} h2{font-size:1.3em} h3{font-size:1.15em}
+      p{margin:0.5em 0;color:var(--text-primary)}
+      a{color:var(--highlight-primary,#0066cc)}
+      code{background:var(--fill-quaternary,rgba(0,0,0,0.06));padding:1px 4px;border-radius:3px;font-size:0.9em}
+      pre{background:var(--fill-quaternary,rgba(0,0,0,0.06));padding:8px;border-radius:4px;overflow-x:auto}
+      pre code{background:none;padding:0;color:inherit}
+      blockquote{border-left:3px solid var(--border-secondary);margin:0.5em 0;padding:4px 12px;color:var(--text-secondary)}
+      table{border-collapse:collapse;width:100%;margin:0.5em 0}
+      th,td{border:1px solid var(--border-secondary);padding:6px 10px;text-align:left}
+      th{background:var(--fill-quaternary,rgba(0,0,0,0.04));font-weight:600}
+      ul,ol{padding-left:1.5em;margin:0.5em 0}
+      li{margin:0.25em 0}
+      hr{border:none;border-top:1px solid var(--border-secondary);margin:1em 0}
+      img{max-width:100%}
+    `;
+    inner.insertBefore(style, inner.firstChild);
+    contentArea.appendChild(inner);
+  } else {
+    contentArea.textContent = "Preview not available for this language";
+    Object.assign(contentArea.style, {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      color: "var(--text-tertiary)",
+      fontSize: "14px",
+    });
+  }
+
+  // ── Assemble ────────────────────────────────────────────────
+  container.appendChild(header);
+  container.appendChild(toolbar);
+  container.appendChild(contentArea);
+  backdrop.appendChild(container);
+
+  const cleanup = () => backdrop.remove();
+  backdrop.addEventListener("click", (e: Event) => {
+    if (e.target === backdrop) cleanup();
+  });
+  closeBtn.addEventListener("click", cleanup);
+
+  const root = doc.body || doc.documentElement;
+  if (root) root.appendChild(backdrop);
 }
 
 // ─── HTML namespace for XUL-compatible element creation ──────────────────────

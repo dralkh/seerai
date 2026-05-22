@@ -13,6 +13,8 @@ import {
 // Re-export PlaceholderType for convenience
 export { PlaceholderType } from "./promptLibrary";
 import { getTableStore } from "./tableStore";
+import { getMessageStore } from "./messageStore";
+import { config } from "../../../package.json";
 
 // ==================== Types ====================
 
@@ -60,6 +62,7 @@ export const PLACEHOLDER_INFO: Record<
   year: { icon: "📅", label: "Year", color: "#607d8b" },
   table: { icon: "📊", label: "Table", color: "#009688" },
   prompt: { icon: "⚡", label: "Prompt", color: "#ffc107" },
+  workspace: { icon: "📂", label: "Workspace", color: "#AF52DE" },
 };
 
 // ==================== Trigger Detection ====================
@@ -170,8 +173,8 @@ export function parseMessageForContext(text: string): ParsedPlaceholder[] {
   const placeholders: ParsedPlaceholder[] = [];
 
   // Regex to match [trigger + value] or [trigger + value::id]
-  // Matches: [#topic], [~tag], [/Paper Title...::123], [@John Smith], [^Collection]
-  const regex = /\[([#/@^~])([^\]]+?)(?:::(\d+))?\]/g;
+  // Matches: [#topic], [~tag], [/Paper Title...::123], [@John Smith], [^Collection], [%Workspace]
+  const regex = /\[([#/@^~%])([^\]]+?)(?:::(\d+))?\]/g;
 
   let match;
   while ((match = regex.exec(text)) !== null) {
@@ -199,7 +202,7 @@ export function parseMessageForContext(text: string): ParsedPlaceholder[] {
  */
 export function getCleanMessage(text: string): string {
   // Remove ::id parts from bracketed placeholders
-  return text.replace(/\[([#/@^~])([^\]]+?)(?:::\d+)?\]/g, "[$1$2]");
+  return text.replace(/\[([#/@^~%])([^\]]+?)(?:::\d+)?\]/g, "[$1$2]");
 }
 
 // ==================== Autocomplete Queries ====================
@@ -780,6 +783,8 @@ export async function getAutocompleteResults(
       return queryTables(query, limit);
     case "prompt":
       return queryPrompts(query, limit);
+    case "workspace":
+      return queryWorkspaces(query, limit);
     default:
       return [];
   }
@@ -857,6 +862,147 @@ export async function queryTables(
     }
   } catch (error) {
     console.error("Error querying tables:", error);
+  }
+
+  return results;
+}
+
+/**
+ * Query workspaces (folder workspaces + chat conversations with workspaces)
+ */
+export async function queryWorkspaces(
+  query: string,
+  limit: number = 20,
+): Promise<AutocompleteResult[]> {
+  const results: AutocompleteResult[] = [];
+  const lowerQuery = query.toLowerCase();
+
+  try {
+    const addonRef = config.addonRef;
+    const dataDir = PathUtils.join(Zotero.DataDirectory.dir, addonRef);
+    const conversationsDir = PathUtils.join(dataDir, "conversations");
+    const workspacesDir = PathUtils.join(dataDir, "workspaces");
+
+    // 1. Folder workspaces (priority — shown first)
+    try {
+      if (await IOUtils.exists(workspacesDir)) {
+        const folderNames = await IOUtils.getChildren(workspacesDir);
+
+        for (const folderFullPath of folderNames) {
+          const slug = folderFullPath.split("/").pop() || "";
+          const workspacePath = PathUtils.join(
+            workspacesDir,
+            slug,
+            "workspace",
+          );
+
+          if (!(await IOUtils.exists(workspacePath))) continue;
+
+          let fileCount = 0;
+          try {
+            const children = await IOUtils.getChildren(workspacePath);
+            for (const child of children) {
+              try {
+                const stat = await IOUtils.stat(child);
+                if (stat.type !== "directory") fileCount++;
+              } catch {
+                /* skip */
+              }
+            }
+          } catch {
+            /* skip */
+          }
+
+          const displayName = slug
+            .replace(/-/g, " ")
+            .replace(/\b\w/g, (c) => c.toUpperCase());
+
+          if (query && !displayName.toLowerCase().includes(lowerQuery))
+            continue;
+
+          results.push({
+            id: `folder:${slug}`,
+            title: displayName,
+            subtitle: `Folder workspace${fileCount > 0 ? ` - ${fileCount} files` : ""}`,
+            icon: "📁",
+            type: "workspace",
+            data: {
+              workspaceDir: workspacePath,
+              folderSlug: slug,
+              workspaceType: "folder",
+            },
+          });
+
+          if (results.length >= limit) break;
+        }
+      }
+    } catch {
+      /* no workspaces dir or error */
+    }
+
+    // 2. Chat conversations with workspaces
+    const remaining = limit - results.length;
+    if (remaining > 0) {
+      const history = await getMessageStore().getHistory();
+      const titleCounts = new Map<string, number>();
+
+      for (const conv of history) {
+        const convWorkspaceDir = PathUtils.join(
+          conversationsDir,
+          conv.id,
+          "workspace",
+        );
+
+        let fileCount = 0;
+        try {
+          if (await IOUtils.exists(convWorkspaceDir)) {
+            const children = await IOUtils.getChildren(convWorkspaceDir);
+            for (const child of children) {
+              try {
+                const stat = await IOUtils.stat(child);
+                if (stat.type !== "directory") fileCount++;
+              } catch {
+                /* skip */
+              }
+            }
+          }
+        } catch {
+          /* no workspace dir */
+        }
+
+        if (query && !conv.title.toLowerCase().includes(lowerQuery)) continue;
+
+        const count = (titleCounts.get(conv.title) || 0) + 1;
+        titleCounts.set(conv.title, count);
+
+        const title = count > 1 ? `${conv.title} (#${count})` : conv.title;
+        const dateStr =
+          conv.updatedAt instanceof Date
+            ? conv.updatedAt.toLocaleDateString()
+            : new Date(conv.updatedAt).toLocaleDateString();
+        const subtitle =
+          count > 1
+            ? `Chat - ${dateStr}${fileCount > 0 ? `, ${fileCount} files` : ""}`
+            : `Chat${fileCount > 0 ? ` - ${fileCount} files` : ""}`;
+
+        results.push({
+          id: `chat:${conv.id}`,
+          title,
+          subtitle,
+          icon: "💬",
+          type: "workspace",
+          data: {
+            workspaceDir: convWorkspaceDir,
+            conversationId: conv.id,
+            workspaceType: "chat",
+          },
+        });
+
+        if (results.length >= limit) break;
+      }
+    }
+  } catch (error) {
+    Zotero.debug(`[seerai] Error querying workspaces: ${error}`);
   }
 
   return results;

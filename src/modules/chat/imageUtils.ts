@@ -57,6 +57,55 @@ export async function getImageAttachments(
 }
 
 /**
+ * Strip base64-encoded data URIs from text content
+ * Handles markdown images, HTML img tags, and inline data URIs
+ */
+export function stripBase64Data(text: string): string {
+  if (!text || text.length < 100) return text;
+
+  let stripped = text;
+  let totalRemoved = 0;
+
+  // 1. Remove markdown image tags with base64 data URIs
+  //    ![alt](data:image/png;base64,...)
+  const mdImgRegex = /!\[.*?\]\(.*?data:[^;]+;base64,[A-Za-z0-9+/=]+.*?\)/g;
+  const mdMatches = stripped.match(mdImgRegex);
+  if (mdMatches) {
+    const removed = mdMatches.reduce((s, m) => s + m.length, 0);
+    stripped = stripped.replace(mdImgRegex, "");
+    totalRemoved += removed;
+  }
+
+  // 2. Remove HTML img tags with base64 data URIs
+  //    <img src="data:image/png;base64,..." ...>
+  const htmlImgRegex = /<img[^>]*src\s*=\s*"data:[^"]*;base64,[^"]*"[^>]*>/gi;
+  const htmlMatches = stripped.match(htmlImgRegex);
+  if (htmlMatches) {
+    const removed = htmlMatches.reduce((s, m) => s + m.length, 0);
+    stripped = stripped.replace(htmlImgRegex, "");
+    totalRemoved += removed;
+  }
+
+  // 3. Remove standalone base64 data URIs (longer than 100 chars)
+  //    data:image/png;base64,ABCD...
+  const dataUriRegex = /data:[^;]+;base64,[A-Za-z0-9+/=]{100,}/g;
+  const uriMatches = stripped.match(dataUriRegex);
+  if (uriMatches) {
+    const removed = uriMatches.reduce((s, m) => s + m.length, 0);
+    stripped = stripped.replace(dataUriRegex, "[base64 image data removed]");
+    totalRemoved += removed;
+  }
+
+  if (totalRemoved > 0) {
+    Zotero.debug(
+      `[seerai] Stripped ${totalRemoved} bytes of base64 image data from content`,
+    );
+  }
+
+  return stripped;
+}
+
+/**
  * Read file and encode as base64
  */
 export async function encodeImageAsBase64(

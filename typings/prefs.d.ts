@@ -62,6 +62,29 @@ declare namespace _ZoteroTypes {
       "workspaceFolderPaths": string;
       "fileViewerEnabled": boolean;
       "previewExtensions": string;
+      "driveClientId": string;
+      "driveClientSecret": string;
+      "driveRefreshToken": string;
+      "driveAccessToken": string;
+      "driveTokenExpiry": string;
+      "cloud.dropbox.clientId": string;
+      "cloud.dropbox.refreshToken": string;
+      "cloud.dropbox.accessToken": string;
+      "cloud.dropbox.tokenExpiry": string;
+      "cloud.nextcloud.serverUrl": string;
+      "cloud.nextcloud.username": string;
+      "cloud.nextcloud.appPassword": string;
+      "cloud.box.clientId": string;
+      "cloud.box.clientSecret": string;
+      "cloud.box.refreshToken": string;
+      "cloud.box.accessToken": string;
+      "cloud.box.tokenExpiry": string;
+      "cloud.onedrive.clientId": string;
+      "cloud.onedrive.siteId": string;
+      "cloud.onedrive.refreshToken": string;
+      "cloud.onedrive.accessToken": string;
+      "cloud.onedrive.tokenExpiry": string;
+      "cloud.activeProvider": string;
     };
   }
 }

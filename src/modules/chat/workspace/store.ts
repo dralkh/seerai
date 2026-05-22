@@ -37,6 +37,112 @@ const METADATA_DIRS = new Set([
   "workspace_snapshot.json",
 ]);
 
+const SYSTEM_IGNORES = new Set(["node_modules", ".git", ".svn", ".hg"]);
+
+interface GitignoreRule {
+  raw: string;
+  negated: boolean;
+  dirOnly: boolean;
+  matchFn: (path: string, isDir: boolean) => boolean;
+}
+
+async function readGitignoreRules(rootDir: string): Promise<GitignoreRule[]> {
+  const rules: GitignoreRule[] = [];
+  const gitignorePath = PathUtils.join(rootDir, ".gitignore");
+  let rawText: string | null = null;
+  try {
+    if (await IOUtils.exists(gitignorePath)) {
+      const bytes = await IOUtils.read(gitignorePath);
+      rawText = new TextDecoder().decode(bytes);
+    }
+  } catch {
+    return rules;
+  }
+  if (!rawText) return rules;
+
+  for (const raw of rawText.split("\n")) {
+    let line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+
+    const negated = line.startsWith("!");
+    if (negated) line = line.slice(1).trim();
+    if (!line) continue;
+
+    const dirOnly = line.endsWith("/");
+    if (dirOnly) line = line.slice(0, -1);
+
+    let anchored = false;
+    if (line.includes("/")) {
+      anchored = true;
+    }
+
+    const glob = line;
+    let regexStr = "";
+    for (let i = 0; i < glob.length; i++) {
+      if (glob[i] === "*" && glob[i + 1] === "*") {
+        regexStr += ".*";
+        i++;
+      } else if (glob[i] === "*") {
+        regexStr += "[^/]*";
+      } else if (glob[i] === "?") {
+        regexStr += "[^/]";
+      } else if (
+        glob[i] === "." ||
+        glob[i] === "+" ||
+        glob[i] === "^" ||
+        glob[i] === "$" ||
+        glob[i] === "(" ||
+        glob[i] === ")" ||
+        glob[i] === "{" ||
+        glob[i] === "}" ||
+        glob[i] === "[" ||
+        glob[i] === "]" ||
+        glob[i] === "|" ||
+        glob[i] === "\\"
+      ) {
+        regexStr += "\\" + glob[i];
+      } else {
+        regexStr += glob[i];
+      }
+    }
+
+    const regex = new RegExp(
+      anchored ? `^${regexStr}(/.*)?$` : `(^|/)${regexStr}(/.*)?$`,
+    );
+
+    rules.push({
+      raw,
+      negated,
+      dirOnly,
+      matchFn: (path, isDir) => {
+        if (dirOnly && !isDir) return false;
+        return regex.test(path);
+      },
+    });
+  }
+
+  return rules;
+}
+
+function shouldIgnore(
+  relativePath: string,
+  isDir: boolean,
+  rules: GitignoreRule[],
+): boolean {
+  const basename = relativePath.includes("/")
+    ? relativePath.slice(relativePath.lastIndexOf("/") + 1)
+    : relativePath;
+  if (SYSTEM_IGNORES.has(basename)) return true;
+
+  let ignored = false;
+  for (const rule of rules) {
+    if (rule.matchFn(relativePath, isDir)) {
+      ignored = !rule.negated;
+    }
+  }
+  return ignored;
+}
+
 function slugifyFolder(name: string): string {
   return name
     .toLowerCase()
@@ -116,6 +222,11 @@ export class WorkspaceStore {
   public onWorkspaceChanged: (() => void) | null = null;
 
   private _stagedContentCache: Map<string, string> = new Map();
+
+  private _gitignoreCache: {
+    rules: GitignoreRule[];
+    workspaceDir: string;
+  } | null = null;
 
   private get dataDir(): string {
     return PathUtils.join(Zotero.DataDirectory.dir, config.addonRef);
@@ -213,6 +324,15 @@ export class WorkspaceStore {
 
   isCustomPath(): boolean {
     return !!this._customPath;
+  }
+
+  private get isCustomWorkspace(): boolean {
+    if (this._customPath) return true;
+    if (this._currentFolder) {
+      const paths = this.getFolderCustomPaths();
+      return !!paths[slugifyFolder(this._currentFolder)];
+    }
+    return false;
   }
 
   getCustomPath(): string | null {
@@ -437,6 +557,13 @@ export class WorkspaceStore {
     );
 
     if (prevFolder) {
+      const folderPaths = this.getFolderCustomPaths();
+      const slug = slugifyFolder(prevFolder);
+      if (folderPaths[slug]) {
+        await this.ensureDir(perChatDir);
+        return;
+      }
+
       const sharedDir = this.folderWorkspaceDir(prevFolder);
       const history = await getMessageStore().getHistory();
       const conv = history.find((h) => h.id === chatId);
@@ -535,6 +662,7 @@ export class WorkspaceStore {
     let count = 0;
     for (const name of children) {
       if (METADATA_DIRS.has(name)) continue;
+      if (SYSTEM_IGNORES.has(name)) continue;
       const srcPath = PathUtils.join(srcDir, name);
       const destPath = PathUtils.join(destDir, name);
       let isDir = false;
@@ -558,6 +686,33 @@ export class WorkspaceStore {
       }
     }
     return count;
+  }
+
+  private async _getGitignoreRules(): Promise<GitignoreRule[]> {
+    const dir = this.workspaceDir;
+    if (this._gitignoreCache && this._gitignoreCache.workspaceDir === dir) {
+      return this._gitignoreCache.rules;
+    }
+    const rules = await readGitignoreRules(dir);
+    this._gitignoreCache = { rules, workspaceDir: dir };
+    return rules;
+  }
+
+  private _invalidateGitignoreCache(): void {
+    this._gitignoreCache = null;
+  }
+
+  private async _shouldIgnorePath(
+    relativePath: string,
+    isDir: boolean,
+  ): Promise<boolean> {
+    const basename = relativePath.includes("/")
+      ? relativePath.slice(relativePath.lastIndexOf("/") + 1)
+      : relativePath;
+    if (SYSTEM_IGNORES.has(basename)) return true;
+    const rules = await this._getGitignoreRules();
+    if (rules.length === 0) return false;
+    return shouldIgnore(relativePath, isDir, rules);
   }
 
   private async withWriteLock<T>(operation: () => Promise<T>): Promise<T> {
@@ -677,6 +832,7 @@ export class WorkspaceStore {
     const existed = await IOUtils.exists(fileAbsPath).catch(() => false);
     const encoder = new TextEncoder();
     await IOUtils.write(fileAbsPath, encoder.encode(content));
+    this._gitignoreCache = null;
     this.onWorkspaceChanged?.();
     return { versionId: this.generateId(), created: !existed };
   }
@@ -689,7 +845,10 @@ export class WorkspaceStore {
     } catch {
       return false;
     }
-    await IOUtils.remove(fileAbsPath);
+
+    if (!this.isCustomWorkspace) {
+      await IOUtils.remove(fileAbsPath);
+    }
 
     const gitOk = await this.ensureGitAvailable();
     if (gitOk) {
@@ -701,6 +860,7 @@ export class WorkspaceStore {
         normalized,
       ]).catch(() => {});
     }
+    this._gitignoreCache = null;
     this.onWorkspaceChanged?.();
     return true;
   }
@@ -713,7 +873,10 @@ export class WorkspaceStore {
     } catch {
       return false;
     }
-    await (IOUtils as any).remove(folderAbsPath, { recursive: true });
+
+    if (!this.isCustomWorkspace) {
+      await (IOUtils as any).remove(folderAbsPath, { recursive: true });
+    }
 
     const gitOk = await this.ensureGitAvailable();
     if (gitOk) {
@@ -726,6 +889,7 @@ export class WorkspaceStore {
         normalized,
       ]).catch(() => {});
     }
+    this._gitignoreCache = null;
     this.onWorkspaceChanged?.();
     return true;
   }
@@ -759,6 +923,7 @@ export class WorkspaceStore {
         newNormalized,
       ]).catch(() => {});
     }
+    this._gitignoreCache = null;
     this.onWorkspaceChanged?.();
     return true;
   }
@@ -885,6 +1050,9 @@ export class WorkspaceStore {
       } catch {
         continue;
       }
+
+      if (await this._shouldIgnorePath(childRelative, isDir)) continue;
+
       if (isDir) {
         const childEntries = await this.collectTree(childAbs, childRelative);
         if (childEntries.length > 0) {
@@ -955,6 +1123,9 @@ export class WorkspaceStore {
       } catch {
         continue;
       }
+
+      if (await this._shouldIgnorePath(childRelative, isDir)) continue;
+
       if (isDir) {
         await this.collectFiles(childAbs, childRelative, entries);
       } else {
@@ -1024,6 +1195,16 @@ export class WorkspaceStore {
     this._stagedContentCache.set(normalized, file?.content ?? "");
     this._trackedSetPromise = null;
     this._ignoredSetPromise = null;
+    this._gitignoreCache = null;
+    this.onWorkspaceChanged?.();
+  }
+
+  async stageAll(): Promise<void> {
+    await this.ensureInit();
+    await execGit(this.workspaceDir, ["add", "-A"]);
+    this._trackedSetPromise = null;
+    this._ignoredSetPromise = null;
+    this._gitignoreCache = null;
     this.onWorkspaceChanged?.();
   }
 
@@ -1034,14 +1215,6 @@ export class WorkspaceStore {
       () => {},
     );
     this._stagedContentCache.delete(normalized);
-    this.onWorkspaceChanged?.();
-  }
-
-  async stageAll(): Promise<void> {
-    await this.ensureInit();
-    await execGit(this.workspaceDir, ["add", "-A"]);
-    this._trackedSetPromise = null;
-    this._ignoredSetPromise = null;
     this.onWorkspaceChanged?.();
   }
 
@@ -1091,6 +1264,7 @@ export class WorkspaceStore {
     this._stagedContentCache.clear();
     this._trackedSetPromise = null;
     this._ignoredSetPromise = null;
+    this._gitignoreCache = null;
     this.onWorkspaceChanged?.();
     return hashResult.exitCode === 0 ? hashResult.stdout.trim() : null;
   }
@@ -1160,20 +1334,6 @@ export class WorkspaceStore {
       Zotero.debug(
         `[seerai] getGitStatus: git status failed (exit=${statusResult.exitCode}): stdout=${statusResult.stdout.slice(0, 200)} stderr=${statusResult.stderr.slice(0, 200)}`,
       );
-      const ignoredSet = await this.getIgnoredFileSet();
-      for (const f of diskFiles) {
-        if (ignoredSet.has(f.path)) continue;
-        const file = await this.readFile(f.path);
-        changes.push({
-          path: f.path,
-          entry: {
-            ...f,
-            status: "untracked",
-            gitStatus: "untracked" as FileGitStatus,
-            content: file?.content,
-          },
-        });
-      }
       return { staged, changes, stagedContent, headContent };
     }
 
@@ -1334,6 +1494,7 @@ export class WorkspaceStore {
 
     this._trackedSetPromise = null;
     this._ignoredSetPromise = null;
+    this._gitignoreCache = null;
     this.onWorkspaceChanged?.();
   }
 
@@ -1553,6 +1714,7 @@ export class WorkspaceStore {
     this._stagedContentCache.clear();
     this._trackedSetPromise = null;
     this._ignoredSetPromise = null;
+    this._gitignoreCache = null;
     this.onWorkspaceChanged?.();
   }
 
