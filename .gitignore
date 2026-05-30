@@ -11,12 +11,15 @@ yarn.lock
 # TSC
 tsconfig.tsbuildinfo
 
+# Documentation
+plan
+doc
+
 # Scaffold
 .env
 .scaffold
 build
 logs
-doc
 seerai.xpi
 seerai-mcp.cjs
 .agent

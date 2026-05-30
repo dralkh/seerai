@@ -68,6 +68,11 @@ const ENDPOINTS = [
   // Completion signal
   TOOL_NAMES.TASK_COMPLETE,
 
+  // Semantic & keyword search tools
+  TOOL_NAMES.SEMANTIC_SEARCH,
+  TOOL_NAMES.KEYWORD_SEARCH,
+  TOOL_NAMES.READ_CHUNKS,
+
   // Workspace tools
   TOOL_NAMES.WORKSPACE_READ_FILE,
   TOOL_NAMES.WORKSPACE_WRITE_FILE,

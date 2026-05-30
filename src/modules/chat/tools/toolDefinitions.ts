@@ -147,6 +147,11 @@ export const agentTools: ToolDefinition[] = [
               "Maximum number of results to return (default: 10, max: 50)",
             default: 10,
           },
+          library_id: {
+            type: "integer",
+            description:
+              "Library ID to restrict search to a specific library (user library or group library). Omit to search all libraries.",
+          },
         },
         required: ["query"],
       },
@@ -178,7 +183,7 @@ export const agentTools: ToolDefinition[] = [
     function: {
       name: TOOL_NAMES.READ_ITEM_CONTENT,
       description:
-        "Read the full content of a paper/item. This retrieves text from notes, PDF content, or OCR depending on availability. Use this when you need to analyze the actual content of a paper, not just its metadata.",
+        "Read the full content of a paper/item. When pre-indexed chunks are available in the semantic index, returns those directly for faster retrieval. Otherwise, extracts text from notes, PDF content, or OCR depending on availability. Use this when you need to analyze the actual content of a paper, not just its metadata.",
       parameters: {
         type: "object",
         properties: {
@@ -541,6 +546,216 @@ export const agentTools: ToolDefinition[] = [
           limit: { type: "integer", default: 5 },
         },
         required: ["action"],
+      },
+    },
+  },
+
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.SEMANTIC_SEARCH,
+      description:
+        "Semantically search your Zotero library for relevant passages. " +
+        "Use this to find information across your papers, notes, and PDFs, " +
+        "even when the exact wording differs from your query. " +
+        "Returns ranked passages with relevance scores and source attribution. " +
+        "This is ideal for finding concepts, themes, and evidence across your entire library. " +
+        "Default scope is 'library' — searches all indexed items. Use 'collection' with a collection_id to search a specific folder. " +
+        "Use 'context' only when the user has explicitly added specific papers to the chat context.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description:
+              "Natural language search query. Be specific about what you're looking for.",
+          },
+          scope: {
+            type: "string",
+            enum: ["context", "library", "collection"],
+            description:
+              "What to search. Default is 'library' (all indexed items). Use 'collection' with a collection_id for a specific folder. Use 'context' only when user has added papers to chat context.",
+          },
+          library_id: {
+            type: "integer",
+            description:
+              "Library ID to restrict search to a specific library. Use when scope is 'library' to narrow to a user or group library.",
+          },
+          collection_id: {
+            type: "number",
+            description:
+              "Collection ID (required if scope is 'collection'). Collections are always searched recursively including sub-collections.",
+          },
+          top_k: {
+            type: "number",
+            description: "Number of results to return (default: 5, max: 20)",
+          },
+          min_score: {
+            type: "number",
+            description: "Minimum relevance score 0-100 (default: 30)",
+          },
+          sources: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: ["abstract", "pdf", "note", "metadata", "table", "file"],
+            },
+            description:
+              "Filter results to specific chunk sources. 'abstract' for paper abstracts, 'pdf' for full-text PDF content, 'note' for user notes. Omit to search all sources.",
+          },
+          include_full_text: {
+            type: "boolean",
+            description:
+              "Include full passage text instead of a 1000-character preview (default: false). Set to true when you need complete context from a passage.",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.KEYWORD_SEARCH,
+      description:
+        "Fast keyword-based search of your Zotero library using BM25 lexical matching. " +
+        "Use this for exact terminology searches (gene names, chemical compounds, " +
+        "mathematical concepts, author names) where precise word matching matters. " +
+        "This is faster and cheaper than semantic_search — use it first, " +
+        "then escalate to semantic_search if you need conceptual understanding. " +
+        "Default scope is 'library' — searches all indexed items. Use 'collection' with a collection_id for a specific folder. " +
+        "Use 'context' only when the user has explicitly added specific papers to chat context.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description:
+              "Search terms for exact matching. Use specific terminology, gene names, " +
+              "compound names, or technical terms",
+          },
+          scope: {
+            type: "string",
+            enum: ["context", "library", "collection"],
+            description:
+              "What to search. Default is 'library' (all indexed items). Use 'collection' with a collection_id for a specific folder. Use 'context' only when user has added papers to chat context.",
+          },
+          library_id: {
+            type: "integer",
+            description:
+              "Library ID to restrict search to a specific library. Use when scope is 'library' to narrow to a user or group library.",
+          },
+          collection_id: {
+            type: "number",
+            description:
+              "Collection ID (required if scope is 'collection'). Collections are always searched recursively including sub-collections.",
+          },
+          top_k: {
+            type: "number",
+            description: "Number of results to return (default: 5, max: 20)",
+          },
+          sources: {
+            type: "array",
+            items: {
+              type: "string",
+              enum: ["abstract", "pdf", "note", "metadata", "table", "file"],
+            },
+            description:
+              "Filter results to specific chunk sources. 'pdf' for full-text content, 'abstract' for abstracts, 'note' for user notes. Omit to search all sources.",
+          },
+        },
+        required: ["query"],
+      },
+    },
+  },
+
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.READ_CHUNKS,
+      description:
+        "Read specific text chunks/passages from indexed papers by chunk ID or item ID. Use after semantic_search or keyword_search to get the full text of interesting passages. " +
+        "Respects scope restrictions — chunks outside the specified scope are excluded. Requires either chunk_ids or item_id.",
+      parameters: {
+        type: "object",
+        properties: {
+          chunk_ids: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "List of chunk IDs to read (e.g. from semantic_search results). Required if item_id is not provided.",
+          },
+          item_id: {
+            type: "number",
+            description:
+              "Item ID to read all chunks from (returns top matched chunks). Required if chunk_ids is not provided.",
+          },
+          max_chunks: {
+            type: "number",
+            description: "Maximum chunks to return (default: 10, max: 50)",
+          },
+          scope: {
+            type: "string",
+            enum: ["context", "library", "collection"],
+            description:
+              "Scope to restrict which items can be read. Default is 'library' (all indexed items). Use 'context' only when user has added papers to chat context.",
+          },
+          library_id: {
+            type: "integer",
+            description:
+              "Library ID to restrict to a specific library. Use with scope 'library' to narrow to a user or group library.",
+          },
+          collection_id: {
+            type: "number",
+            description:
+              "Collection ID. Required if scope is 'collection'. (Collections are always searched recursively with sub-collections.)",
+          },
+        },
+      },
+    },
+  },
+
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.SEARCH_SIMILAR,
+      description:
+        "Find papers similar to a given item using embedding similarity. " +
+        "Use this to discover related papers, find alternative sources, or explore a research topic. " +
+        "The source item must be indexed (add it to chat context first).",
+      parameters: {
+        type: "object",
+        properties: {
+          item_id: {
+            type: "number",
+            description: "Item ID to find similar papers to",
+          },
+          top_k: {
+            type: "number",
+            description:
+              "Number of similar items to return (default: 5, max: 20)",
+          },
+          min_score: {
+            type: "number",
+            description: "Minimum similarity score 0-100 (default: 30)",
+          },
+          scope: {
+            type: "string",
+            enum: ["context", "library", "collection"],
+            description:
+              "Where to search for similar items: 'context' (current chat), 'library' (all indexed), or 'collection' (specific collection). Default: 'library'.",
+          },
+          library_id: {
+            type: "integer",
+            description: "Library ID to restrict search to a specific library",
+          },
+          collection_id: {
+            type: "number",
+            description: "Collection ID (required if scope is 'collection')",
+          },
+        },
+        required: ["item_id"],
       },
     },
   },

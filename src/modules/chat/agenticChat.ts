@@ -20,7 +20,6 @@ import {
   type AgentQuery,
   type ProviderEvent,
 } from "../openai";
-import { config } from "../../../package.json";
 import {
   getFilteredAgentTools,
   executeToolCall,
@@ -632,6 +631,7 @@ export function createToolProcessUI(doc: Document): {
         min-width: 0;
         max-width: 100%;
         box-sizing: border-box;
+        user-select: text;
     `;
 
   const summary = doc.createElementNS(HTML_NS, "summary") as HTMLElement;
@@ -893,15 +893,8 @@ export function createToolExecutionUI(
   details.className = "tool-execution-card";
   details.setAttribute("data-tool-id", toolCall.id);
 
-  // Auto-expand if it failed, or if it's an interactive workspace_question
-  if (result && !result.success) {
-    details.open = true;
-  }
-  if (
-    result &&
-    result.success &&
-    toolCall.function.name === "workspace_question"
-  ) {
+  // Auto-expand all completed tool calls so results are visible on re-render
+  if (result) {
     details.open = true;
   }
 
@@ -913,6 +906,7 @@ export function createToolExecutionUI(
         min-width: 0;
         max-width: 100%;
         box-sizing: border-box;
+        user-select: text;
     `;
 
   // Summary (Header)
@@ -994,6 +988,8 @@ export function createToolExecutionUI(
         word-break: break-word;
         max-width: 100%;
         box-sizing: border-box;
+        user-select: text;
+        cursor: text;
     `;
 
   // Arguments
@@ -1105,7 +1101,9 @@ export async function handleAgenticChat(
   // Get tools if enabled, filtered by permission settings
   let allFilteredTools = getFilteredAgentTools();
   if (options.allowedTools) {
-    allFilteredTools = allFilteredTools.filter(t => options.allowedTools!.includes(t.function.name));
+    allFilteredTools = allFilteredTools.filter((t) =>
+      options.allowedTools!.includes(t.function.name),
+    );
   }
   const tools: ToolDefinition[] | undefined = options.enableTools
     ? allFilteredTools
@@ -1464,9 +1462,8 @@ export async function handleAgenticChat(
  */
 export function isAgenticModeEnabled(): boolean {
   try {
-    const prefPrefix = config.prefsPrefix;
-    const enabled = Zotero.Prefs.get(`${prefPrefix}.agenticMode`);
-    return enabled === true; // Default to false
+    const enabled = Zotero.Prefs.get("extensions.seerai.agenticMode");
+    return enabled === true;
   } catch (e) {
     return false;
   }

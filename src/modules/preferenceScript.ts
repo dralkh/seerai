@@ -403,6 +403,110 @@ function bindPrefEvents() {
     "tableGenerationSound",
   );
 
+  // RAG Reranker settings
+  (() => {
+    const providerSelect = doc?.querySelector(
+      `#zotero-prefpane-${config.addonRef}-ragRerankerProvider`,
+    ) as XUL.MenuList;
+    if (providerSelect) {
+      const currentProvider =
+        (Zotero.Prefs.get(`${prefPrefix}.ragRerankerProvider`) as string) ||
+        "none";
+      providerSelect.value = currentProvider;
+      providerSelect.addEventListener("command", () => {
+        Zotero.Prefs.set(
+          `${prefPrefix}.ragRerankerProvider`,
+          providerSelect.value,
+        );
+      });
+    }
+
+    bindInput(
+      `zotero-prefpane-${config.addonRef}-ragRerankerApiKey`,
+      "ragRerankerApiKey",
+    );
+    bindInput(
+      `zotero-prefpane-${config.addonRef}-ragRerankerModel`,
+      "ragRerankerModel",
+    );
+    bindInput(
+      `zotero-prefpane-${config.addonRef}-ragRerankerTopN`,
+      "ragRerankerTopN",
+    );
+    bindInput(`zotero-prefpane-${config.addonRef}-ragRrfAlpha`, "ragRrfAlpha");
+    bindCheckbox(
+      `zotero-prefpane-${config.addonRef}-ragMmrEnabled`,
+      "ragMmrEnabled",
+    );
+    bindInput(
+      `zotero-prefpane-${config.addonRef}-ragMmrLambda`,
+      "ragMmrLambda",
+    );
+  })();
+
+  // Phase 8 RAG settings
+  (() => {
+    bindCheckbox(
+      `zotero-prefpane-${config.addonRef}-ragContextualRetrieval`,
+      "ragContextualRetrieval",
+    );
+    bindCheckbox(
+      `zotero-prefpane-${config.addonRef}-ragSentenceWindow`,
+      "ragSentenceWindow",
+    );
+    bindInput(
+      `zotero-prefpane-${config.addonRef}-ragSentenceWindowSize`,
+      "ragSentenceWindowSize",
+    );
+    bindCheckbox(
+      `zotero-prefpane-${config.addonRef}-ragMultiQueryExpansion`,
+      "ragMultiQueryExpansion",
+    );
+    bindCheckbox(
+      `zotero-prefpane-${config.addonRef}-ragQueryDecomposition`,
+      "ragQueryDecomposition",
+    );
+    bindInput(
+      `zotero-prefpane-${config.addonRef}-ragCitationGraphHops`,
+      "ragCitationGraphHops",
+    );
+    bindCheckbox(
+      `zotero-prefpane-${config.addonRef}-ragCorrectiveEnabled`,
+      "ragCorrectiveEnabled",
+    );
+    bindCheckbox(
+      `zotero-prefpane-${config.addonRef}-ragEvalEnabled`,
+      "ragEvalEnabled",
+    );
+    bindInput(
+      `zotero-prefpane-${config.addonRef}-ragEvalGroundTruth`,
+      "ragEvalGroundTruth",
+    );
+    bindInput(
+      `zotero-prefpane-${config.addonRef}-ragEvalEmbeddingModel`,
+      "ragEvalEmbeddingModel",
+    );
+
+    const clearBtn = doc?.querySelector(
+      `#zotero-prefpane-${config.addonRef}-clearRagCache`,
+    ) as HTMLButtonElement;
+    if (clearBtn) {
+      clearBtn.addEventListener("click", async () => {
+        try {
+          const { getVectorStore } = await import("./chat/rag/vectorStore");
+          const store = getVectorStore();
+          await store.clearAll();
+          Zotero.debug("[seerai] RAG: vector cache cleared");
+          const ZM = ztoolkit.getGlobal("Zotero").getMainWindow();
+          const svc = ZM.require("./services/prompts");
+          if (svc) svc.alert("", "RAG vector cache cleared.");
+        } catch (e) {
+          Zotero.debug(`[seerai] RAG: cache clear failed: ${e}`);
+        }
+      });
+    }
+  })();
+
   // Initialize MCP Integration UI
   initMcpIntegrationUI();
 

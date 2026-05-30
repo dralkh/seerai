@@ -959,6 +959,156 @@ function showCodePreviewModal(
 // ─── HTML namespace for XUL-compatible element creation ──────────────────────
 const RAG_HTML_NS = "http://www.w3.org/1999/xhtml";
 
+const RAG_STYLE_ID = "seerai-rag-progress-styles";
+
+export function injectRAGStyles(doc: Document): void {
+  if (doc.getElementById(RAG_STYLE_ID)) return;
+  const style = doc.createElementNS(RAG_HTML_NS, "style") as HTMLStyleElement;
+  style.id = RAG_STYLE_ID;
+  style.textContent = `
+    .rag-rank-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 11.5px; color: var(--text-primary, #333); border-bottom: 1px solid var(--fill-quaternary, rgba(0,0,0,0.04)); }
+    .rag-rank-row:last-child { border-bottom: none; }
+    .rag-rank-pos { flex-shrink: 0; width: 18px; text-align: right; font-weight: 600; color: var(--text-tertiary, #888); font-size: 10.5px; }
+    .rag-rank-bar-bg { flex-shrink: 0; width: 60px; height: 6px; background: var(--fill-quaternary, #e8e8e8); border-radius: 3px; overflow: hidden; }
+    .rag-rank-bar { height: 100%; border-radius: 3px; transition: width 0.3s ease; }
+    .rag-rank-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-wrap: break-word; white-space: normal; }
+    .rag-rank-score { flex-shrink: 0; font-size: 10px; font-weight: 500; color: var(--text-tertiary, #888); font-variant-numeric: tabular-nums; }
+    .rag-rank-source { flex-shrink: 0; font-size: 9px; padding: 1px 4px; border-radius: 3px; background: var(--fill-quaternary, #eee); color: var(--text-tertiary, #888); text-transform: uppercase; letter-spacing: 0.3px; }
+    @keyframes rag-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    @keyframes rag-bar-fill { from { width: 0; } }
+  `;
+  const styleTarget = doc.head || doc.documentElement;
+  if (styleTarget) styleTarget.appendChild(style);
+}
+
+export function ragScoreColor(score: number): string {
+  if (score >= 0.7) return "#34C759";
+  if (score >= 0.5) return "#FF9500";
+  if (score >= 0.3) return "#FFCC02";
+  return "#FF3B30";
+}
+
+export const SOURCE_COLORS: Record<string, { bg: string; color: string }> = {
+  table: { bg: "rgba(33, 150, 243, 0.15)", color: "rgba(33, 150, 243, 0.85)" },
+  file: { bg: "rgba(255, 152, 0, 0.15)", color: "rgba(255, 152, 0, 0.85)" },
+  pdf: { bg: "rgba(76, 175, 80, 0.15)", color: "rgba(76, 175, 80, 0.85)" },
+  note: { bg: "rgba(156, 39, 176, 0.15)", color: "rgba(156, 39, 176, 0.85)" },
+  abstract: { bg: "rgba(255, 193, 7, 0.15)", color: "rgba(255, 193, 7, 0.85)" },
+  metadata: {
+    bg: "rgba(96, 125, 139, 0.15)",
+    color: "rgba(96, 125, 139, 0.85)",
+  },
+};
+
+export interface RAGRankedItem {
+  title: string;
+  score: number;
+  source: string;
+  description?: string;
+  itemId: number;
+}
+
+export function createRAGRankRow(
+  doc: Document,
+  item: RAGRankedItem,
+  position: number,
+  maxScore: number,
+  opts?: {
+    clickToNavigate?: boolean;
+    showAddToContext?: boolean;
+    onAddToContext?: (itemId: number, title: string) => void;
+  },
+): HTMLElement {
+  const isVerbatim = item.score < 0;
+  const row = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+  row.className = "rag-rank-row";
+
+  const pos = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
+  pos.className = "rag-rank-pos";
+  pos.textContent = isVerbatim ? "\u2022" : `${position}`;
+  row.appendChild(pos);
+
+  const barBg = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+  barBg.className = "rag-rank-bar-bg";
+  const bar = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+  bar.className = "rag-rank-bar";
+  if (isVerbatim) {
+    bar.style.width = "100%";
+    bar.style.background = "#42A5F5";
+  } else {
+    const pct = maxScore > 0 ? (item.score / maxScore) * 100 : 0;
+    bar.style.width = `${pct}%`;
+    bar.style.background = ragScoreColor(item.score);
+  }
+  barBg.appendChild(bar);
+  row.appendChild(barBg);
+
+  const titleBlock = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+  titleBlock.style.cssText =
+    "flex: 1; min-width: 0; width: 100%; overflow-wrap: anywhere; word-wrap: break-word;";
+
+  const title = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+  title.className = "rag-rank-title";
+  title.textContent = item.title;
+  title.title = item.title;
+  if (opts?.clickToNavigate) {
+    title.style.cursor = "pointer";
+    title.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const zp = Zotero.getActiveZoteroPane();
+      if (zp) zp.selectItem(item.itemId);
+    });
+  }
+  titleBlock.appendChild(title);
+
+  if (item.description) {
+    const desc = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
+    desc.style.cssText =
+      "font-size: 10px; color: var(--text-tertiary, #999); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; line-height: 1.3; margin-top: 2px; overflow-wrap: anywhere; word-wrap: break-word;";
+    desc.textContent = item.description;
+    desc.title = item.description;
+    titleBlock.appendChild(desc);
+  }
+  row.appendChild(titleBlock);
+
+  const scoreEl = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
+  scoreEl.className = "rag-rank-score";
+  if (isVerbatim) {
+    scoreEl.textContent = "verbatim";
+    scoreEl.style.fontSize = "9px";
+    scoreEl.style.color = "#42A5F5";
+  } else {
+    scoreEl.textContent = item.score.toFixed(3);
+  }
+  row.appendChild(scoreEl);
+
+  const source = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
+  source.className = "rag-rank-source";
+  source.textContent = item.source;
+  const sc = SOURCE_COLORS[item.source] || SOURCE_COLORS.note;
+  source.style.background = sc.bg;
+  source.style.color = sc.color;
+  row.appendChild(source);
+
+  if (opts?.showAddToContext && opts?.onAddToContext) {
+    const addBtn = doc.createElementNS(
+      RAG_HTML_NS,
+      "button",
+    ) as HTMLButtonElement;
+    addBtn.textContent = "+";
+    addBtn.title = `Add "${item.title}" to context`;
+    addBtn.style.cssText =
+      "flex-shrink: 0; font-size: 9px; padding: 1px 6px; border: 1px solid var(--border-primary, #ccc); border-radius: 3px; background: var(--background-secondary); color: var(--text-primary); cursor: pointer; line-height: 1.2; margin-left: 2px;";
+    addBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      opts.onAddToContext!(item.itemId, item.title);
+    });
+    row.appendChild(addBtn);
+  }
+
+  return row;
+}
+
 /**
  * Create a live RAG progress UI component.
  *
@@ -975,24 +1125,32 @@ const RAG_HTML_NS = "http://www.w3.org/1999/xhtml";
 export function createRAGProgressUI(doc: Document): {
   container: HTMLElement;
   update: (event: RAGProgressEvent) => void;
+  dismiss: (reason: string) => void;
+  getIsOpen: () => boolean;
 } {
   const details = doc.createElementNS(
     RAG_HTML_NS,
     "details",
   ) as HTMLDetailsElement;
+  details.classList.add("seerai-rag-progress");
   details.open = true; // start expanded so user sees progress
   details.style.cssText = `
     margin: 4px 0 8px 0;
     border: 1px solid var(--border-secondary, #e0e0e0);
     border-radius: 8px;
     background: var(--background-primary, #fff);
-    overflow: hidden;
     box-shadow: 0 1px 3px rgba(0,0,0,0.06);
     font-size: 12.5px;
     line-height: 1.4;
+    min-width: 0;
+    max-width: 100%;
+    width: 100%;
+    box-sizing: border-box;
+    overflow-wrap: anywhere;
+    word-wrap: break-word;
   `;
 
-  // ── Summary bar ────────────────────────────────────────────────────────
+  // ── Summaries ────────────────────────────────────────────────────────
   const summary = doc.createElementNS(RAG_HTML_NS, "summary") as HTMLElement;
   summary.style.cssText = `
     padding: 6px 10px;
@@ -1047,80 +1205,7 @@ export function createRAGProgressUI(doc: Document): {
   details.appendChild(listContainer);
 
   // ── CSS animation (injected once) ──────────────────────────────────────
-  const styleId = "seerai-rag-progress-styles";
-  if (!doc.getElementById(styleId)) {
-    const style = doc.createElementNS(RAG_HTML_NS, "style") as HTMLElement;
-    style.id = styleId;
-    style.textContent = `
-      @keyframes rag-spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-      }
-      @keyframes rag-bar-fill {
-        from { width: 0; }
-      }
-      .rag-rank-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 0;
-        font-size: 11.5px;
-        color: var(--text-primary, #333);
-        border-bottom: 1px solid var(--fill-quaternary, rgba(0,0,0,0.04));
-      }
-      .rag-rank-row:last-child {
-        border-bottom: none;
-      }
-      .rag-rank-pos {
-        flex-shrink: 0;
-        width: 18px;
-        text-align: right;
-        font-weight: 600;
-        color: var(--text-tertiary, #888);
-        font-size: 10.5px;
-      }
-      .rag-rank-bar-bg {
-        flex-shrink: 0;
-        width: 60px;
-        height: 6px;
-        background: var(--fill-quaternary, #e8e8e8);
-        border-radius: 3px;
-        overflow: hidden;
-      }
-      .rag-rank-bar {
-        height: 100%;
-        border-radius: 3px;
-        animation: rag-bar-fill 0.4s ease-out;
-        transition: width 0.3s ease;
-      }
-      .rag-rank-title {
-        flex: 1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        min-width: 0;
-      }
-      .rag-rank-score {
-        flex-shrink: 0;
-        font-size: 10px;
-        font-weight: 500;
-        color: var(--text-tertiary, #888);
-        font-variant-numeric: tabular-nums;
-      }
-      .rag-rank-source {
-        flex-shrink: 0;
-        font-size: 9px;
-        padding: 1px 4px;
-        border-radius: 3px;
-        background: var(--fill-quaternary, #eee);
-        color: var(--text-tertiary, #888);
-        text-transform: uppercase;
-        letter-spacing: 0.3px;
-      }
-    `;
-    const styleTarget = doc.head || doc.documentElement;
-    if (styleTarget) styleTarget.appendChild(style);
-  }
+  injectRAGStyles(doc);
 
   // ── Step label (below summary, inside list area) ───────────────────────
   const stepLabel = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
@@ -1136,25 +1221,15 @@ export function createRAGProgressUI(doc: Document): {
   const rankList = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
   listContainer.appendChild(rankList);
 
-  // ── Score-to-color helper ──────────────────────────────────────────────
-  function scoreColor(score: number): string {
-    // Green (high) → Yellow (mid) → Red (low)
-    if (score >= 0.7) return "#34C759";
-    if (score >= 0.5) return "#FF9500";
-    if (score >= 0.3) return "#FFCC02";
-    return "#FF3B30";
-  }
-
   // ── Update function ────────────────────────────────────────────────────
   function update(event: RAGProgressEvent): void {
-    // Update status label
     const stepIcons: Record<string, string> = {
-      indexing: "\uD83D\uDCDA", // 📚
-      "embedding-query": "\uD83D\uDD0D", // 🔍
-      searching: "\uD83D\uDD0E", // 🔎
-      reranking: "\u2696\uFE0F", // ⚖️
-      assembling: "\uD83D\uDCE6", // 📦
-      "embedding-passthrough": "\uD83D\uDCCA", // 📊
+      indexing: "\u2261", // ≡
+      "embedding-query": "\u25CB", // ○
+      searching: "\u25D0", // ◐
+      reranking: "\u21C5", // ⇅
+      assembling: "\u25A3", // ▣
+      "embedding-passthrough": "\u25A1", // □
       complete: "\u2713", // ✓
     };
 
@@ -1163,12 +1238,14 @@ export function createRAGProgressUI(doc: Document): {
     if (event.step === "complete") {
       spinner.textContent = "\u2713"; // ✓
       spinner.style.animation = "none";
-      spinner.style.color = "var(--accent-green, #34C759)";
+      if (event.error) {
+        spinner.style.color = "var(--accent-red, #FF3B30)";
+      } else {
+        spinner.style.color = "var(--accent-green, #34C759)";
+      }
       statusLabel.textContent = `Smart Context: ${event.message}`;
-      // Auto-collapse after a short delay
-      setTimeout(() => {
-        details.open = false;
-      }, 2000);
+      // Keep open so user can inspect passages
+      details.open = true;
     } else {
       spinner.textContent = icon;
       statusLabel.textContent = `Smart Context: ${event.message}`;
@@ -1185,105 +1262,72 @@ export function createRAGProgressUI(doc: Document): {
       const maxScore = scoredItems.length > 0 ? scoredItems[0].score : 1;
 
       event.rankedResults.forEach((item, idx) => {
-        const isVerbatim = item.score < 0;
-        const row = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
-        row.className = "rag-rank-row";
+        const row = createRAGRankRow(doc, item, idx + 1, maxScore);
+        rankList.appendChild(row);
+      });
 
-        // Position number
-        const pos = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
-        pos.className = "rag-rank-pos";
-        pos.textContent = isVerbatim ? "\u2022" : `${idx + 1}`;
-
-        // Score bar
-        const barBg = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
-        barBg.className = "rag-rank-bar-bg";
-        const bar = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
-        bar.className = "rag-rank-bar";
-        if (isVerbatim) {
-          // Verbatim passthrough items get a full-width bar in a distinct color
-          bar.style.width = "100%";
-          bar.style.background = "#42A5F5"; // blue for "included verbatim"
-        } else {
-          const pct = maxScore > 0 ? (item.score / maxScore) * 100 : 0;
-          bar.style.width = `${pct}%`;
-          bar.style.background = scoreColor(item.score);
-        }
-        barBg.appendChild(bar);
-
-        // Title + description container
-        const titleBlock = doc.createElementNS(
+      if (event.step === "complete") {
+        const feedbackRow = doc.createElementNS(
           RAG_HTML_NS,
           "div",
         ) as HTMLElement;
-        titleBlock.style.cssText = `
-          flex: 1;
-          overflow: hidden;
-          min-width: 0;
-        `;
+        feedbackRow.style.cssText =
+          "padding: 4px 0; font-size: 10px; color: var(--text-tertiary); display: flex; gap: 6px; align-items: center; margin-top: 4px;";
+        const feedbackLabel = doc.createElementNS(
+          RAG_HTML_NS,
+          "span",
+        ) as HTMLElement;
+        feedbackLabel.textContent = "Was this helpful?";
+        feedbackRow.appendChild(feedbackLabel);
 
-        const title = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
-        title.className = "rag-rank-title";
-        title.textContent = item.title;
-        title.title = item.title; // full title on hover
-        titleBlock.appendChild(title);
-
-        // Description (content preview) — shown if available
-        if (item.description) {
-          const desc = doc.createElementNS(RAG_HTML_NS, "div") as HTMLElement;
-          desc.style.cssText = `
-            font-size: 10px;
-            color: var(--text-tertiary, #999);
-            overflow: hidden;
-            display: -webkit-box;
-            -webkit-line-clamp: 3;
-            -webkit-box-orient: vertical;
-            line-height: 1.3;
-            margin-top: 2px;
-            word-break: break-word;
-          `;
-          desc.textContent = item.description;
-          desc.title = item.description;
-          titleBlock.appendChild(desc);
-        }
-
-        // Score number (or "verbatim" label for passthrough items)
-        const scoreEl = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
-        scoreEl.className = "rag-rank-score";
-        if (isVerbatim) {
-          scoreEl.textContent = "verbatim";
-          scoreEl.style.fontSize = "9px";
-          scoreEl.style.color = "#42A5F5";
-        } else {
-          scoreEl.textContent = item.score.toFixed(3);
-        }
-
-        // Source badge with type-specific coloring
-        const source = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
-        source.className = "rag-rank-source";
-        source.textContent = item.source;
-
-        // Color-code by source type
-        const sourceColors: Record<string, { bg: string; color: string }> = {
-          table: { bg: "#E3F2FD", color: "#1565C0" },
-          file: { bg: "#FFF3E0", color: "#E65100" },
-          pdf: { bg: "#E8F5E9", color: "#2E7D32" },
-          note: { bg: "#F3E5F5", color: "#6A1B9A" },
-          abstract: { bg: "#FFFDE7", color: "#F57F17" },
-          metadata: { bg: "#ECEFF1", color: "#455A64" },
+        const thumbsUp = doc.createElementNS(
+          RAG_HTML_NS,
+          "button",
+        ) as HTMLButtonElement;
+        thumbsUp.textContent = "\u2714";
+        thumbsUp.style.cssText =
+          "background: none; border: 1px solid var(--border-secondary); border-radius: 3px; padding: 1px 5px; cursor: pointer; font-size: 11px; color: var(--text-secondary); line-height: 1;";
+        thumbsUp.onclick = () => {
+          thumbsUp.style.background = "var(--accent-green, #34C759)";
+          thumbsUp.style.color = "#fff";
+          thumbsUp.disabled = true;
+          (thumbsDown as HTMLButtonElement).disabled = true;
         };
-        const sc = sourceColors[item.source] || sourceColors.note;
-        source.style.background = sc.bg;
-        source.style.color = sc.color;
+        feedbackRow.appendChild(thumbsUp);
 
-        row.appendChild(pos);
-        row.appendChild(barBg);
-        row.appendChild(titleBlock);
-        row.appendChild(scoreEl);
-        row.appendChild(source);
-        rankList.appendChild(row);
-      });
+        const thumbsDown = doc.createElementNS(
+          RAG_HTML_NS,
+          "button",
+        ) as HTMLButtonElement;
+        thumbsDown.textContent = "\u2718";
+        thumbsDown.style.cssText =
+          "background: none; border: 1px solid var(--border-secondary); border-radius: 3px; padding: 1px 5px; cursor: pointer; font-size: 11px; color: var(--text-secondary); line-height: 1;";
+        thumbsDown.onclick = () => {
+          thumbsDown.style.background = "var(--accent-red, #FF3B30)";
+          thumbsDown.style.color = "#fff";
+          thumbsDown.disabled = true;
+          thumbsUp.disabled = true;
+        };
+        feedbackRow.appendChild(thumbsDown);
+
+        rankList.appendChild(feedbackRow);
+      }
     }
   }
 
-  return { container: details, update };
+  // ── Dismiss function — sets a non-progress state ────────────────────
+  function dismiss(reason: string): void {
+    spinner.textContent = "\u2713";
+    spinner.style.animation = "none";
+    spinner.style.color = "var(--text-tertiary, #888)";
+    statusLabel.textContent = `Smart Context: ${reason}`;
+    details.open = true;
+  }
+
+  return {
+    container: details,
+    update,
+    dismiss,
+    getIsOpen: () => details.open,
+  };
 }

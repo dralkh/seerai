@@ -21,14 +21,31 @@ export class EmbeddingService {
   /** Cached model list (per-provider, keyed by apiURL) */
   private modelListCache: Map<
     string,
-    { models: EmbeddingModelInfo[]; fetchedAt: number }
+    {
+      models: EmbeddingModelInfo[];
+      fetchedAt: number;
+      negativeCacheExpiry?: number;
+    }
   > = new Map();
 
   /** Cache TTL for model list (5 minutes) */
   private static readonly MODEL_CACHE_TTL = 5 * 60 * 1000;
 
+  /** Shorter TTL for negative (empty/failed) cache entries (60 seconds) */
+  private static readonly NEGATIVE_CACHE_TTL = 60 * 1000;
+
   /** Max concurrent embedding API requests when batching */
   private static readonly MAX_CONCURRENT_BATCHES = 4;
+
+  /** Query embedding cache (session-level, keyed by model:query) */
+  private queryCache: Map<string, { embedding: number[]; expiresAt: number }> =
+    new Map();
+
+  /** Cache TTL for query embeddings (5 minutes) */
+  private static readonly QUERY_CACHE_TTL = 5 * 60 * 1000;
+
+  /** Max entries in query cache */
+  private static readonly QUERY_CACHE_MAX = 100;
 
   private constructor() {}
 
@@ -229,6 +246,37 @@ export class EmbeddingService {
   }
 
   /**
+   * Get embedding with session-level caching for repeated queries.
+   * Caches by model:query key with 5-minute TTL.
+   */
+  async getQueryEmbedding(query: string): Promise<number[]> {
+    const model = this.getConfiguredModel() || "unknown";
+    const key = `${model}:${query}`;
+
+    const cached = this.queryCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      Zotero.debug(
+        `[seerai] Embedding cache hit for "${query.substring(0, 40)}..."`,
+      );
+      return cached.embedding;
+    }
+
+    const embedding = await this.getEmbedding(query);
+
+    if (this.queryCache.size >= EmbeddingService.QUERY_CACHE_MAX) {
+      const oldest = this.queryCache.keys().next().value;
+      if (oldest) this.queryCache.delete(oldest);
+    }
+
+    this.queryCache.set(key, {
+      embedding,
+      expiresAt: Date.now() + EmbeddingService.QUERY_CACHE_TTL,
+    });
+
+    return embedding;
+  }
+
+  /**
    * Convenience: get embedding vectors for multiple texts.
    * Batches by both item count (max 2048) and estimated token count
    * (respects the configured maxTokens for the embedding model).
@@ -321,50 +369,45 @@ export class EmbeddingService {
 
   /**
    * Check if a given embedding model supports the `dimensions` parameter.
-   * Uses the cached model list from the provider (NanoGPT).
-   * For non-NanoGPT providers, conservatively returns true (user-configured).
+   * Uses the cached model list from the provider's embedding-models endpoint.
+   * For providers without a known models endpoint, conservatively returns true.
    */
   async modelSupportsDimensions(model: string): Promise<boolean> {
     const cfg = getActiveModelConfig();
-    if (!cfg) return true; // No config — can't check, allow it
-
-    const isNanoGPT = cfg.apiURL.includes("nano-gpt.com");
-    if (!isNanoGPT) return true; // Non-NanoGPT — assume user knows what they configured
+    if (!cfg) return true;
 
     const models = await this.fetchEmbeddingModels();
-    if (models.length === 0) return true; // Couldn't fetch — allow it
+    if (models.length === 0) return true;
 
     const modelInfo = models.find((m) => m.id === model);
-    if (!modelInfo) return true; // Unknown model — allow it (user may have typed a custom model)
+    if (!modelInfo) return true;
 
     return modelInfo.supports_dimensions;
   }
 
   /**
    * Fetch available embedding models from the provider.
-   * Currently only NanoGPT exposes a model list endpoint.
-   * For other providers, returns an empty array (user configures model manually).
+   * Attempts the standard /api/v1/embedding-models endpoint from the base URL.
+   * Returns empty array if the endpoint doesn't exist or fails.
    */
   async fetchEmbeddingModels(): Promise<EmbeddingModelInfo[]> {
     const cfg = getActiveModelConfig();
     if (!cfg) return [];
 
-    // Only NanoGPT has a dedicated embedding models endpoint
-    const isNanoGPT = cfg.apiURL.includes("nano-gpt.com");
-    if (!isNanoGPT) return [];
-
-    // Check cache
     const cacheKey = cfg.apiURL;
     const cached = this.modelListCache.get(cacheKey);
-    if (
-      cached &&
-      Date.now() - cached.fetchedAt < EmbeddingService.MODEL_CACHE_TTL
-    ) {
-      return cached.models;
+    if (cached) {
+      const ttl = cached.negativeCacheExpiry
+        ? EmbeddingService.NEGATIVE_CACHE_TTL
+        : EmbeddingService.MODEL_CACHE_TTL;
+      if (Date.now() - cached.fetchedAt < ttl) {
+        return cached.models;
+      }
     }
 
     try {
-      const modelsUrl = "https://nano-gpt.com/api/v1/embedding-models";
+      const baseUrl = cfg.apiURL.replace(/\/+$/, "");
+      const modelsUrl = `${baseUrl}/embedding-models`;
 
       Zotero.debug(`[seerai] Fetching embedding models from ${modelsUrl}`);
 
@@ -377,6 +420,11 @@ export class EmbeddingService {
       });
 
       if (!response.ok) {
+        this.modelListCache.set(cacheKey, {
+          models: [],
+          fetchedAt: Date.now(),
+          negativeCacheExpiry: Date.now(),
+        });
         Zotero.debug(
           `[seerai] Failed to fetch embedding models: ${response.status}`,
         );
@@ -387,7 +435,6 @@ export class EmbeddingService {
         (await response.json()) as unknown as EmbeddingModelsListResponse;
       const models = data.data || [];
 
-      // Update cache
       this.modelListCache.set(cacheKey, {
         models,
         fetchedAt: Date.now(),
@@ -398,6 +445,11 @@ export class EmbeddingService {
       );
       return models;
     } catch (error) {
+      this.modelListCache.set(cacheKey, {
+        models: [],
+        fetchedAt: Date.now(),
+        negativeCacheExpiry: Date.now(),
+      });
       Zotero.debug(`[seerai] Error fetching embedding models: ${error}`);
       return [];
     }

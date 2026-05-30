@@ -50,6 +50,12 @@ export const SearchLibraryParamsSchema = z.object({
     .default(10)
     .optional()
     .describe("Maximum number of results (default: 10, max: 50)"),
+  library_id: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Library ID to restrict search (user library or group library)"),
 });
 
 export const GetItemMetadataParamsSchema = z.object({
@@ -408,6 +414,170 @@ export const WorkspaceLogParamsSchema = z.object({
     .describe("Max history entries"),
 });
 
+export const SemanticSearchParamsSchema = z.object({
+  query: z.string().describe("Natural language search query"),
+  scope: z
+    .enum(["context", "library", "collection"])
+    .default("library")
+    .optional()
+    .describe("What to search"),
+  library_id: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Library ID to restrict search (user library or group library)"),
+  collection_id: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Collection ID (if scope is 'collection')"),
+  top_k: z
+    .number()
+    .int()
+    .min(1)
+    .max(20)
+    .default(5)
+    .optional()
+    .describe("Number of results to return"),
+  min_score: z
+    .number()
+    .int()
+    .min(0)
+    .max(100)
+    .default(30)
+    .optional()
+    .describe("Minimum relevance score 0-100"),
+  sources: z
+    .array(z.enum(["abstract", "pdf", "note", "metadata", "table", "file"]))
+    .optional()
+    .describe(
+      "Filter results to specific chunk sources (e.g. ['pdf', 'abstract'] for methods and abstracts only)",
+    ),
+  include_full_text: z
+    .boolean()
+    .default(false)
+    .optional()
+    .describe("Include full passage text instead of a 1000-char preview"),
+});
+
+export const KeywordSearchParamsSchema = z.object({
+  query: z.string().describe("Search query for keyword matching"),
+  scope: z
+    .enum(["context", "library", "collection"])
+    .default("library")
+    .optional()
+    .describe("What to search"),
+  library_id: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Library ID to restrict search (user library or group library)"),
+  collection_id: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Collection ID (if scope is 'collection')"),
+  top_k: z
+    .number()
+    .int()
+    .min(1)
+    .max(20)
+    .default(5)
+    .optional()
+    .describe("Number of results to return"),
+  sources: z
+    .array(z.enum(["abstract", "pdf", "note", "metadata", "table", "file"]))
+    .optional()
+    .describe(
+      "Filter results to specific chunk sources (e.g. ['pdf'] for full-text only)",
+    ),
+});
+
+export const ReadChunksParamsSchema = z.object({
+  chunk_ids: z
+    .array(z.string())
+    .optional()
+    .describe("List of chunk IDs to read"),
+  item_id: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Item ID to read all chunks from"),
+  max_chunks: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .default(10)
+    .optional()
+    .describe("Maximum chunks to return"),
+  scope: z
+    .enum(["context", "library", "collection"])
+    .default("library")
+    .optional()
+    .describe(
+      "Scope: 'library' (all indexed), 'context' (items in chat), or 'collection' (specific collection)",
+    ),
+  library_id: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Library ID to restrict to a specific library"),
+  collection_id: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Collection ID (required if scope is 'collection')"),
+});
+
+export const SearchSimilarParamsSchema = z.object({
+  item_id: z
+    .number()
+    .int()
+    .positive()
+    .describe("Item ID to find similar items to"),
+  top_k: z
+    .number()
+    .int()
+    .min(1)
+    .max(20)
+    .default(5)
+    .optional()
+    .describe("Number of similar items to return"),
+  min_score: z
+    .number()
+    .int()
+    .min(0)
+    .max(100)
+    .default(30)
+    .optional()
+    .describe("Minimum relevance score 0-100"),
+  scope: z
+    .enum(["context", "library", "collection"])
+    .default("library")
+    .optional()
+    .describe("Scope to search within for similar items"),
+  library_id: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Library ID to restrict search"),
+  collection_id: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Collection ID (if scope is 'collection')"),
+});
+
 // ==================== SCHEMA REGISTRY ====================
 
 const schemaRegistry: Partial<Record<ToolName, z.ZodSchema>> = {
@@ -432,6 +602,10 @@ const schemaRegistry: Partial<Record<ToolName, z.ZodSchema>> = {
   [TOOL_NAMES.WORKSPACE_BASH]: WorkspaceBashParamsSchema,
   [TOOL_NAMES.WORKSPACE_DIFF]: WorkspaceDiffParamsSchema,
   [TOOL_NAMES.WORKSPACE_LOG]: WorkspaceLogParamsSchema,
+  [TOOL_NAMES.SEMANTIC_SEARCH]: SemanticSearchParamsSchema,
+  [TOOL_NAMES.KEYWORD_SEARCH]: KeywordSearchParamsSchema,
+  [TOOL_NAMES.READ_CHUNKS]: ReadChunksParamsSchema,
+  [TOOL_NAMES.SEARCH_SIMILAR]: SearchSimilarParamsSchema,
 };
 
 // ==================== SENSITIVITY REGISTRY ====================
@@ -463,6 +637,10 @@ const sensitivityRegistry: Record<ToolName, SensitivityLevel> = {
   [TOOL_NAMES.TODO_WRITE]: "write",
   [TOOL_NAMES.TODO_READ]: "read",
   [TOOL_NAMES.TASK_COMPLETE]: "write",
+  [TOOL_NAMES.SEMANTIC_SEARCH]: "read",
+  [TOOL_NAMES.KEYWORD_SEARCH]: "read",
+  [TOOL_NAMES.READ_CHUNKS]: "read",
+  [TOOL_NAMES.SEARCH_SIMILAR]: "read",
 };
 
 // ==================== UTILITIES ====================

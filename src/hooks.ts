@@ -8,12 +8,20 @@ import { initThemeObserver } from "./utils/theme";
 import { registerApiEndpoints } from "./modules/api";
 import { executeGenerateItemTags } from "./modules/chat/tools/tagTool";
 import { defaultAgentConfig } from "./modules/chat/tools/toolTypes";
-import { getActiveModelConfig } from "./modules/chat/modelConfig";
+import {
+  getActiveModelConfig,
+  initModelConfigs,
+} from "./modules/chat/modelConfig";
 import { DetachedWindowManager } from "./modules/ui/windowManager";
 import {
   CloudProviderManager,
   registerCallbackEndpoint,
 } from "./modules/drive";
+import {
+  startBackgroundIndexer,
+  stopBackgroundIndexer,
+  enqueueForIndexing,
+} from "./modules/chat/rag/backgroundIndexer";
 
 const ocrService = new OcrService();
 
@@ -28,6 +36,22 @@ async function onStartup() {
 
   Assistant.register();
   BasicExampleFactory.registerPrefs();
+
+  // Clear legacy modelConfigs pref synchronously (prevents Zotero large-pref warnings)
+  try {
+    const prefKey = `${addon.data.config.prefsPrefix}.modelConfigs`;
+    if (Zotero.Prefs.get(prefKey)) {
+      Zotero.Prefs.clear(prefKey);
+      Zotero.debug("[seerai] Cleared legacy modelConfigs pref on startup");
+    }
+  } catch {
+    // ignore
+  }
+
+  // Load model configs from file storage (migrate from legacy prefs)
+  initModelConfigs().catch((e) => {
+    Zotero.debug(`[seerai] Failed to init model configs from file: ${e}`);
+  });
 
   // Register MCP API endpoints
   registerApiEndpoints();
@@ -49,6 +73,11 @@ async function onStartup() {
 
   // Initialize detached window manager (restore previous state if any)
   DetachedWindowManager.initialize();
+
+  // Start background RAG indexer
+  startBackgroundIndexer().catch((e) => {
+    Zotero.debug(`[seerai] Failed to start background indexer: ${e}`);
+  });
 
   // Mark initialized as true to confirm plugin loading status
   // outside of the plugin (e.g. scaffold testing process)
@@ -595,9 +624,9 @@ async function onMainWindowUnload(win: Window): Promise<void> {
 }
 
 function onShutdown(): void {
+  stopBackgroundIndexer();
   addon.data.ztoolkit.unregisterAll();
   addon.data.dialog?.window?.close();
-  // Remove addon object
   addon.data.alive = false;
   // @ts-expect-error - Plugin instance is not typed
   delete Zotero[addon.data.config.addonInstance];
@@ -615,8 +644,15 @@ async function onNotify(
   ids: Array<string | number>,
   extraData: { [key: string]: any },
 ) {
-  // You can add your code to the corresponding notify type
   addon.data.ztoolkit.log("notify", event, type, ids, extraData);
+
+  if ((event === "add" || event === "modify") && type === "item") {
+    for (const id of ids) {
+      if (typeof id === "number") {
+        enqueueForIndexing(id);
+      }
+    }
+  }
 }
 
 /**

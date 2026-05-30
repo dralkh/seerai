@@ -20,6 +20,25 @@ import type {
   RetrievedChunk,
   VectorSearchResult,
 } from "./types";
+import {
+  invalidateBm25Cache,
+  incrementalAddToBm25Cache,
+  incrementalRemoveFromBm25Cache,
+} from "./bm25";
+
+function extractSnippet(chunks: DocumentChunk[]): string | undefined {
+  const abstractChunk = chunks.find((c) => c.source === "abstract");
+  if (abstractChunk) {
+    return abstractChunk.text.substring(0, 300);
+  }
+  const longest = chunks.reduce((best, c) =>
+    c.text.length > best.text.length ? c : best,
+  );
+  if (longest.text.length > 0) {
+    return longest.text.substring(0, 300);
+  }
+  return undefined;
+}
 
 export class VectorStore {
   private static instance: VectorStore | null = null;
@@ -123,7 +142,7 @@ export class VectorStore {
   /**
    * Persist the in-memory index to disk.
    */
-  private async saveIndex(): Promise<void> {
+  async saveIndex(): Promise<void> {
     if (!this.index) return;
     this.index.updatedAt = new Date().toISOString();
     const indexPath = this.getIndexPath();
@@ -138,7 +157,11 @@ export class VectorStore {
   private async loadEntry(itemId: number): Promise<VectorStoreEntry | null> {
     // Check cache first
     if (this.entryCache.has(itemId)) {
-      return this.entryCache.get(itemId)!;
+      const entry = this.entryCache.get(itemId)!;
+      // Move to end of Map to maintain LRU order
+      this.entryCache.delete(itemId);
+      this.entryCache.set(itemId, entry);
+      return entry;
     }
 
     const entryPath = this.getEntryPath(itemId);
@@ -202,6 +225,10 @@ export class VectorStore {
     embeddings: number[][],
     model: string,
     contentHash: string,
+    parentWindows?: Record<string, string>,
+    publicationYear?: number,
+    title?: string,
+    firstCreator?: string,
   ): Promise<void> {
     if (chunks.length !== embeddings.length) {
       throw new Error(
@@ -226,6 +253,7 @@ export class VectorStore {
       dimensions,
       contentHash,
       indexedAt: new Date().toISOString(),
+      parentWindows,
     };
 
     // Save to disk
@@ -233,6 +261,12 @@ export class VectorStore {
 
     // Update global index
     const index = await this.loadIndex();
+    const zItem = Zotero.Items.get(itemId);
+    const firstAuthor =
+      firstCreator ||
+      (chunks[0]?.metadata.authors?.[0] || "").split(/\s/).pop() ||
+      undefined;
+    const snippet = extractSnippet(chunks);
     index.entries[itemId] = {
       itemId,
       chunkCount: chunks.length,
@@ -240,6 +274,14 @@ export class VectorStore {
       dimensions,
       contentHash,
       lastIndexedAt: entry.indexedAt,
+      lastModified: zItem?.dateModified,
+      title:
+        title ||
+        chunks[0]?.metadata.title ||
+        chunks.find((c) => c.metadata.title)?.metadata.title,
+      firstCreator: firstAuthor,
+      publicationYear,
+      snippet,
     };
     await this.saveIndex();
 
@@ -247,10 +289,13 @@ export class VectorStore {
       `[seerai] Indexed item ${itemId}: ${chunks.length} chunks, ` +
         `${dimensions} dimensions, model=${model}`,
     );
+    incrementalAddToBm25Cache(itemId);
   }
 
   /**
    * Remove an item's vectors from the store.
+   *
+   * Returns true if the item was found and removed.
    */
   async removeItem(itemId: number): Promise<boolean> {
     const index = await this.loadIndex();
@@ -272,6 +317,7 @@ export class VectorStore {
     await this.saveIndex();
 
     Zotero.debug(`[seerai] Removed vectors for item ${itemId}`);
+    incrementalRemoveFromBm25Cache(itemId);
     return true;
   }
 
@@ -313,10 +359,49 @@ export class VectorStore {
 
   /**
    * Get the index entry for an item (metadata only, no vectors).
+   *
+   * If the entry exists but lacks a `title` (items indexed before the
+   * title/snippet cache feature was added), the entry is enriched from
+   * the full on-disk entry (chunk metadata) — a one-time lazy migration.
    */
   async getIndexEntry(itemId: number): Promise<VectorIndexEntry | null> {
     const index = await this.loadIndex();
-    return index.entries[itemId] || null;
+    const entry = index.entries[itemId];
+    if (!entry) return null;
+    if (!entry.title) {
+      return this.enrichIndexEntry(itemId);
+    }
+    return entry;
+  }
+
+  /**
+   * Lazily enrich an index entry that lacks cached metadata.
+   *
+   * Reads the full VectorStoreEntry from disk (one-time per item),
+   * extracts title / firstCreator / snippet from chunk data, and
+   * persists the enriched entry back to the global index.
+   */
+  private async enrichIndexEntry(
+    itemId: number,
+  ): Promise<VectorIndexEntry | null> {
+    const fullEntry = await this.loadEntry(itemId);
+    if (!fullEntry) return null;
+
+    const index = await this.loadIndex();
+    const entry = index.entries[itemId];
+    if (!entry) return null;
+
+    const chunks = fullEntry.chunks;
+    entry.title =
+      chunks[0]?.metadata.title ||
+      chunks.find((c) => c.metadata.title)?.metadata.title;
+    entry.firstCreator =
+      entry.firstCreator ||
+      (chunks[0]?.metadata.authors?.[0] || "").split(/\s/).pop() ||
+      undefined;
+    entry.snippet = entry.snippet || extractSnippet(chunks);
+
+    return entry;
   }
 
   // ─── Public API: Search ────────────────────────────────────────────────────
@@ -350,6 +435,9 @@ export class VectorStore {
       : Object.keys(index.entries).map(Number);
 
     if (itemIds.length === 0) {
+      Zotero.debug(
+        `[seerai] RAG search: no indexed items in scope (filtered ${filterItemIds?.length ?? "all"} items, 0 have vectors)`,
+      );
       return { chunks: [], dimensionMismatch: false, mismatchedItemIds: [] };
     }
 
@@ -380,13 +468,28 @@ export class VectorStore {
 
     // ── All dimensions match — perform cosine similarity search ────────────
     const candidates: RetrievedChunk[] = [];
+    let totalChunksSearched = 0;
+    let topScoreBelowThreshold = -Infinity;
+    let entriesWithNoChunks = 0;
 
     for (const itemId of itemIds) {
       const entry = await this.loadEntry(itemId);
       if (!entry) continue;
 
+      if (entry.chunks.length === 0) {
+        entriesWithNoChunks++;
+        continue;
+      }
+
+      // Extract publication year once per item for recency scoring
+      const pubYear = await extractPublicationYear(itemId);
+
       for (const chunk of entry.chunks) {
+        totalChunksSearched++;
         const score = cosineSimilarity(queryEmbedding, chunk.embedding);
+        if (score > topScoreBelowThreshold && score < minScore) {
+          topScoreBelowThreshold = score;
+        }
         if (score >= minScore) {
           candidates.push({
             chunk,
@@ -394,10 +497,21 @@ export class VectorStore {
             sourceItem: {
               title: chunk.metadata.title || `Item ${itemId}`,
               id: itemId,
+              publicationYear: pubYear,
             },
           });
         }
       }
+    }
+
+    if (candidates.length === 0 && totalChunksSearched > 0) {
+      Zotero.debug(
+        `[seerai] RAG search: 0 results from ${totalChunksSearched} chunks across ${itemIds.length} items ` +
+          `(top score ${topScoreBelowThreshold.toFixed(4)} below threshold ${minScore})` +
+          (entriesWithNoChunks > 0
+            ? `; ${entriesWithNoChunks} items have 0 chunks`
+            : ""),
+      );
     }
 
     // Sort by score descending, take topK
@@ -434,6 +548,27 @@ export class VectorStore {
     return itemIds.filter((id) => !!index.entries[id]).length;
   }
 
+  async getIndexedItemIds(): Promise<number[]> {
+    const index = await this.loadIndex();
+    return Object.keys(index.entries).map(Number);
+  }
+
+  async loadEntryForBm25(itemId: number): Promise<VectorStoreEntry | null> {
+    return this.loadEntry(itemId);
+  }
+
+  /**
+   * Get parent window text for a sentence-window chunk.
+   * Returns undefined if the item or parent window doesn't exist.
+   */
+  async getParentWindow(
+    itemId: number,
+    parentId: string,
+  ): Promise<string | undefined> {
+    const entry = await this.loadEntry(itemId);
+    return entry?.parentWindows?.[parentId];
+  }
+
   /**
    * Clear all stored vectors and reset the index.
    */
@@ -464,6 +599,7 @@ export class VectorStore {
     this.entryCache.clear();
 
     Zotero.debug("[seerai] Cleared all vectors");
+    invalidateBm25Cache();
   }
 
   // ─── Content hashing ──────────────────────────────────────────────────────
@@ -511,6 +647,13 @@ function cosineSimilarity(a: number[], b: number[]): number {
   if (magnitude === 0) return 0;
 
   return dotProduct / magnitude;
+}
+
+async function extractPublicationYear(
+  itemId: number,
+): Promise<number | undefined> {
+  const entry = await VectorStore.getInstance().getIndexEntry(itemId);
+  return entry?.publicationYear;
 }
 
 /** Singleton accessor */

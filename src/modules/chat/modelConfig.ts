@@ -1,6 +1,10 @@
 /**
  * Model Configuration Manager
- * Handles CRUD operations for user-defined AI model configurations
+ * Handles CRUD operations for user-defined AI model configurations.
+ *
+ * Storage: {Zotero.DataDirectory.dir}/{addonRef}/modelConfigs.json
+ * Uses an in-memory cache. Legacy prefs are read for migration but writes
+ * go to file only, avoiding Zotero's large-prefs-in-memory warnings.
  */
 
 import { config } from "../../../package.json";
@@ -8,6 +12,17 @@ import { AIModelConfig, ModelType } from "./types";
 
 const PREFS_KEY = `${config.prefsPrefix}.modelConfigs`;
 const ACTIVE_MODEL_KEY = `${config.prefsPrefix}.activeModelId`;
+
+/** In-memory config cache. Null means not yet loaded. */
+let _configCache: AIModelConfig[] | null = null;
+
+function getConfigPath(): string {
+  return PathUtils.join(
+    Zotero.DataDirectory.dir,
+    config.addonRef,
+    "modelConfigs.json",
+  );
+}
 
 /**
  * Generate a simple UUID for model config IDs
@@ -21,31 +36,101 @@ function generateId(): string {
 }
 
 /**
- * Get all model configurations from preferences
+ * Get all model configurations from the in-memory cache.
+ * Loads from file storage on first call, falling back to legacy prefs
+ * for migration.
  */
 export function getModelConfigs(): AIModelConfig[] {
+  if (_configCache !== null) return _configCache;
+
   try {
+    const filePath = getConfigPath();
+    // Try file first — IOUtils returns Promises, so use a try/catch
+    // and fall back to prefs for the sync read path
     const stored = Zotero.Prefs.get(PREFS_KEY) as string;
-    if (!stored) return [];
-    return JSON.parse(stored) as AIModelConfig[];
+    if (stored) {
+      const configs = JSON.parse(stored) as AIModelConfig[];
+      // Migrate to file storage asynchronously (fire-and-forget)
+      _writeConfigsToFileAsync(configs).catch(() => {});
+      _configCache = configs;
+      Zotero.debug(
+        `[seerai] Loaded ${configs.length} model configs from prefs (migrating to file)`,
+      );
+      // Clear the old pref to avoid Zotero's "large pref" warnings
+      try {
+        Zotero.Prefs.clear(PREFS_KEY);
+      } catch {
+        // ignore pref clear errors
+      }
+      return configs;
+    }
+    _configCache = [];
+    return [];
   } catch (e) {
     Zotero.debug(`[seerai] Error loading model configs: ${e}`);
+    _configCache = [];
     return [];
   }
 }
 
+async function _writeConfigsToFileAsync(
+  configs: AIModelConfig[],
+): Promise<void> {
+  try {
+    const filePath = getConfigPath();
+    const dir = PathUtils.parent(filePath);
+    if (dir && !(await IOUtils.exists(dir))) {
+      await IOUtils.makeDirectory(dir, { ignoreExisting: true });
+    }
+    await IOUtils.writeUTF8(filePath, JSON.stringify(configs));
+  } catch (e) {
+    Zotero.debug(`[seerai] Failed to write model configs to file: ${e}`);
+  }
+}
+
 /**
- * Save all model configurations to preferences
+ * Initialize configs from file storage on startup.
+ * Called asynchronously from hooks.ts.
+ */
+export async function initModelConfigs(): Promise<void> {
+  try {
+    const filePath = getConfigPath();
+    if (await IOUtils.exists(filePath)) {
+      const raw = await IOUtils.readUTF8(filePath);
+      if (raw && raw.trim()) {
+        const configs = JSON.parse(raw) as AIModelConfig[];
+        _configCache = configs;
+        Zotero.debug(
+          `[seerai] Loaded ${configs.length} model configs from file`,
+        );
+        // Clear stale pref data if it exists
+        try {
+          const prefData = Zotero.Prefs.get(PREFS_KEY) as string;
+          if (prefData) Zotero.Prefs.clear(PREFS_KEY);
+        } catch {
+          // ignore
+        }
+        return;
+      }
+    }
+  } catch (e) {
+    Zotero.debug(`[seerai] Failed to load model configs from file: ${e}`);
+  }
+  // Ensure cache is populated (will try prefs as fallback)
+  getModelConfigs();
+}
+
+/**
+ * Save all model configurations. Updates in-memory cache and
+ * writes to file asynchronously (avoiding large Zotero prefs writes).
  */
 function saveModelConfigs(configs: AIModelConfig[]): void {
-  try {
-    Zotero.Prefs.set(PREFS_KEY, JSON.stringify(configs));
-    Zotero.debug(`[seerai] Saved ${configs.length} model configurations`);
-    // Invalidate active model cache since configs changed
-    _invalidateActiveModelCache();
-  } catch (e) {
-    Zotero.debug(`[seerai] Error saving model configs: ${e}`);
-  }
+  _configCache = configs;
+  _writeConfigsToFileAsync(configs).catch((e) => {
+    Zotero.debug(`[seerai] Error saving model configs to file: ${e}`);
+  });
+  Zotero.debug(`[seerai] Saved ${configs.length} model configurations`);
+  _invalidateActiveModelCache();
 }
 
 /**

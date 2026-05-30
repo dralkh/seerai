@@ -36,6 +36,12 @@ const searchLibraryParams = z.object({
     .default(10)
     .optional()
     .describe("Max results (default: 10)"),
+  library_id: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Library ID to restrict search (user library or group library)"),
 });
 
 const getItemMetadataParams = z.object({
@@ -457,7 +463,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "read_item_content",
     description:
-      "Read the full content of a paper including notes and PDF text.",
+      "Read the full content of a paper including notes and PDF text. Returns pre-indexed chunks from the semantic index when available.",
     inputSchema: readItemContentParams,
   },
   {
@@ -476,6 +482,172 @@ export const TOOL_DEFINITIONS = [
       "Generate AI-powered tags for a Zotero item based on its content.",
     inputSchema: z.object({
       item_id: z.number().describe("Zotero item ID to generate tags for"),
+    }),
+  },
+
+  // ==================== RAG / Search Tools ====================
+  {
+    name: "semantic_search",
+    description:
+      "Semantically search your Zotero library for relevant passages. " +
+      "Use this to find information across your papers, notes, and PDFs, " +
+      "even when the exact wording differs from your query. " +
+      "Returns ranked passages with relevance scores and source attribution. " +
+      "This is ideal for finding concepts, themes, and evidence across your entire library.",
+    inputSchema: z.object({
+      query: z
+        .string()
+        .describe(
+          "Natural language search query. Be specific about what you're looking for.",
+        ),
+      scope: z
+        .enum(["context", "library", "collection"])
+        .default("context")
+        .optional()
+        .describe(
+          "What to search: 'context' (items currently in chat context), " +
+            "'library' (entire library), or 'collection' (specific collection)",
+        ),
+      library_id: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "Library ID to restrict search (user library or group library)",
+        ),
+      collection_id: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "Collection ID (if scope is 'collection'). Collections are always searched recursively including sub-collections.",
+        ),
+      top_k: z
+        .number()
+        .int()
+        .min(1)
+        .max(20)
+        .default(5)
+        .optional()
+        .describe("Number of results to return"),
+      min_score: z
+        .number()
+        .int()
+        .min(0)
+        .max(100)
+        .default(30)
+        .optional()
+        .describe("Minimum relevance score 0-100"),
+      sources: z
+        .array(z.enum(["abstract", "pdf", "note", "metadata", "table", "file"]))
+        .optional()
+        .describe(
+          "Filter results to specific chunk sources (e.g. ['pdf', 'abstract'])",
+        ),
+      include_full_text: z
+        .boolean()
+        .default(false)
+        .optional()
+        .describe("Include full passage text instead of 1000-char preview"),
+    }),
+  },
+  {
+    name: "keyword_search",
+    description:
+      "Fast keyword-based search of your Zotero library using BM25 lexical matching. " +
+      "Use for exact terminology searches (gene names, chemical compounds, " +
+      "mathematical concepts, author names) where precise word matching matters. " +
+      "This is faster and cheaper than semantic_search — " +
+      "try this first, then escalate to semantic_search for conceptual understanding.",
+    inputSchema: z.object({
+      query: z.string().describe("Search terms for exact matching"),
+      scope: z
+        .enum(["context", "library", "collection"])
+        .default("context")
+        .optional()
+        .describe("What to search"),
+      library_id: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "Library ID to restrict search (user library or group library)",
+        ),
+      collection_id: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "Collection ID (if scope is 'collection'). Collections are always searched recursively including sub-collections.",
+        ),
+      top_k: z
+        .number()
+        .int()
+        .min(1)
+        .max(20)
+        .default(5)
+        .optional()
+        .describe("Number of results to return"),
+      sources: z
+        .array(z.enum(["abstract", "pdf", "note", "metadata", "table", "file"]))
+        .optional()
+        .describe(
+          "Filter results to specific chunk sources (e.g. ['pdf'] for full-text only)",
+        ),
+    }),
+  },
+  {
+    name: "read_chunks",
+    description:
+      "Read specific text chunks/passages from indexed papers by chunk ID or item ID. " +
+      "Use after semantic_search or keyword_search to get the full text of interesting passages. " +
+      "Respects scope restrictions — chunks outside the specified scope are excluded.",
+    inputSchema: z.object({
+      chunk_ids: z
+        .array(z.string())
+        .optional()
+        .describe(
+          "List of chunk IDs to read (e.g. from semantic_search results)",
+        ),
+      item_id: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Item ID to read all chunks from"),
+      max_chunks: z
+        .number()
+        .int()
+        .min(1)
+        .max(50)
+        .default(10)
+        .optional()
+        .describe("Maximum chunks to return"),
+      scope: z
+        .enum(["context", "library", "collection"])
+        .default("context")
+        .optional()
+        .describe(
+          "Scope: 'context' (items in chat), 'library' (all indexed), or 'collection' (specific collection)",
+        ),
+      library_id: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Library ID to restrict to a specific library"),
+      collection_id: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "Collection ID (required if scope is 'collection'). Collections are always searched recursively.",
+        ),
     }),
   },
 
@@ -531,6 +703,55 @@ export const TOOL_DEFINITIONS = [
     name: "workspace_log",
     description: "Show version history for a workspace file.",
     inputSchema: workspaceLogParams,
+  },
+  {
+    name: "search_similar",
+    description:
+      "Find papers similar to a given item using embedding similarity. " +
+      "Use this to discover related papers, find alternative sources, or explore a research topic. " +
+      "The source item must be indexed first.",
+    inputSchema: z.object({
+      item_id: z
+        .number()
+        .int()
+        .positive()
+        .describe("Item ID to find similar papers to"),
+      top_k: z
+        .number()
+        .int()
+        .min(1)
+        .max(20)
+        .default(5)
+        .optional()
+        .describe("Number of similar items to return"),
+      min_score: z
+        .number()
+        .int()
+        .min(0)
+        .max(100)
+        .default(30)
+        .optional()
+        .describe("Minimum similarity score 0-100"),
+      scope: z
+        .enum(["context", "library", "collection"])
+        .default("library")
+        .optional()
+        .describe("Scope to search within for similar items"),
+      library_id: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Library ID to restrict search"),
+      collection_id: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "Collection ID (if scope is 'collection'). Collections are always searched recursively with sub-collections.",
+        ),
+    }),
   },
 ];
 

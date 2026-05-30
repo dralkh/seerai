@@ -109,7 +109,7 @@ export class ChatContextManager {
   }
 
   /**
-   * Clear all context items
+   * Clear all context items (silent — no notification)
    */
   public clearAll(): void {
     if (this.items.length > 0) {
@@ -117,6 +117,22 @@ export class ChatContextManager {
       this.notifyListeners();
       Zotero.debug(`[seerai] Context cleared`);
     }
+  }
+
+  /**
+   * Restore context items from saved state (without duplicate notifications)
+   */
+  public restoreItems(items: ContextItem[]): void {
+    this.items = items.map((item) => ({ ...item }));
+    this.notifyListeners();
+    Zotero.debug(`[seerai] Context restored: ${items.length} items`);
+  }
+
+  /**
+   * Export context items for persistence
+   */
+  public getSerializableItems(): ContextItem[] {
+    return [...this.items];
   }
 
   /**
@@ -182,6 +198,13 @@ export class ChatContextManager {
   }
 
   private notifyListeners(): void {
-    this.listeners.forEach((listener) => listener(this.getItems()));
+    const items = this.getItems();
+    for (const listener of this.listeners) {
+      try {
+        listener(items);
+      } catch (e) {
+        Zotero.debug(`[seerai] Error in context listener: ${e}`);
+      }
+    }
   }
 }

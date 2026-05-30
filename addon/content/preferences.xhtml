@@ -599,6 +599,242 @@
 <html:hr style="margin: 16px 0" />
 
 <label>
+  <html:h3>RAG &amp; Reranker Settings</html:h3>
+</label>
+<vbox
+  style="
+    margin-left: 20px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: 4px;
+  "
+>
+  <html:h4 style="margin: 0 0 6px 0; color: var(--text-secondary)"
+    >Cross-encoder Reranker</html:h4
+  >
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <label style="width: 90px; font-weight: bold">Provider:</label>
+    <menulist
+      id="zotero-prefpane-__addonRef__-ragRerankerProvider"
+      style="min-width: 160px"
+    >
+      <menupopup>
+        <menuitem value="none" label="None (local only)" />
+        <menuitem value="jina" label="Jina Reranker v3" />
+        <menuitem value="cohere" label="Cohere Rerank 4" />
+      </menupopup>
+    </menulist>
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <label style="width: 90px; font-weight: bold">API Key:</label>
+    <html:input
+      type="password"
+      id="zotero-prefpane-__addonRef__-ragRerankerApiKey"
+      placeholder="Optional — required for Jina or Cohere"
+      style="flex: 1; min-width: 200px"
+    ></html:input>
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <label style="width: 90px; font-weight: bold">Model:</label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-ragRerankerModel"
+      placeholder="jina-reranker-v3 (auto)"
+      style="flex: 1; min-width: 160px"
+    ></html:input>
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 12px">
+    <label style="width: 90px; font-weight: bold">Top N:</label>
+    <html:input
+      type="number"
+      id="zotero-prefpane-__addonRef__-ragRerankerTopN"
+      placeholder="10"
+      min="1"
+      max="100"
+      style="width: 60px"
+    ></html:input>
+    <label style="margin-left: 8px; font-size: 11px; color: #666"
+      >Candidates sent to reranker (1-100)</label
+    >
+  </hbox>
+
+  <html:h4 style="margin: 8px 0 6px 0; color: var(--text-secondary)"
+    >Hybrid Rank Fusion (RRF)</html:h4
+  >
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <label style="width: 90px; font-weight: bold">RRF Alpha:</label>
+    <html:input
+      type="number"
+      id="zotero-prefpane-__addonRef__-ragRrfAlpha"
+      placeholder="55"
+      min="1"
+      max="99"
+      style="width: 60px"
+    ></html:input>
+    <label style="margin-left: 8px; font-size: 11px; color: #666"
+      >Dense weight 0–100 (default 55). Higher = favor semantic over keyword
+      results.</label
+    >
+  </hbox>
+
+  <html:h4 style="margin: 8px 0 6px 0; color: var(--text-secondary)"
+    >Diversity Selection (MMR)</html:h4
+  >
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <checkbox
+      id="zotero-prefpane-__addonRef__-ragMmrEnabled"
+      label="Enable MMR diversity"
+      checked="true"
+    />
+  </hbox>
+
+  <hbox align="center" style="margin-bottom: 8px">
+    <label style="width: 90px; font-weight: bold">MMR Lambda:</label>
+    <html:input
+      type="number"
+      id="zotero-prefpane-__addonRef__-ragMmrLambda"
+      placeholder="70"
+      min="1"
+      max="99"
+      style="width: 60px"
+    ></html:input>
+    <label style="margin-left: 8px; font-size: 11px; color: #666"
+      >Relevance vs diversity 0–100 (default 70). Higher = more relevance, lower
+      = more diverse.</label
+    >
+  </hbox>
+</vbox>
+
+<html:hr style="margin: 8px 0" />
+
+<label>
+  <html:h4 style="margin: 0 0 6px 0; color: var(--text-secondary)"
+    >Advanced Retrieval</html:h4
+  >
+</label>
+<vbox
+  style="
+    margin-left: 20px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: 4px;
+  "
+>
+  <hbox align="center" style="margin-bottom: 6px">
+    <checkbox
+      id="zotero-prefpane-__addonRef__-ragContextualRetrieval"
+      label="Contextual Retrieval — generate chunk context via LLM at index time"
+    />
+  </hbox>
+  <hbox align="center" style="margin-bottom: 6px">
+    <checkbox
+      id="zotero-prefpane-__addonRef__-ragSentenceWindow"
+      label="Sentence-Window Retrieval — embed child chunks, retrieve parent windows"
+    />
+  </hbox>
+  <hbox align="center" style="margin-bottom: 6px">
+    <label style="width: 130px; font-weight: bold">Window Size:</label>
+    <html:input
+      type="number"
+      id="zotero-prefpane-__addonRef__-ragSentenceWindowSize"
+      placeholder="3"
+      min="1"
+      max="10"
+      style="width: 60px"
+    ></html:input>
+    <label style="margin-left: 8px; font-size: 11px; color: #666"
+      >Number of sentences before/after (1-10)</label
+    >
+  </hbox>
+  <hbox align="center" style="margin-bottom: 6px">
+    <checkbox
+      id="zotero-prefpane-__addonRef__-ragMultiQueryExpansion"
+      label="Multi-Query — generate variant queries for broader retrieval"
+    />
+  </hbox>
+  <hbox align="center" style="margin-bottom: 6px">
+    <checkbox
+      id="zotero-prefpane-__addonRef__-ragQueryDecomposition"
+      label="Query Decomposition — split complex queries into sub-queries"
+    />
+  </hbox>
+  <hbox align="center" style="margin-bottom: 6px">
+    <label style="width: 130px; font-weight: bold">Citation Graph Hops:</label>
+    <html:input
+      type="number"
+      id="zotero-prefpane-__addonRef__-ragCitationGraphHops"
+      placeholder="0"
+      min="0"
+      max="3"
+      style="width: 60px"
+    ></html:input>
+    <label style="margin-left: 8px; font-size: 11px; color: #666"
+      >Follow citation links 0-3 hops (0 = disabled)</label
+    >
+  </hbox>
+  <hbox align="center" style="margin-bottom: 6px">
+    <checkbox
+      id="zotero-prefpane-__addonRef__-ragCorrectiveEnabled"
+      label="Corrective RAG — evaluate + rewrite + re-retrieve on insufficient context"
+    />
+  </hbox>
+</vbox>
+
+<html:hr style="margin: 8px 0" />
+
+<label>
+  <html:h4 style="margin: 0 0 6px 0; color: var(--text-secondary)"
+    >Evaluation</html:h4
+  >
+</label>
+<vbox
+  style="
+    margin-left: 20px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.03);
+    border-radius: 4px;
+  "
+>
+  <hbox align="center" style="margin-bottom: 6px">
+    <checkbox
+      id="zotero-prefpane-__addonRef__-ragEvalEnabled"
+      label="Enable RAG evaluation (requires ground truth data)"
+    />
+  </hbox>
+  <hbox align="center" style="margin-bottom: 6px">
+    <label style="width: 100px; font-weight: bold">Ground Truth Path:</label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-ragEvalGroundTruth"
+      placeholder="evaluation/ground_truth.json"
+      style="flex: 1; min-width: 200px"
+    ></html:input>
+  </hbox>
+  <hbox align="center" style="margin-bottom: 6px">
+    <label style="width: 100px; font-weight: bold">Embedding Model:</label>
+    <html:input
+      type="text"
+      id="zotero-prefpane-__addonRef__-ragEvalEmbeddingModel"
+      placeholder="text-embedding-3-small"
+      style="width: 200px"
+    ></html:input>
+  </hbox>
+  <hbox align="center" style="margin-top: 8px">
+    <button id="zotero-prefpane-__addonRef__-clearRagCache" style="color: #c00">
+      Clear RAG Vector Cache
+    </button>
+  </hbox>
+</vbox>
+
+<html:hr style="margin: 16px 0" />
+
+<label>
   <html:h3>Cloud Storage Integration</html:h3>
 </label>
 <vbox

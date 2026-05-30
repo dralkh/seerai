@@ -17,7 +17,11 @@ import { youdotcomService } from "./youdotcom";
 
 // ==================== Types ====================
 
-export type WebSearchProviderType = "firecrawl" | "tavily" | "nanogpt" | "youdotcom";
+export type WebSearchProviderType =
+  | "firecrawl"
+  | "tavily"
+  | "nanogpt"
+  | "youdotcom";
 
 export interface WebSearchResult {
   url: string;

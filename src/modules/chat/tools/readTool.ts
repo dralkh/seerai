@@ -17,6 +17,7 @@ import {
   readAttachmentContent,
   getAttachmentLabel,
 } from "../../fileViewer";
+import { getVectorStore } from "../rag/vectorStore";
 
 /**
  * Execute get_item_metadata tool
@@ -152,6 +153,41 @@ export async function executeReadItemContent(
         success: false,
         error: `Permission Denied: Item ${item_id} is outside the current restricted scope.`,
       };
+    }
+
+    // Attempt to read from pre-indexed vector store chunks first (faster, chunked)
+    if (include_pdf) {
+      const vectorStore = getVectorStore();
+      const entry = await vectorStore.loadEntryForBm25(item_id);
+      if (entry && entry.chunks.length > 0) {
+        const title =
+          entry.chunks[0]?.metadata?.title ||
+          item.getField("title") ||
+          "Untitled";
+        const chunkList = entry.chunks.map((chunk) => ({
+          chunk_id: chunk.id,
+          text: chunk.text,
+          source: chunk.source,
+          chunk_index: chunk.chunkIndex,
+          metadata: chunk.metadata as Record<string, unknown>,
+        }));
+        return {
+          success: true,
+          data: {
+            content: entry.chunks.map((c) => c.text).join("\n\n"),
+            source_type: "vector_store",
+            notes_count: 0,
+            content_length: entry.chunks.reduce(
+              (sum, c) => sum + c.text.length,
+              0,
+            ),
+            truncated: false,
+            chunks: chunkList,
+            item_title: title,
+          },
+          summary: `Read ${chunkList.length} pre-indexed chunks for "${title}" from vector store`,
+        };
+      }
     }
 
     let content = "";

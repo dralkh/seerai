@@ -46,7 +46,8 @@ class YoudotcomService {
   private getConfig() {
     const prefPrefix = config.prefsPrefix;
     return {
-      apiKey: (Zotero.Prefs.get(`${prefPrefix}.youdotcomApiKey`) as string) || "",
+      apiKey:
+        (Zotero.Prefs.get(`${prefPrefix}.youdotcomApiKey`) as string) || "",
       searchMode:
         (Zotero.Prefs.get(`${prefPrefix}.youdotcomSearchMode`) as string) ||
         "normal",
@@ -93,46 +94,52 @@ class YoudotcomService {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          urls: [url]
+          urls: [url],
         }),
       });
 
       if (!response.ok) {
-        throw new Error(`You.com contents error: ${response.status} ${response.statusText}`);
+        throw new Error(
+          `You.com contents error: ${response.status} ${response.statusText}`,
+        );
       }
 
       // The you.com /v1/contents endpoint returns an array of content objects or a dictionary
-      // Let's parse it and extract the raw text/markdown. 
+      // Let's parse it and extract the raw text/markdown.
       // Typically it returns an array of objects for each URL or a single object.
-      const data = await response.json() as any;
-      
+      const data = (await response.json()) as any;
+
       // Look for any string-like content fields (like 'content', 'text', 'markdown', 'html')
       let markdown = "";
       if (Array.isArray(data)) {
-         const item = data.find(i => i.url === url || i.source === url) || data[0];
-         if (item) {
-           markdown = item.content || item.text || item.markdown || JSON.stringify(item);
-         }
+        const item =
+          data.find((i) => i.url === url || i.source === url) || data[0];
+        if (item) {
+          markdown =
+            item.content || item.text || item.markdown || JSON.stringify(item);
+        }
       } else if (data.contents && Array.isArray(data.contents)) {
-         const item = data.contents[0];
-         if (item) {
-           markdown = item.content || item.text || item.markdown || JSON.stringify(item);
-         }
+        const item = data.contents[0];
+        if (item) {
+          markdown =
+            item.content || item.text || item.markdown || JSON.stringify(item);
+        }
       } else {
-         markdown = data.content || data.text || JSON.stringify(data);
+        markdown = data.content || data.text || JSON.stringify(data);
       }
 
       if (!markdown) {
-         return null;
+        return null;
       }
 
       return {
         url: url,
         title: "", // The API might not return a reliable title
-        markdown: typeof markdown === 'string' ? markdown : JSON.stringify(markdown),
+        markdown:
+          typeof markdown === "string" ? markdown : JSON.stringify(markdown),
         metadata: {
           sourceURL: url,
-        }
+        },
       };
     } catch (error) {
       Zotero.debug(`[seerai] You.com scrapeUrl error: ${error}`);
@@ -140,10 +147,7 @@ class YoudotcomService {
     }
   }
 
-  async webSearch(
-    query: string,
-    limit?: number,
-  ): Promise<WebSearchResult[]> {
+  async webSearch(query: string, limit?: number): Promise<WebSearchResult[]> {
     if (!this.isConfigured()) {
       Zotero.debug("[seerai] You.com not configured, skipping web search");
       return [];
@@ -151,7 +155,7 @@ class YoudotcomService {
 
     const { apiKey, searchMode, searchLimit } = this.getConfig();
     const actualLimit = limit || searchLimit;
-    
+
     const cacheKey = `web:${query}:${actualLimit}:${searchMode}`;
     if (this.searchCache.has(cacheKey)) {
       return this.searchCache.get(cacheKey)!;
@@ -160,7 +164,9 @@ class YoudotcomService {
     await this.rateLimit();
 
     try {
-      Zotero.debug(`[seerai] You.com web search (${searchMode} mode): ${query}`);
+      Zotero.debug(
+        `[seerai] You.com web search (${searchMode} mode): ${query}`,
+      );
       let results: WebSearchResult[] = [];
 
       if (searchMode === "research") {
@@ -179,14 +185,16 @@ class YoudotcomService {
         });
 
         if (!response.ok) {
-           throw new Error(`You.com research error: ${response.status} ${response.statusText}`);
+          throw new Error(
+            `You.com research error: ${response.status} ${response.statusText}`,
+          );
         }
 
-        const data = await response.json() as YouResearchResponse;
+        const data = (await response.json()) as YouResearchResponse;
 
         const content = data.output?.content || "";
         const sources = data.output?.sources || [];
-        
+
         if (content) {
           results.push({
             url: "you://research-answer",
@@ -195,20 +203,23 @@ class YoudotcomService {
             description: content.substring(0, 200),
             metadata: {
               title: "You.com Research Answer",
-            }
+            },
           });
         }
 
-        const sourceResults = sources.slice(0, actualLimit).map((s) => ({
-          url: s.url || "",
-          title: s.title || "Untitled",
-          description: s.title,
-          markdown: `${s.title}: ${s.url}`,
-          metadata: {
+        const sourceResults = sources
+          .slice(0, actualLimit)
+          .map((s) => ({
+            url: s.url || "",
             title: s.title || "Untitled",
-            sourceURL: s.url,
-          }
-        })).filter(r => !!r.url);
+            description: s.title,
+            markdown: `${s.title}: ${s.url}`,
+            metadata: {
+              title: s.title || "Untitled",
+              sourceURL: s.url,
+            },
+          }))
+          .filter((r) => !!r.url);
 
         results = [...results, ...sourceResults];
       } else {
@@ -221,26 +232,34 @@ class YoudotcomService {
         });
 
         if (!response.ok) {
-           throw new Error(`You.com search error: ${response.status} ${response.statusText}`);
+          throw new Error(
+            `You.com search error: ${response.status} ${response.statusText}`,
+          );
         }
 
-        const data = await response.json() as YouSearchResponse;
+        const data = (await response.json()) as YouSearchResponse;
         const webResults = data.results?.web || [];
 
-        results = webResults.slice(0, actualLimit).map((r) => {
-          const snippet = (r.snippets && r.snippets.length > 0) ? r.snippets[0] : (r.description || "");
-          return {
-            url: r.url || "",
-            title: r.title || "Untitled",
-            description: snippet,
-            markdown: snippet,
-            metadata: {
+        results = webResults
+          .slice(0, actualLimit)
+          .map((r) => {
+            const snippet =
+              r.snippets && r.snippets.length > 0
+                ? r.snippets[0]
+                : r.description || "";
+            return {
+              url: r.url || "",
               title: r.title || "Untitled",
               description: snippet,
-              sourceURL: r.url,
-            }
-          };
-        }).filter(r => !!r.url);
+              markdown: snippet,
+              metadata: {
+                title: r.title || "Untitled",
+                description: snippet,
+                sourceURL: r.url,
+              },
+            };
+          })
+          .filter((r) => !!r.url);
       }
 
       Zotero.debug(`[seerai] You.com returned ${results.length} results`);
@@ -278,20 +297,27 @@ class YoudotcomService {
 
       const searchUrl = `https://ydc-index.io/v1/search?query=${encodeURIComponent(query + " PDF")}`;
       const response = await fetch(searchUrl, {
-          method: "GET",
-          headers: {
-            "X-API-Key": apiKey,
-          },
+        method: "GET",
+        headers: {
+          "X-API-Key": apiKey,
+        },
       });
 
       if (!response.ok) {
-         throw new Error(`You.com search error: ${response.status} ${response.statusText}`);
+        throw new Error(
+          `You.com search error: ${response.status} ${response.statusText}`,
+        );
       }
 
-      const data = await response.json() as YouSearchResponse;
+      const data = (await response.json()) as YouSearchResponse;
       const webResults = data.results?.web || [];
-      const pdfResult = this.extractPdfFromResults(webResults.map(r => ({ url: r.url || "", content: r.snippets?.[0] || r.description || "" })));
-      
+      const pdfResult = this.extractPdfFromResults(
+        webResults.map((r) => ({
+          url: r.url || "",
+          content: r.snippets?.[0] || r.description || "",
+        })),
+      );
+
       this.pdfDiscoveryCache.set(cacheKey, pdfResult);
       return pdfResult;
     } catch (error) {
@@ -334,65 +360,103 @@ class YoudotcomService {
 
       const searchUrl = `https://ydc-index.io/v1/search?query=${encodeURIComponent(query + " filetype:pdf OR PDF download")}`;
       const response = await fetch(searchUrl, {
-          method: "GET",
-          headers: {
-            "X-API-Key": apiKey,
-          },
+        method: "GET",
+        headers: {
+          "X-API-Key": apiKey,
+        },
       });
 
       if (!response.ok) {
-         throw new Error(`You.com search error: ${response.status} ${response.statusText}`);
+        throw new Error(
+          `You.com search error: ${response.status} ${response.statusText}`,
+        );
       }
 
-      const data = await response.json() as YouSearchResponse;
+      const data = (await response.json()) as YouSearchResponse;
       const webResults = data.results?.web || [];
-      
+
       if (webResults.length > 0) {
-        const pdfResult = this.extractPdfFromResults(webResults.map(r => ({ url: r.url || "", content: r.snippets?.[0] || r.description || "" })));
+        const pdfResult = this.extractPdfFromResults(
+          webResults.map((r) => ({
+            url: r.url || "",
+            content: r.snippets?.[0] || r.description || "",
+          })),
+        );
         if (pdfResult) {
           this.pdfDiscoveryCache.set(cacheKey, pdfResult);
           return pdfResult;
         }
       }
 
-      const notFoundResult: PdfDiscoveryResult = { source: "youdotcom" as any, status: "not_found" };
+      const notFoundResult: PdfDiscoveryResult = {
+        source: "youdotcom" as any,
+        status: "not_found",
+      };
       this.pdfDiscoveryCache.set(cacheKey, notFoundResult);
       return notFoundResult;
     } catch (error) {
       Zotero.debug(`[seerai] You.com searchForPdf error: ${error}`);
-      const errorResult: PdfDiscoveryResult = { source: "youdotcom" as any, status: "not_found" };
+      const errorResult: PdfDiscoveryResult = {
+        source: "youdotcom" as any,
+        status: "not_found",
+      };
       this.pdfDiscoveryCache.set(cacheKey, errorResult);
       return errorResult;
     }
   }
 
   private extractPdfFromResults(
-    results: {url: string, content: string}[],
+    results: { url: string; content: string }[],
   ): PdfDiscoveryResult | null {
     for (const result of results) {
       if (this.isPdfUrl(result.url)) {
-        return { pdfUrl: result.url, source: "youdotcom" as any, status: "pdf_found" };
+        return {
+          pdfUrl: result.url,
+          source: "youdotcom" as any,
+          status: "pdf_found",
+        };
       }
       const content = result.content;
       if (content) {
-        const pdfLinkRegex = /\[([^\]]*)\]\((https?:\/\/[^\s)]+\.pdf[^\s)]*)\)/gi;
+        const pdfLinkRegex =
+          /\[([^\]]*)\]\((https?:\/\/[^\s)]+\.pdf[^\s)]*)\)/gi;
         const match = pdfLinkRegex.exec(content);
         if (match) {
-          return { pdfUrl: match[2], pageUrl: result.url, source: "youdotcom" as any, status: "pdf_found" };
+          return {
+            pdfUrl: match[2],
+            pageUrl: result.url,
+            source: "youdotcom" as any,
+            status: "pdf_found",
+          };
         }
-        const downloadRegex = /\[([^\]]*(?:download|pdf|full\s*text)[^\]]*)\]\((https?:\/\/[^\s)]+)\)/gi;
+        const downloadRegex =
+          /\[([^\]]*(?:download|pdf|full\s*text)[^\]]*)\]\((https?:\/\/[^\s)]+)\)/gi;
         const downloadMatch = downloadRegex.exec(content);
         if (downloadMatch) {
-          return { pdfUrl: downloadMatch[2], pageUrl: result.url, source: "youdotcom" as any, status: "pdf_found" };
+          return {
+            pdfUrl: downloadMatch[2],
+            pageUrl: result.url,
+            source: "youdotcom" as any,
+            status: "pdf_found",
+          };
         }
       }
       if (result.url.includes("arxiv.org/abs/")) {
         const pdfUrl = result.url.replace("/abs/", "/pdf/") + ".pdf";
-        return { pdfUrl: pdfUrl, pageUrl: result.url, source: "youdotcom" as any, status: "pdf_found" };
+        return {
+          pdfUrl: pdfUrl,
+          pageUrl: result.url,
+          source: "youdotcom" as any,
+          status: "pdf_found",
+        };
       }
     }
     if (results.length > 0) {
-      return { pageUrl: results[0].url, source: "youdotcom" as any, status: "page_found" };
+      return {
+        pageUrl: results[0].url,
+        source: "youdotcom" as any,
+        status: "page_found",
+      };
     }
     return null;
   }

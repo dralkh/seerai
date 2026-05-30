@@ -46,6 +46,12 @@ export { executeCollection } from "./collectionTool";
 export { executeWeb } from "./webTool";
 export { executeRelatedPapers } from "./citationTool";
 export { executeGenerateItemTags } from "./tagTool";
+export {
+  executeSemanticSearch,
+  executeKeywordSearch,
+  executeReadChunks,
+  executeSearchSimilar,
+} from "./ragTool";
 export { executeTodoWrite, executeTodoRead, detectPlanNeed } from "./todoTool";
 export {
   executeWorkspaceTool,

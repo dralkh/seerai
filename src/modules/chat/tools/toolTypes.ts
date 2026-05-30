@@ -193,6 +193,7 @@ export interface SearchLibraryParams {
     collection?: string;
     item_types?: string[];
   };
+  library_id?: number;
   limit?: number;
 }
 
@@ -408,10 +409,25 @@ export interface GetItemMetadataResult {
  */
 export interface ReadItemContentResult {
   content: string;
-  source_type: "notes" | "indexed_pdf" | "ocr" | "metadata_only";
+  source_type:
+    | "notes"
+    | "indexed_pdf"
+    | "ocr"
+    | "metadata_only"
+    | "vector_store";
   notes_count: number;
   content_length: number;
   truncated: boolean;
+  /** Pre-indexed chunks from vector store (only when source_type is "vector_store") */
+  chunks?: Array<{
+    chunk_id: string;
+    text: string;
+    source: string;
+    chunk_index: number;
+    metadata: Record<string, unknown>;
+  }>;
+  /** Item title (only when source_type is "vector_store") */
+  item_title?: string;
 }
 
 /**
@@ -820,11 +836,119 @@ export const TOOL_NAMES = {
   TODO_WRITE: "todowrite",
   TODO_READ: "todoread",
   TASK_COMPLETE: "task_complete",
+
+  SEMANTIC_SEARCH: "semantic_search",
+  KEYWORD_SEARCH: "keyword_search",
+  READ_CHUNKS: "read_chunks",
+  SEARCH_SIMILAR: "search_similar",
 } as const;
 
 export type ToolName = (typeof TOOL_NAMES)[keyof typeof TOOL_NAMES];
 
 // ==================== TODO Tool Types ====================
+
+// ==================== Semantic Search Tool Types ====================
+
+export interface SemanticSearchParams {
+  query: string;
+  scope?: "context" | "library" | "collection";
+  library_id?: number;
+  collection_id?: number;
+  top_k?: number;
+  min_score?: number;
+  /** Filter results to specific chunk sources (e.g. ["pdf", "abstract"]) */
+  sources?: Array<"abstract" | "pdf" | "note" | "metadata" | "table" | "file">;
+  /** Include full passage text instead of 1000-char preview */
+  include_full_text?: boolean;
+}
+
+export interface SemanticSearchResultData {
+  query: string;
+  total_searched: number;
+  results: Array<{
+    title: string;
+    item_id: number;
+    passage: string;
+    source: string;
+    relevance: number;
+  }>;
+}
+
+// ==================== Keyword Search Tool Types ====================
+
+export interface KeywordSearchParams {
+  query: string;
+  scope?: "context" | "library" | "collection";
+  library_id?: number;
+  collection_id?: number;
+  top_k?: number;
+  /** Filter results to specific chunk sources (e.g. ["pdf", "abstract"]) */
+  sources?: Array<"abstract" | "pdf" | "note" | "metadata" | "table" | "file">;
+}
+
+export interface KeywordSearchResultData {
+  query: string;
+  total_searched: number;
+  results: Array<{
+    title: string;
+    item_id: number;
+    passage: string;
+    source: string;
+    relevance: number;
+  }>;
+}
+
+// ==================== Read Chunks Tool Types ====================
+
+export interface ReadChunksParams {
+  chunk_ids?: string[];
+  item_id?: number;
+  max_chunks?: number;
+  scope?: "context" | "library" | "collection";
+  library_id?: number;
+  collection_id?: number;
+}
+
+export interface ReadChunksResultData {
+  chunks: Array<{
+    chunk_id: string;
+    item_id: number;
+    item_title: string;
+    text: string;
+    source: string;
+    chunk_index: number;
+    metadata?: Record<string, unknown>;
+  }>;
+  total_found: number;
+}
+
+// ==================== Search Similar Tool Types ====================
+
+export interface SearchSimilarParams {
+  item_id: number;
+  top_k?: number;
+  min_score?: number;
+  scope?: "context" | "library" | "collection";
+  library_id?: number;
+  collection_id?: number;
+}
+
+export interface SearchSimilarResultData {
+  source_item: {
+    id: number;
+    title: string;
+  };
+  similar_items: Array<{
+    id: number;
+    title: string;
+    score: number;
+    /** First author last name + year when available */
+    citation?: string;
+    /** ~300 char abstract snippet from the indexed chunks */
+    snippet?: string;
+  }>;
+  total_searched: number;
+}
 
 export interface TodoItem {
   id: string;

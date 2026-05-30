@@ -26,6 +26,10 @@ import {
   NoteParams,
   RelatedPapersParams,
   WebParams,
+  SemanticSearchParams,
+  KeywordSearchParams,
+  ReadChunksParams,
+  SearchSimilarParams,
 } from "./toolTypes";
 
 import { safeValidateToolArgs, formatZodError } from "./schemas";
@@ -48,6 +52,12 @@ import {
   executeTodoRead,
   checkTodosBeforeComplete,
 } from "./todoTool";
+import {
+  executeSemanticSearch,
+  executeKeywordSearch,
+  executeReadChunks,
+  executeSearchSimilar,
+} from "./ragTool";
 import { executeWorkspaceTool } from "../workspace/tools";
 
 /**
@@ -151,6 +161,31 @@ export async function executeToolCall(
       case TOOL_NAMES.GENERATE_ITEM_TAGS:
         return await executeGenerateItemTags(
           validatedArgs as GenerateItemTagsParams,
+          config,
+        );
+
+      // ==================== Semantic Search ====================
+      case TOOL_NAMES.SEMANTIC_SEARCH:
+        return await executeSemanticSearch(
+          validatedArgs as SemanticSearchParams,
+          config,
+        );
+
+      case TOOL_NAMES.KEYWORD_SEARCH:
+        return await executeKeywordSearch(
+          validatedArgs as KeywordSearchParams,
+          config,
+        );
+
+      case TOOL_NAMES.READ_CHUNKS:
+        return await executeReadChunks(
+          validatedArgs as ReadChunksParams,
+          config,
+        );
+
+      case TOOL_NAMES.SEARCH_SIMILAR:
+        return await executeSearchSimilar(
+          validatedArgs as SearchSimilarParams,
           config,
         );
 

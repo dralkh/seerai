@@ -30,10 +30,12 @@ export abstract class MessageStore {
   abstract getConversationState(): Promise<{
     states?: ChatStates;
     options?: ChatOptions;
+    contextItems?: import("./context/contextTypes").ContextItem[];
   } | null>;
   abstract saveConversationState(
     states: ChatStates,
     options: ChatOptions,
+    contextItems?: import("./context/contextTypes").ContextItem[],
   ): Promise<void>;
 
   // Continuation (provider session resume token)
@@ -287,6 +289,7 @@ export class FileMessageStore extends MessageStore {
   public async getConversationState(): Promise<{
     states?: ChatStates;
     options?: ChatOptions;
+    contextItems?: import("./context/contextTypes").ContextItem[];
   } | null> {
     try {
       if (!(await IOUtils.exists(this.stateFile))) {
@@ -310,6 +313,7 @@ export class FileMessageStore extends MessageStore {
   public async saveConversationState(
     states: ChatStates,
     options: ChatOptions,
+    contextItems?: import("./context/contextTypes").ContextItem[],
   ): Promise<void> {
     try {
       const convDir = PathUtils.join(
@@ -317,7 +321,13 @@ export class FileMessageStore extends MessageStore {
         this.currentConversationId,
       );
       await this.ensureDirectory(convDir);
-      const stateData = { states, options, savedAt: new Date().toISOString() };
+      const stateData = {
+        states,
+        options,
+        contextItems:
+          contextItems && contextItems.length > 0 ? contextItems : undefined,
+        savedAt: new Date().toISOString(),
+      };
       const encoder = new TextEncoder();
       await IOUtils.write(
         this.stateFile,
@@ -629,6 +639,7 @@ export class FileMessageStore extends MessageStore {
         await this.saveConversationState(
           state.states || ({} as any),
           state.options || ({} as any),
+          state.contextItems,
         );
       }
 

@@ -59,8 +59,39 @@ pref("ragTopK", 20);
 pref("ragMinScore", 30);
 pref("ragChunkSize", 512);
 pref("ragChunkOverlap", 64);
+pref("ragRrfAlpha", 55); // 0-100, RRF weight for dense vs sparse. 55 = 0.55 dense bias.
+// RAG MMR (Maximal Marginal Relevance) preferences
+pref("ragMmrEnabled", true);
+pref("ragMmrLambda", 70); // 0-100, MMR relevance-diversity trade-off. 70 = 0.7 relevance bias.
+// RAG Query Expansion
+pref("ragQueryExpansion", true);
+pref("ragMultiQueryExpansion", true);
+// RAG HyDE (Hypothetical Document Embeddings)
+pref("ragHydeEnabled", false);
+// RAG Contextual Retrieval
+pref("ragContextualRetrieval", false);
+// RAG Sentence-Window Retrieval
+pref("ragSentenceWindow", false);
+pref("ragSentenceWindowSize", 3);
+// RAG Query Decomposition
+pref("ragQueryDecomposition", false);
+// RAG Citation Graph Traversal
+pref("ragCitationGraphHops", 0);
+// RAG Corrective Retrieval
+pref("ragCorrectiveEnabled", false);
+// RAG Evaluation
+pref("ragEvalEnabled", false);
+pref("ragEvalGroundTruth", "");
+pref("ragEvalEmbeddingModel", "");
+// RAG Cross-Encoder Reranker preferences
+pref("ragRerankerProvider", "none"); // "none", "jina", or "cohere"
+pref("ragRerankerApiKey", "");
+pref("ragRerankerModel", ""); // Empty = use provider default (jina-reranker-v3 / rerank-v4)
+pref("ragRerankerTopN", 10);
 pref("tableGenerationSound", true);
 pref("historySidebarWidth", 120);
+pref("historySidebarVisible", true);
+pref("workspaceSectionCollapsed", "[]");
 pref("workspaceSidebarWidth", 120);
 pref("workspaceSidebarCollapsed", true);
 pref("workspaceEditorHeight", 300);

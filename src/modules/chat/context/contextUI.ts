@@ -13,12 +13,25 @@ import { getWorkspaceStore } from "../workspace/store";
 import { convertDocxToMarkdown } from "../../docxConverter";
 import { stripBase64Data } from "../imageUtils";
 
+let _lastContextChipsListener: ((items: ContextItem[]) => void) | null = null;
+
+function truncateWords(text: string, maxWords: number): string {
+  const words = text.trim().split(/\s+/);
+  if (words.length <= maxWords) return text;
+  return words.slice(0, maxWords).join(" ") + "...";
+}
+
 /**
  * Creates the unified context chips area element.
  * Subscribes to ChatContextManager updates.
  */
 export function createContextChipsArea(doc: Document): HTMLElement {
   const contextManager = ChatContextManager.getInstance();
+
+  if (_lastContextChipsListener) {
+    contextManager.removeListener(_lastContextChipsListener);
+    _lastContextChipsListener = null;
+  }
 
   const container = doc.createElement("div");
   container.id = "unified-context-chips";
@@ -116,10 +129,11 @@ export function createContextChipsArea(doc: Document): HTMLElement {
 
   container.appendChild(header);
 
-  // Initial listener
-  contextManager.addListener((items) => {
+  // Initial listener — store ref for cleanup to avoid stale listeners
+  _lastContextChipsListener = (items) => {
     updateChips(doc, container, label, items);
-  });
+  };
+  contextManager.addListener(_lastContextChipsListener);
 
   return container;
 }
@@ -147,7 +161,8 @@ function updateChips(
     const chip = doc.createElement("div");
     const color = CONTEXT_COLORS[item.type] || "#007AFF";
 
-    chip.style.display = "inline-flex";
+    chip.style.display = "flex";
+    chip.style.flexWrap = "wrap";
     chip.style.alignItems = "center";
     chip.style.gap = "4px";
     chip.style.padding = "4px 8px";
@@ -156,24 +171,49 @@ function updateChips(
     chip.style.borderRadius = "12px";
     chip.style.fontSize = "11px";
     chip.style.fontWeight = "500";
-    chip.style.cursor = "default";
-    chip.style.maxWidth = "200px";
-    chip.style.overflow = "hidden";
+    chip.style.cursor = "pointer";
+    chip.style.maxWidth = "100%";
     chip.style.boxShadow = "0 1px 2px rgba(0,0,0,0.1)";
 
-    // Icon + Name
+    // Icon + Name in a wrapping span for multi-line text
     const icon =
       item.type === "file" && item.metadata?.driveFileId
         ? (item.metadata?.providerIcon as string) ||
           CONTEXT_ICONS[item.type] ||
           ""
         : CONTEXT_ICONS[item.type] || "";
-    const nameText =
-      item.displayName.length > 25
-        ? item.displayName.substring(0, 22) + "..."
-        : item.displayName;
 
-    chip.title = `${icon} ${item.fullName || item.displayName} (${item.type})`;
+    const chipText = doc.createElement("span");
+    chipText.style.minWidth = "0";
+    chipText.style.flex = "1 1 auto";
+    chipText.style.whiteSpace = "normal";
+    chipText.style.wordBreak = "break-word";
+    chipText.style.overflowWrap = "break-word";
+    const truncatedName = truncateWords(item.displayName, 4);
+    chipText.innerText = `${icon} ${truncatedName}`;
+    chipText.title = `${icon} ${item.fullName || item.displayName} (${item.type})`;
+
+    // Click to navigate in Zotero
+    chipText.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (item.type === "paper" || item.type === "collection") {
+        const id = Number(item.id);
+        if (!isNaN(id)) {
+          const zp = Zotero.getActiveZoteroPane();
+          if (zp) {
+            if (item.type === "collection") {
+              try {
+                (zp as any).loadCollection(id);
+              } catch {
+                zp.selectItem(id);
+              }
+            } else {
+              zp.selectItem(id);
+            }
+          }
+        }
+      }
+    });
 
     // For file items, build a richer tooltip with size/token details
     if (item.type === "file" && item.metadata) {
@@ -204,10 +244,9 @@ function updateChips(
       }
       if (fileCategory === "audio") parts.push("(transcribed)");
       if (extractionError) parts.push(`Error: ${extractionError}`);
-      chip.title = parts.join(" | ");
+      chipText.title = parts.join(" | ");
     }
-
-    chip.innerText = `${icon} ${nameText}`;
+    chip.appendChild(chipText);
 
     // Remove Button
     const removeBtn = doc.createElement("span");

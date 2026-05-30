@@ -30,7 +30,7 @@ export async function executeSearchLibrary(
   config: AgentConfig,
 ): Promise<ToolResult> {
   try {
-    const { query, filters, limit = 10 } = params;
+    const { query, filters, limit = 10, library_id } = params;
     const effectiveLimit = Math.min(limit, 50); // Cap at 50
 
     Zotero.debug(
@@ -41,10 +41,13 @@ export async function executeSearchLibrary(
     );
 
     // Determine library and collection scope
+    // Explicit library_id param overrides config.libraryScope
     let searchLibraryID: number | undefined;
     let searchCollectionID: number | undefined;
 
-    if (config.libraryScope.type === "user") {
+    if (library_id !== undefined) {
+      searchLibraryID = library_id;
+    } else if (config.libraryScope.type === "user") {
       searchLibraryID = Zotero.Libraries.userLibraryID;
     } else if (config.libraryScope.type === "group") {
       const groupLibId = Zotero.Groups.getLibraryIDFromGroupID(

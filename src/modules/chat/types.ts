@@ -117,6 +117,26 @@ export const defaultChatStates: ChatStates = {
 export type StateName = keyof ChatStates;
 
 // Chat message types
+
+/** RAG statistics attached to a message or session */
+export interface RAGStats {
+  chunksRetrieved: number;
+  tokensUsed: number;
+  queryTimeMs: number;
+  indexedCount?: number;
+  totalContextItems?: number;
+  itemsIndexedOnDemand?: number;
+  ragDetailsOpen?: boolean;
+  rankedResults?: Array<{
+    title: string;
+    score: number;
+    source: string;
+    description?: string;
+    itemId: number;
+    chunkId: string;
+  }>;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system" | "error";
@@ -126,7 +146,9 @@ export interface ChatMessage {
   canRetry?: boolean; // For assistant messages - user can regenerate
   canEdit?: boolean; // For user messages - can be edited
   toolResults?: { toolCall: any; result?: any }[]; // Persisted tool executions
+  isToolDetailsOpen?: boolean; // Persisted tool process expand/collapse state
   iterationCount?: number; // Total reasoning turns/iterations
+  ragStats?: RAGStats;
 }
 
 // Model type categories for different API capabilities
@@ -278,6 +300,8 @@ export interface ChatOptions {
   systemPrompt?: string;
   /** Skill template IDs from prompt library to inject into system prompt */
   skillIds?: string[];
+  /** Per-conversation library scope (mirrors extensions.seerai.libraryScope pref values) */
+  libraryScope?: string;
 }
 
 export const defaultChatOptions: ChatOptions = {
@@ -292,6 +316,7 @@ export const defaultChatOptions: ChatOptions = {
   autoPlayTts: false,
   ragEnabled: undefined, // undefined = inherit from global pref
   ragTokenThreshold: undefined, // undefined = inherit from global pref
+  libraryScope: undefined,
 };
 
 // Selection chip display config

@@ -73,6 +73,8 @@ export function createWorkspaceSidebar(
   doc: Document,
   callbacks: WorkspaceSidebarCallbacks,
 ): HTMLElement {
+  loadSectionCollapsedFromPref();
+
   const sidebar = doc.createElement("div");
   sidebar.className = "workspace-sidebar";
   sidebar.style.cssText = `
@@ -178,6 +180,37 @@ export function createWorkspaceSidebar(
     },
   );
   actions.appendChild(workspaceSettingsBtn);
+
+  const collapseAllSectionsBtn = createIconButton(
+    doc,
+    "\u2191",
+    "Collapse all sections",
+    () => {
+      _sectionCollapsed.clear();
+      const sections = sidebar.querySelectorAll(
+        ".workspace-section",
+      ) as NodeListOf<HTMLElement>;
+      sections.forEach((section: HTMLElement) => {
+        const header = section.querySelector(
+          ".workspace-section-header",
+        ) as HTMLElement | null;
+        const items = section.querySelector(
+          ".section-items",
+        ) as HTMLElement | null;
+        const arrow = header?.querySelector("span");
+        if (items && items.style.display !== "none") {
+          items.style.display = "none";
+          if (arrow) arrow.textContent = "\u25B8";
+        }
+        const title = section.dataset.sectionTitle;
+        if (title) {
+          _sectionCollapsed.set(title, true);
+        }
+      });
+      saveSectionCollapsedToPref();
+    },
+  );
+  actions.appendChild(collapseAllSectionsBtn);
 
   const collapseBtn = createIconButton(
     doc,
@@ -351,6 +384,34 @@ let _refreshInProgress = false;
 let _refreshDirty = false;
 
 const _sectionCollapsed = new Map<string, boolean>();
+
+function loadSectionCollapsedFromPref(): void {
+  try {
+    const raw = Zotero.Prefs.get(
+      "extensions.seerai.workspaceSectionCollapsed",
+    ) as string;
+    if (raw) {
+      const entries = JSON.parse(raw) as [string, boolean][];
+      _sectionCollapsed.clear();
+      for (const [k, v] of entries) {
+        _sectionCollapsed.set(k, v);
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function saveSectionCollapsedToPref(): void {
+  try {
+    Zotero.Prefs.set(
+      "extensions.seerai.workspaceSectionCollapsed",
+      JSON.stringify([..._sectionCollapsed]),
+    );
+  } catch {
+    // ignore
+  }
+}
 
 export async function refreshWorkspaceSidebar(
   sidebar: HTMLElement,
@@ -1036,8 +1097,11 @@ function createCollapsibleSection(
   const isExpanded = remembered !== undefined ? !remembered : expanded;
 
   const section = doc.createElement("div");
+  section.className = "workspace-section";
+  section.dataset.sectionTitle = title;
 
   const header = doc.createElement("div");
+  header.className = "workspace-section-header";
   header.style.cssText = `
     display: flex;
     align-items: center;
@@ -1080,6 +1144,7 @@ function createCollapsibleSection(
     items.style.display = isCollapsed ? "" : "none";
     arrow.textContent = isCollapsed ? "\u25BE" : "\u25B8";
     _sectionCollapsed.set(title, !isCollapsed);
+    saveSectionCollapsedToPref();
   });
 
   section.appendChild(header);

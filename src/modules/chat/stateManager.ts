@@ -17,6 +17,7 @@ import {
   ChatOptions,
   defaultChatOptions,
 } from "./types";
+import { countTokens as bpeCountTokens } from "./tokenizer";
 
 export class ChatStateManager {
   private states: ChatStates;
@@ -312,17 +313,9 @@ export class ChatStateManager {
     this.notify();
   }
 
-  /**
-   * Estimate token count for a given text.
-   *
-   * Uses ~3.2 chars/token which is conservative for mixed academic content.
-   * The naive 4 chars/token heuristic underestimates by ~20-30% on real
-   * payloads (JSON-encoded messages, tables, multi-language text) and caused
-   * context_length_exceeded errors even when pre-flight checks passed.
-   */
   static countTokens(text: string): number {
     if (!text) return 0;
-    return Math.ceil(text.length / 3.2);
+    return bpeCountTokens(text, { allowFallback: true });
   }
 
   /**
