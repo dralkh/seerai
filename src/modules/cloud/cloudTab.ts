@@ -648,13 +648,15 @@ async function renderFullUI(doc: Document): Promise<HTMLElement> {
 
   const splitContainer = div(
     doc,
-    "flex: 1 1 0; display: flex; min-height: 0; overflow: hidden;",
+    "position: relative; flex: 1 1 0; display: flex; min-width: 0; min-height: 0; overflow: hidden;",
   );
+  splitContainer.className = "cloud-split-layout";
 
   const leftPanel = div(
     doc,
     "display: flex; flex-direction: column; min-height: 0; overflow: hidden; border-right: 1px solid var(--border-primary);",
   );
+  leftPanel.className = "cloud-files-panel";
   leftPanel.style.flex = "0.4 0.4 0";
   leftPanel.style.minWidth = MIN_LEFT_WIDTH + "px";
 
@@ -669,6 +671,7 @@ async function renderFullUI(doc: Document): Promise<HTMLElement> {
     doc,
     "flex: 1 1 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--background-primary);",
   );
+  rightPanel.className = "cloud-editor-panel";
   rightPanel.style.minWidth = MIN_RIGHT_WIDTH + "px";
   splitContainer.appendChild(rightPanel);
 
@@ -711,6 +714,43 @@ async function renderFullUI(doc: Document): Promise<HTMLElement> {
     editorToolbar,
     statusBar,
   };
+
+  const applyResponsiveLayout = () => {
+    const availableWidth = splitContainer.getBoundingClientRect().width;
+    if (!availableWidth) return;
+    if (availableWidth < 640) {
+      splitContainer.style.flexDirection = "column";
+      leftPanel.style.flex = "0 0 36%";
+      leftPanel.style.width = "100%";
+      leftPanel.style.minWidth = "0";
+      leftPanel.style.minHeight = "120px";
+      leftPanel.style.borderRight = "none";
+      leftPanel.style.borderBottom = "1px solid var(--border-primary)";
+      handle.style.display = "none";
+      rightPanel.style.width = "100%";
+      rightPanel.style.minWidth = "0";
+      rightPanel.style.minHeight = "160px";
+    } else {
+      splitContainer.style.flexDirection = "row";
+      leftPanel.style.flex = "0.4 0.4 0";
+      leftPanel.style.width = "";
+      leftPanel.style.minWidth = MIN_LEFT_WIDTH + "px";
+      leftPanel.style.minHeight = "0";
+      leftPanel.style.borderRight = "1px solid var(--border-primary)";
+      leftPanel.style.borderBottom = "none";
+      handle.style.display = "";
+      rightPanel.style.width = "";
+      rightPanel.style.minWidth = MIN_RIGHT_WIDTH + "px";
+      rightPanel.style.minHeight = "0";
+    }
+  };
+  const ResizeObserverCtor = doc.defaultView?.ResizeObserver;
+  if (ResizeObserverCtor) {
+    const layoutObserver = new ResizeObserverCtor(applyResponsiveLayout);
+    layoutObserver.observe(splitContainer);
+    (container as any)._layoutObserver = layoutObserver;
+  }
+  setTimeout(applyResponsiveLayout, 0);
 
   await navigateToFolder(doc, state.currentFolderId);
 

@@ -15,6 +15,7 @@ export { PlaceholderType } from "./promptLibrary";
 import { getTableStore } from "./tableStore";
 import { getMessageStore } from "./messageStore";
 import { config } from "../../../package.json";
+import { getSRService } from "../systematicReview/service";
 
 // ==================== Types ====================
 
@@ -63,6 +64,7 @@ export const PLACEHOLDER_INFO: Record<
   table: { icon: "📊", label: "Table", color: "#009688" },
   prompt: { icon: "⚡", label: "Prompt", color: "#ffc107" },
   workspace: { icon: "📂", label: "Workspace", color: "#AF52DE" },
+  review: { icon: "R", label: "Review", color: "#7C3AED" },
 };
 
 // ==================== Trigger Detection ====================
@@ -202,7 +204,7 @@ export function parseMessageForContext(text: string): ParsedPlaceholder[] {
  */
 export function getCleanMessage(text: string): string {
   // Remove ::id parts from bracketed placeholders
-  return text.replace(/\[([#/@^~%])([^\]]+?)(?:::\d+)?\]/g, "[$1$2]");
+  return text.replace(/\[([#/@^~%&])([^\]]+?)(?:::\d+)?\]/g, "[$1$2]");
 }
 
 // ==================== Autocomplete Queries ====================
@@ -785,9 +787,32 @@ export async function getAutocompleteResults(
       return queryPrompts(query, limit);
     case "workspace":
       return queryWorkspaces(query, limit);
+    case "review":
+      return queryReviews(query, limit);
     default:
       return [];
   }
+}
+
+export async function queryReviews(
+  query: string,
+  limit: number = 20,
+): Promise<AutocompleteResult[]> {
+  const state = await getSRService().load();
+  const lowerQuery = query.toLowerCase();
+  return state.spaces
+    .filter(
+      (project) => !query || project.name.toLowerCase().includes(lowerQuery),
+    )
+    .slice(0, limit)
+    .map((project) => ({
+      id: project.id,
+      title: project.name,
+      subtitle: `${project.data?.papers.filter((paper) => paper.status === "included").length || 0} included papers`,
+      icon: "R",
+      type: "review" as const,
+      data: { projectId: project.id },
+    }));
 }
 
 /**

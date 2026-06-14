@@ -196,7 +196,7 @@ export const defaultTableHistory: TableHistory = {
 };
 
 // Active tab state
-export type AssistantTab = "chat" | "table" | "search" | "cloud";
+export type AssistantTab = "chat" | "table" | "search" | "cloud" | "systematic";
 
 // ==================== Search Tab Types ====================
 

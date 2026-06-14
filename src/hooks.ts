@@ -53,6 +53,20 @@ async function onStartup() {
     Zotero.debug(`[seerai] Failed to init model configs from file: ${e}`);
   });
 
+  // Preload systematic review paper IDs for context menu visibility
+  try {
+    const {
+      ensureSRStateLoaded,
+      getSystematicReviewPaperIds,
+      isItemInSystematicReview,
+    } = await import("./modules/systematicReview/systematicReviewTab");
+    await ensureSRStateLoaded();
+    Assistant.syncSystematicReviewCache(getSystematicReviewPaperIds());
+    Assistant.setSystematicReviewStoreCheck(isItemInSystematicReview);
+  } catch (e) {
+    Zotero.debug(`[seerai] Failed to preload SR state: ${e}`);
+  }
+
   // Register MCP API endpoints
   registerApiEndpoints();
 
@@ -185,6 +199,42 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
       menu.appendChild(removeFromTableMenu);
     }
 
+    // Add to Systematic Review menu item
+    const addToSRMenuId = "seerai-add-to-sr";
+    let addToSRMenu = win.document.getElementById(
+      addToSRMenuId,
+    ) as XUL.MenuItem;
+    if (!addToSRMenu) {
+      addToSRMenu = win.document.createXULElement("menuitem") as XUL.MenuItem;
+      addToSRMenu.setAttribute("id", addToSRMenuId);
+      addToSRMenu.setAttribute("label", "Add Paper to Systematic Review");
+      addToSRMenu.setAttribute("class", "menuitem-iconic");
+      addToSRMenu.addEventListener("command", async () => {
+        const items = Zotero.getActiveZoteroPane().getSelectedItems();
+        await Assistant.addItemsToSystematicReview(items);
+      });
+      menu.appendChild(addToSRMenu);
+    }
+
+    // Remove from Systematic Review menu item
+    const removeFromSRMenuId = "seerai-remove-from-sr";
+    let removeFromSRMenu = win.document.getElementById(
+      removeFromSRMenuId,
+    ) as XUL.MenuItem;
+    if (!removeFromSRMenu) {
+      removeFromSRMenu = win.document.createXULElement(
+        "menuitem",
+      ) as XUL.MenuItem;
+      removeFromSRMenu.setAttribute("id", removeFromSRMenuId);
+      removeFromSRMenu.setAttribute("label", "Remove from Systematic Review");
+      removeFromSRMenu.setAttribute("class", "menuitem-iconic");
+      removeFromSRMenu.addEventListener("command", async () => {
+        const items = Zotero.getActiveZoteroPane().getSelectedItems();
+        await Assistant.removeItemsFromSystematicReview(items);
+      });
+      menu.appendChild(removeFromSRMenu);
+    }
+
     // Handle visibility
     menu.addEventListener("popupshowing", () => {
       const items = Zotero.getActiveZoteroPane().getSelectedItems();
@@ -233,6 +283,14 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
         Assistant.isItemInCurrentTable(item.id),
       );
       removeFromTableMenu.hidden = !isRegularSelection || !anyInTable;
+
+      // Systematic Review Visibility
+      addToSRMenu.hidden = !isRegularSelection;
+
+      const anyInSR = items.some((item) =>
+        Assistant.isItemInSystematicReview(item.id),
+      );
+      removeFromSRMenu.hidden = !isRegularSelection || !anyInSR;
 
       // Generate Tags Visibility
       // Show for regular items (same as "Extract with OCR" roughly, but broader)
@@ -651,6 +709,26 @@ async function onNotify(
       if (typeof id === "number") {
         enqueueForIndexing(id);
       }
+    }
+  }
+
+  if (event === "delete" && (type === "item" || type === "collection")) {
+    try {
+      const { getSRService } =
+        await import("./modules/systematicReview/service");
+      const service = getSRService();
+      const state = await service.load();
+      const numericIds = ids.filter(
+        (id): id is number => typeof id === "number",
+      );
+      if (type === "item") {
+        service.removePapersFromAllProjects(state, numericIds);
+      } else {
+        service.removeCollectionsFromAllProjects(state, numericIds);
+      }
+      await service.save(state);
+    } catch (error) {
+      Zotero.debug(`[seerai] Failed to reconcile systematic review: ${error}`);
     }
   }
 }

@@ -30,6 +30,7 @@ import {
   KeywordSearchParams,
   ReadChunksParams,
   SearchSimilarParams,
+  SystematicReviewParams,
 } from "./toolTypes";
 
 import { safeValidateToolArgs, formatZodError } from "./schemas";
@@ -59,6 +60,7 @@ import {
   executeSearchSimilar,
 } from "./ragTool";
 import { executeWorkspaceTool } from "../workspace/tools";
+import { executeSystematicReview } from "./systematicReviewTool";
 
 /**
  * Parse a tool call from API format to typed format
@@ -214,6 +216,11 @@ export async function executeToolCall(
 
       case TOOL_NAMES.WEB:
         return await executeWeb(validatedArgs as WebParams, config);
+
+      case TOOL_NAMES.SYSTEMATIC_REVIEW:
+        return await executeSystematicReview(
+          validatedArgs as SystematicReviewParams,
+        );
 
       // ==================== TODO & Completion ====================
 

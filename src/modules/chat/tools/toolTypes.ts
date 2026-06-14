@@ -230,7 +230,14 @@ export interface CreateNoteParams {
  * Context item for context operations
  */
 export interface ContextItem {
-  type: "paper" | "tag" | "author" | "collection" | "topic" | "table";
+  type:
+    | "paper"
+    | "tag"
+    | "author"
+    | "collection"
+    | "topic"
+    | "table"
+    | "review";
   id?: number | string;
   name?: string;
 }
@@ -804,6 +811,178 @@ export interface WebParams {
   url?: string;
 }
 
+export type SystematicReviewParams =
+  | { action: "list_projects" }
+  | { action: "get_project"; project_id?: string }
+  | { action: "get_records"; project_id?: string }
+  | { action: "get_synthesis"; project_id?: string; run_id?: string }
+  | { action: "get_gaps"; project_id?: string; run_id?: string }
+  | { action: "get_prisma"; project_id?: string }
+  | { action: "get_sources"; project_id?: string }
+  | {
+      action: "sync_sources";
+      project_id?: string;
+      sources: {
+        collection_id: number;
+        type: "Database" | "Register" | "Other source";
+        label: string;
+        include_subfolders?: boolean;
+      }[];
+    }
+  | { action: "get_protocol"; project_id?: string }
+  | { action: "validate_protocol"; project_id?: string }
+  | {
+      action: "rollback_protocol";
+      project_id?: string;
+      revision_id: string;
+    }
+  | {
+      action: "update_protocol";
+      project_id?: string;
+      research_question?: string;
+      framework?: string;
+      dimensions?: {
+        key: string;
+        label: string;
+        description?: string;
+        value: string;
+        keyword_aids?: string[];
+        evidence_labels?: string[];
+      }[];
+      inclusion_rules?: string[];
+      exclusion_rules?: string[];
+      include_keyword_aids?: string[];
+      exclude_keyword_aids?: string[];
+    }
+  | { action: "create_project"; name: string }
+  | { action: "add_papers"; project_id?: string; paper_ids: number[] }
+  | { action: "remove_papers"; project_id?: string; paper_ids: number[] }
+  | { action: "get_extraction_template"; project_id?: string }
+  | {
+      action: "propose_extraction_template";
+      project_id?: string;
+      instructions?: string;
+    }
+  | {
+      action: "activate_extraction_template";
+      project_id?: string;
+      template_id: string;
+    }
+  | {
+      action: "update_extraction_template";
+      project_id?: string;
+      template_id: string;
+      name?: string;
+      instructions?: string;
+      outcomes?: {
+        id?: string;
+        name: string;
+        aliases?: string[];
+        description?: string;
+        measures: ("OR" | "RR" | "HR" | "MD" | "SMD")[];
+        timepoints?: string[];
+        unit?: string;
+        direction?: "higher_better" | "lower_better";
+        required?: boolean;
+      }[];
+    }
+  | {
+      action: "start_analysis_job";
+      project_id?: string;
+      paper_ids: number[];
+    }
+  | {
+      action: "start_extraction_job";
+      project_id?: string;
+      paper_ids: number[];
+    }
+  | {
+      action:
+        | "get_review_job"
+        | "pause_review_job"
+        | "cancel_review_job"
+        | "retry_review_job";
+      project_id?: string;
+      job_id: string;
+    }
+  | {
+      action: "get_extractions";
+      project_id?: string;
+      paper_id?: number;
+      extraction_status?: "proposed" | "verified" | "rejected";
+    }
+  | {
+      action: "review_extractions";
+      project_id?: string;
+      paper_id: number;
+      extraction_ids: string[];
+      verification_status: "verified" | "rejected";
+    }
+  | { action: "get_synthesis_readiness"; project_id?: string }
+  | {
+      action: "analyze_papers";
+      project_id?: string;
+      paper_ids: number[];
+    }
+  | {
+      action: "save_extraction";
+      project_id?: string;
+      paper_id: number;
+      extraction: {
+        id?: string;
+        outcome: string;
+        effect_type: "OR" | "RR" | "HR" | "MD" | "SMD";
+        effect_size: number;
+        ci_low: number;
+        ci_high: number;
+        n: number;
+        events: number;
+        timepoint?: string;
+        unit?: string;
+        direction?: "higher_better" | "lower_better";
+        source_attachment_id?: number;
+        source_page?: string;
+        source_quote?: string;
+        verification_status?: "proposed" | "verified";
+      };
+    }
+  | {
+      action: "run_synthesis";
+      project_id?: string;
+      force?: boolean;
+    }
+  | {
+      action: "confirm_synthesis";
+      project_id?: string;
+      domain_id: string;
+      selected_model: "common_effect" | "random_effects" | "narrative";
+    }
+  | {
+      action: "generate_gaps";
+      project_id?: string;
+      synthesis_run_id?: string;
+      force?: boolean;
+    }
+  | {
+      action: "update_gap";
+      project_id?: string;
+      gap_id: string;
+      title?: string;
+      severity?: "high" | "medium" | "low";
+      description?: string;
+      implication?: string;
+      status?: "draft" | "accepted" | "rejected" | "ignored";
+      reviewer_note?: string;
+    }
+  | {
+      action: "screen";
+      project_id?: string;
+      paper_ids: number[];
+      decision: "undecided" | "included" | "maybe" | "excluded";
+      reason?: string;
+      stage?: "title_abstract" | "full_text" | "final";
+    };
+
 // ==================== Tool Name Constants ====================
 
 export const TOOL_NAMES = {
@@ -820,6 +999,7 @@ export const TOOL_NAMES = {
   NOTE: "note",
   RELATED_PAPERS: "related_papers",
   WEB: "web",
+  SYSTEMATIC_REVIEW: "systematic_review",
 
   // Workspace tools
   WORKSPACE_READ_FILE: "workspace_read_file",

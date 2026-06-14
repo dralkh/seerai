@@ -626,10 +626,7 @@ export function createPlaceholderMenuButton(
 
     menu = doc.createElement("div");
     menu.style.cssText = `
-            position: absolute;
-            bottom: 100%;
-            left: 0;
-            margin-bottom: 4px;
+            position: fixed;
             background: var(--background-primary);
             border: 1px solid var(--border-primary);
             border-radius: 8px;
@@ -638,6 +635,13 @@ export function createPlaceholderMenuButton(
             z-index: 10003;
             min-width: 160px;
         `;
+    const buttonRect = button.getBoundingClientRect();
+    const viewWidth = doc.defaultView?.innerWidth || 1200;
+    menu.style.left = `${Math.min(buttonRect.left, viewWidth - 170)}px`;
+    menu.style.bottom = `${Math.max(
+      6,
+      (doc.defaultView?.innerHeight || 800) - buttonRect.top + 4,
+    )}px`;
 
     const placeholderTypes: [string, PlaceholderType][] = [
       ["!", "prompt"],
@@ -648,6 +652,7 @@ export function createPlaceholderMenuButton(
       ["~", "tag"],
       ["$", "table"],
       ["%", "workspace"],
+      ["&", "review"],
     ];
 
     for (const [trigger, type] of placeholderTypes) {
@@ -668,11 +673,15 @@ export function createPlaceholderMenuButton(
                 font-size: 12px;
                 color: var(--text-primary);
             `;
-      item.innerHTML = `
-                <span style="width: 20px; text-align: center;">${info.icon}</span>
-                <span style="flex: 1;">${info.label}</span>
-                <span style="font-family: monospace; color: var(--text-tertiary);">${trigger}</span>
-            `;
+      const triggerBadge = doc.createElement("span");
+      triggerBadge.textContent = trigger;
+      triggerBadge.style.cssText =
+        "display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:1px solid var(--border-primary);border-radius:5px;font:600 11px monospace;color:var(--text-secondary);background:var(--background-secondary);";
+      const label = doc.createElement("span");
+      label.textContent = info.label;
+      label.style.flex = "1";
+      item.appendChild(triggerBadge);
+      item.appendChild(label);
 
       item.addEventListener("mouseenter", () => {
         item.style.background = "var(--background-secondary)";
@@ -705,12 +714,17 @@ export function createPlaceholderMenuButton(
       menu.appendChild(item);
     }
 
-    container.appendChild(menu);
+    const mountPoint = doc.body || doc.documentElement;
+    if (!mountPoint) return;
+    mountPoint.appendChild(menu);
     menuVisible = true;
 
     // Close on click outside
     const closeHandler = (e: MouseEvent) => {
-      if (!container.contains(e.target as Node)) {
+      if (
+        !container.contains(e.target as Node) &&
+        !menu?.contains(e.target as Node)
+      ) {
         if (menu) {
           menu.remove();
           menu = null;

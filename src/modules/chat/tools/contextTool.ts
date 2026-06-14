@@ -13,6 +13,7 @@ import {
 } from "./toolTypes";
 import { ChatContextManager } from "../context/contextManager";
 import { ContextItemType } from "../context/contextTypes";
+import { getSRService } from "../../systematicReview/service";
 
 /**
  * Unified context tool dispatcher
@@ -119,6 +120,20 @@ async function executeAddToContext(
           id = item.id;
           displayName = item.name || `Table ${item.id}`;
           break;
+
+        case "review": {
+          const state = await getSRService().load();
+          const project = item.id
+            ? state.spaces.find((candidate) => candidate.id === item.id)
+            : state.spaces.find(
+                (candidate) =>
+                  candidate.name.toLowerCase() === item.name?.toLowerCase(),
+              );
+          if (!project) continue;
+          id = project.id;
+          displayName = project.name;
+          break;
+        }
 
         default:
           continue;

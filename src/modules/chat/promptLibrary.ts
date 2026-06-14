@@ -14,7 +14,8 @@ export type PlaceholderType =
   | "year"
   | "table"
   | "prompt"
-  | "workspace";
+  | "workspace"
+  | "review";
 export type PromptCategory =
   | "analysis"
   | "comparative"
@@ -53,11 +54,13 @@ export const PLACEHOLDER_TRIGGERS: Record<string, PlaceholderType> = {
   $: "table",
   "!": "prompt",
   "%": "workspace",
+  "&": "review",
 };
 
 // Placeholder patterns for parsing
 // Format: trigger + word characters (alphanumeric, underscore, space until delimiter)
-const PLACEHOLDER_PATTERN = /([#/@^~$])([\w\s]*?)(?=\s*[#/@^~.,!?;:\]]|$)/g;
+const PLACEHOLDER_PATTERN =
+  /([#/@^~$%&])([\w\s]*?)(?=\s*[#/@^~$%&.,!?;:\]]|$)/g;
 
 // ==================== Storage ====================
 

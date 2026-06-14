@@ -108,6 +108,16 @@ export interface AgentProvider {
   isSessionInvalid(err: unknown): boolean;
 }
 
+export interface ChatCompletionOptions {
+  signal?: {
+    readonly aborted: boolean;
+    addEventListener(type: "abort", listener: () => void): void;
+    removeEventListener(type: "abort", listener: () => void): void;
+  };
+  timeoutMs?: number;
+  isolated?: boolean;
+}
+
 import { RateLimiter } from "../utils/rateLimiter";
 import { getActiveModelConfig } from "./chat/modelConfig";
 import { MODEL_TYPE_ENDPOINTS } from "./chat/types";
@@ -122,7 +132,6 @@ export class OpenAIService {
     Zotero.debug(`[seerai] Config Prefix: ${config.prefsPrefix}`);
     Zotero.debug(`[seerai] Reading Key: ${config.prefsPrefix}.apiKey`);
     const val = Zotero.Prefs.get(`${config.prefsPrefix}.apiKey`);
-    Zotero.debug(`[seerai] API Key Value: ${val}`);
 
     return {
       apiURL: Zotero.Prefs.get(`${config.prefsPrefix}.apiURL`) as string,
@@ -250,7 +259,10 @@ export class OpenAIService {
   /**
    * Standard chat completion (non-streaming)
    */
-  async chatCompletion(messages: OpenAIMessage[]): Promise<string> {
+  async chatCompletion(
+    messages: OpenAIMessage[],
+    options?: ChatCompletionOptions,
+  ): Promise<string> {
     let { apiURL, apiKey, model } = this.getPrefs();
 
     // Try to get full config for rate limiting
@@ -280,22 +292,37 @@ export class OpenAIService {
       ? `${apiURL}chat/completions`
       : `${apiURL}/chat/completions`;
 
-    // Create new AbortController for this request (if available)
-    this.isAborted = false;
+    if (!options?.isolated) this.isAborted = false;
     let signal: AbortSignal | undefined;
+    let controller: AbortController | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    const abortFromCaller = () => controller?.abort();
     try {
-      // AbortController may not be available in Zotero's environment
       if (typeof AbortController !== "undefined") {
-        this.currentController = new AbortController();
-        signal = this.currentController.signal;
+        controller = new AbortController();
+        signal = controller.signal;
+        if (!options?.isolated) this.currentController = controller;
+        if (options?.signal) {
+          if (options.signal.aborted) controller.abort();
+          else options.signal.addEventListener("abort", abortFromCaller);
+        }
+        if (options?.timeoutMs && options.timeoutMs > 0) {
+          timeoutId = setTimeout(() => {
+            timedOut = true;
+            controller?.abort();
+          }, options.timeoutMs);
+        }
       }
     } catch (e) {
-      // Fallback: no abort support
       Zotero.debug("[seerai] AbortController not available, abort disabled");
     }
 
     try {
       const requestBody = this.prepareRequestBody(model, messages);
+      Zotero.debug(
+        `[seerai] Starting chat completion with model ${model} at ${endpoint}`,
+      );
 
       const response = await fetch(endpoint, {
         method: "POST",
@@ -315,15 +342,22 @@ export class OpenAIService {
       }
 
       const data = (await response.json()) as any;
+      Zotero.debug(`[seerai] Chat completion finished for model ${model}`);
       return data.choices?.[0]?.message?.content || "";
     } catch (error) {
       if ((error as Error).name === "AbortError") {
-        throw new Error("Request was cancelled");
+        throw new Error(
+          timedOut ? "Request timed out" : "Request was cancelled",
+        );
       }
       Zotero.logError(error as Error);
       throw error;
     } finally {
-      this.currentController = null;
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      options?.signal?.removeEventListener("abort", abortFromCaller);
+      if (!options?.isolated && this.currentController === controller) {
+        this.currentController = null;
+      }
       if (activeConfig) {
         rateLimiter.release(activeConfig.id);
       }
