@@ -18,7 +18,7 @@ import {
   convertDocxToMarkdown,
 } from "../../docxConverter";
 import { ChatContextManager } from "../context/contextManager";
-import { createIconButton } from "../ui/icons";
+import { createIconButton, createSvgIcon } from "../ui/icons";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -118,7 +118,7 @@ export function createWorkspaceSidebar(
   const actions = doc.createElement("div");
   actions.style.cssText = "display: flex; gap: 4px;";
 
-  const newFileBtn = createIconButton(doc, "+", "New file / folder", () => {
+  const newFileBtn = createIconButton(doc, "add", "New file / folder", () => {
     const strip = sidebar.querySelector(
       "#workspace-creation-strip",
     ) as HTMLElement | null;
@@ -136,7 +136,7 @@ export function createWorkspaceSidebar(
   // Commit button - shows commit dropdown
   const commitActionBtn = createIconButton(
     doc,
-    "\u2713",
+    "check",
     "Commit staged changes",
     () => {
       showCommitDropdown(doc, commitActionBtn, sidebar, callbacks);
@@ -144,32 +144,27 @@ export function createWorkspaceSidebar(
   );
   actions.appendChild(commitActionBtn);
 
-  const historyBtn = createIconButton(doc, "\u23F0", "Commit history", () => {
+  const historyBtn = createIconButton(doc, "library", "Commit history", () => {
     const el = sidebar as any;
     el._showCommitHistoryPanel = true;
     refreshWorkspaceSidebar(sidebar, callbacks);
   });
   actions.appendChild(historyBtn);
 
-  const openFolderBtn = createIconButton(
-    doc,
-    "\uD83D\uDCC2",
-    "Open folder",
-    () => {
-      const store = getWorkspaceStore();
-      const dir = store.workspaceDir;
-      const file = (Components.classes as any)[
-        "@mozilla.org/file/local;1"
-      ].createInstance((Components.interfaces as any).nsIFile);
-      file.initWithPath(dir);
-      file.reveal();
-    },
-  );
+  const openFolderBtn = createIconButton(doc, "folder", "Open folder", () => {
+    const store = getWorkspaceStore();
+    const dir = store.workspaceDir;
+    const file = (Components.classes as any)[
+      "@mozilla.org/file/local;1"
+    ].createInstance((Components.interfaces as any).nsIFile);
+    file.initWithPath(dir);
+    file.reveal();
+  });
   actions.appendChild(openFolderBtn);
 
   const workspaceSettingsBtn = createIconButton(
     doc,
-    "\u2699",
+    "settings",
     "Workspace settings",
     () => {
       const existing = doc.getElementById("workspace-path-dropdown");
@@ -184,7 +179,7 @@ export function createWorkspaceSidebar(
 
   const collapseAllSectionsBtn = createIconButton(
     doc,
-    "\u2191",
+    "chevron-up",
     "Collapse all sections",
     () => {
       _sectionCollapsed.clear();
@@ -201,7 +196,11 @@ export function createWorkspaceSidebar(
         const arrow = header?.querySelector("span");
         if (items && items.style.display !== "none") {
           items.style.display = "none";
-          if (arrow) arrow.textContent = "\u25B8";
+          if (arrow) {
+            arrow.replaceChildren(
+              createSvgIcon(doc, "chevron-right", { size: 10, strokeWidth: 2 }),
+            );
+          }
         }
         const title = section.dataset.sectionTitle;
         if (title) {
@@ -215,7 +214,7 @@ export function createWorkspaceSidebar(
 
   const collapseBtn = createIconButton(
     doc,
-    "\u25B6",
+    "chevron-left",
     "Collapse sidebar",
     () => {
       const sd = sidebar as any;
@@ -229,7 +228,9 @@ export function createWorkspaceSidebar(
         sidebar.style.minWidth = "120px";
         sd._isCollapsed = false;
         sidebar.style.borderLeft = "1px solid var(--border-primary)";
-        collapseBtn.textContent = "\u25B6";
+        collapseBtn.replaceChildren(
+          createSvgIcon(doc, "chevron-left", { size: 14, strokeWidth: 1.7 }),
+        );
         collapseBtn.title = "Collapse sidebar";
         setPref("workspaceSidebarCollapsed", false);
         // Show content
@@ -252,7 +253,9 @@ export function createWorkspaceSidebar(
         sidebar.style.minWidth = "20px";
         sd._isCollapsed = true;
         sidebar.style.borderLeft = "1px solid var(--border-primary)";
-        collapseBtn.textContent = "\u25C0";
+        collapseBtn.replaceChildren(
+          createSvgIcon(doc, "chevron-right", { size: 14, strokeWidth: 1.7 }),
+        );
         collapseBtn.title = "Show sidebar";
         setPref("workspaceSidebarCollapsed", true);
         // Hide content
@@ -270,7 +273,9 @@ export function createWorkspaceSidebar(
         narrowStrip.style.cssText =
           "display: flex; flex-direction: column; align-items: center; padding: 8px 0; gap: 8px;";
         const expandBtn = collapseBtn.cloneNode(true) as HTMLElement;
-        expandBtn.textContent = "\u25C0";
+        expandBtn.replaceChildren(
+          createSvgIcon(doc, "chevron-right", { size: 14, strokeWidth: 1.7 }),
+        );
         expandBtn.title = "Show sidebar";
         expandBtn.addEventListener("click", () => {
           collapseBtn.click();
@@ -346,7 +351,9 @@ export function createWorkspaceSidebar(
     (sidebar as any)._originalWidth = sidebar.style.width;
     sidebar.style.width = "20px";
     sidebar.style.minWidth = "20px";
-    collapseBtn.textContent = "\u25C0";
+    collapseBtn.replaceChildren(
+      createSvgIcon(doc, "chevron-right", { size: 14, strokeWidth: 1.7 }),
+    );
     collapseBtn.title = "Show sidebar";
     scrollContainer.style.display = "none";
     footer.style.display = "none";
@@ -356,7 +363,9 @@ export function createWorkspaceSidebar(
     narrowStrip.style.cssText =
       "display: flex; flex-direction: column; align-items: center; padding: 8px 0; gap: 8px;";
     const expandBtn = collapseBtn.cloneNode(true) as HTMLElement;
-    expandBtn.textContent = "\u25C0";
+    expandBtn.replaceChildren(
+      createSvgIcon(doc, "chevron-right", { size: 14, strokeWidth: 1.7 }),
+    );
     expandBtn.title = "Show sidebar";
     expandBtn.addEventListener("click", () => {
       collapseBtn.click();
@@ -598,7 +607,16 @@ async function _doRefreshWorkspaceSidebar(
             e.stopPropagation();
             const isCollapsed = dirChildren.style.display === "none";
             dirChildren.style.display = isCollapsed ? "" : "none";
-            arrowEl.textContent = isCollapsed ? "\u25BE" : "\u25B8";
+            arrowEl.replaceChildren(
+              createSvgIcon(
+                doc,
+                isCollapsed ? "chevron-down" : "chevron-right",
+                {
+                  size: 10,
+                  strokeWidth: 2,
+                },
+              ),
+            );
           });
 
           dirRow.addEventListener("contextmenu", (e: MouseEvent) => {
@@ -794,7 +812,7 @@ async function _doRefreshWorkspaceSidebar(
 
         const discardBtn = createSmallActionBtn(
           doc,
-          "\u21A9",
+          "trash",
           "Discard",
           async () => {
             if (
@@ -837,8 +855,10 @@ async function _doRefreshWorkspaceSidebar(
             HTML_NS,
             "button",
           ) as HTMLButtonElement;
-          discardBtn.textContent = "\u21A9 Discard Changes";
           discardBtn.style.cssText = `
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
             padding: 2px 10px;
             border: 1px solid var(--border-primary);
             border-radius: 4px;
@@ -848,6 +868,12 @@ async function _doRefreshWorkspaceSidebar(
             font-size: 11px;
             line-height: 18px;
           `;
+          discardBtn.appendChild(
+            createSvgIcon(doc, "refresh", { size: 12, strokeWidth: 1.8 }),
+          );
+          const discardLbl = doc.createElement("span");
+          discardLbl.textContent = "Discard Changes";
+          discardBtn.appendChild(discardLbl);
           discardBtn.addEventListener("click", async () => {
             menu.remove();
             if (
@@ -939,9 +965,10 @@ async function renderCommitHistoryPanel(
   const commits = await store.getCommitHistory();
 
   const backBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-  backBtn.textContent = "\u2190 Back to Files";
   backBtn.style.cssText = `
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     width: 100%;
     padding: 8px 12px;
     border: none;
@@ -952,6 +979,12 @@ async function renderCommitHistoryPanel(
     font-size: 12px;
     text-align: left;
   `;
+  backBtn.appendChild(
+    createSvgIcon(doc, "chevron-left", { size: 12, strokeWidth: 1.8 }),
+  );
+  const backLbl = doc.createElement("span");
+  backLbl.textContent = "Back to Files";
+  backBtn.appendChild(backLbl);
   backBtn.addEventListener("click", () => {
     (sidebar as any)._showCommitHistoryPanel = false;
     refreshWorkspaceSidebar(sidebar, callbacks);
@@ -1118,8 +1151,14 @@ function createCollapsibleSection(
   `;
 
   const arrow = doc.createElement("span");
-  arrow.textContent = isExpanded ? "\u25BE" : "\u25B8";
-  arrow.style.cssText = "font-size: 10px; width: 12px;";
+  arrow.style.cssText =
+    "width: 12px; display: inline-flex; align-items: center;";
+  arrow.appendChild(
+    createSvgIcon(doc, isExpanded ? "chevron-down" : "chevron-right", {
+      size: 10,
+      strokeWidth: 2,
+    }),
+  );
 
   const label = doc.createElement("span");
   label.textContent = `${title} (${count})`;
@@ -1143,7 +1182,12 @@ function createCollapsibleSection(
   header.addEventListener("click", () => {
     const isCollapsed = items.style.display === "none";
     items.style.display = isCollapsed ? "" : "none";
-    arrow.textContent = isCollapsed ? "\u25BE" : "\u25B8";
+    arrow.replaceChildren(
+      createSvgIcon(doc, isCollapsed ? "chevron-down" : "chevron-right", {
+        size: 10,
+        strokeWidth: 2,
+      }),
+    );
     _sectionCollapsed.set(title, !isCollapsed);
     saveSectionCollapsedToPref();
   });
@@ -1182,13 +1226,19 @@ function createFolderRow(
 
   const arrow = doc.createElement("span");
   arrow.className = "folder-arrow";
-  arrow.textContent = "\u25B8";
-  arrow.style.cssText = "font-size: 10px; width: 12px; flex-shrink: 0;";
+  arrow.appendChild(
+    createSvgIcon(doc, "chevron-right", { size: 10, strokeWidth: 2 }),
+  );
+  arrow.style.cssText =
+    "width: 12px; flex-shrink: 0; display: inline-flex; align-items: center;";
   row.appendChild(arrow);
 
   const icon = doc.createElement("span");
-  icon.textContent = "\uD83D\uDCC1";
-  icon.style.cssText = "font-size: 12px; flex-shrink: 0;";
+  icon.style.cssText =
+    "width: 14px; flex-shrink: 0; display: inline-flex; align-items: center;";
+  icon.appendChild(
+    createSvgIcon(doc, "folder", { size: 12, strokeWidth: 1.7 }),
+  );
   row.appendChild(icon);
 
   const nameEl = doc.createElement("span");
@@ -1344,7 +1394,13 @@ function createSmallActionBtn(
   action: () => void,
 ): HTMLElement {
   const btn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-  btn.textContent = text;
+  if (typeof text === "string" && /^[a-zA-Z-]+$/.test(text)) {
+    btn.appendChild(
+      createSvgIcon(doc, text as any, { size: 12, strokeWidth: 1.8 }),
+    );
+  } else {
+    btn.textContent = text;
+  }
   btn.title = title;
   btn.style.cssText = `
     width: 20px;
@@ -1844,9 +1900,12 @@ function showCommitDropdown(
   `;
 
   const hint = doc.createElement("span");
-  hint.textContent = "Ctrl+Enter or press \u2713 to commit";
   hint.style.cssText =
-    "font-size: 10px; color: var(--text-tertiary); flex: 1 1 auto;";
+    "font-size: 10px; color: var(--text-tertiary); flex: 1 1 auto; display: inline-flex; align-items: center; gap: 4px;";
+  hint.appendChild(createSvgIcon(doc, "check", { size: 10, strokeWidth: 1.8 }));
+  const hintText = doc.createElement("span");
+  hintText.textContent = "Ctrl+Enter or press this to commit";
+  hint.appendChild(hintText);
 
   const cancelBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
   cancelBtn.textContent = "Cancel";
@@ -1986,7 +2045,9 @@ function createCreationStrip(
   `;
 
   const createBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-  createBtn.textContent = "+";
+  createBtn.appendChild(
+    createSvgIcon(doc, "add", { size: 14, strokeWidth: 2 }),
+  );
   createBtn.title = "Create file / folder";
   createBtn.style.cssText = `
     width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;

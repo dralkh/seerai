@@ -813,7 +813,7 @@ export function createToolProcessUI(doc: Document): {
   const setExecutingTool = (toolName: string) => {
     const displayName = toolName.replace(/_/g, " ");
     label.textContent = `Calling ${displayName}...`;
-    setProcessIcon("wrench", { animate: "1s" });
+    setProcessIcon("tool", { animate: "1s" });
     // Do NOT force open here
     // BUT user often wants to see new tools.
     // Letting persistence handle this in assistant.ts is better.

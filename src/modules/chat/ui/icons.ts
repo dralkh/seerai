@@ -16,7 +16,6 @@ export type IconName =
   | "more"
   | "newChat"
   | "save"
-  | "clear"
   | "send"
   | "chevron-left"
   | "chevron-right"
@@ -51,7 +50,6 @@ export type IconName =
   | "target"
   | "lightning"
   | "tool"
-  | "wrench"
   | "brain"
   | "image-stack"
   | "image-multiple"
@@ -60,7 +58,6 @@ export type IconName =
   | "warning"
   | "check"
   | "check-circle"
-  | "x"
   | "x-circle"
   | "question"
   | "help"
@@ -72,7 +69,30 @@ export type IconName =
   | "fire"
   | "firecrawl"
   | "thumbs-up"
-  | "scale";
+  | "thumbs-down"
+  | "scale"
+  | "eye"
+  | "pin"
+  | "info"
+  | "hourglass"
+  | "globe"
+  | "home"
+  | "logout"
+  | "server"
+  | "terminal"
+  | "swap"
+  | "list"
+  | "rocket"
+  | "robot"
+  | "compass"
+  | "database"
+  | "share"
+  | "star"
+  | "shield"
+  | "zap"
+  | "cpu"
+  | "message"
+  | "sparkles";
 
 const ICON_PATHS: Record<IconName, string> = {
   agent:
@@ -80,7 +100,7 @@ const ICON_PATHS: Record<IconName, string> = {
   chat: "M5 5h14v10H9l-4 4V5Z",
   settings:
     "M12 8.5A3.5 3.5 0 1 0 12 15.5 3.5 3.5 0 0 0 12 8.5Zm0-5 1 2.1 2.3.5 1.7-1.4 1.8 1.8-1.4 1.7.5 2.3 2.1 1-2.1 1-.5 2.3 1.4 1.7-1.8 1.8-1.7-1.4-2.3.5-1 2.1-1-2.1-2.3-.5-1.7 1.4-1.8-1.8 1.4-1.7-.5-2.3-2.1-1 2.1-1 .5-2.3-1.4-1.7 1.8-1.8 1.7 1.4 2.3-.5 1-2.1Z",
-  prompts: "M5 4h14v16H5V4Zm3 0v16M11 8h5M11 12h5M11 16h4",
+  prompts: "M4 5h16v14H4V5Zm2 3 3 3-3 3M10 16h6",
   add: "M12 5v14M5 12h14",
   attachment:
     "M8.5 12.5 14 7a3 3 0 1 1 4.2 4.2l-7.1 7.1a5 5 0 0 1-7.1-7.1l7.8-7.8",
@@ -94,7 +114,6 @@ const ICON_PATHS: Record<IconName, string> = {
   more: "M6 12h.01M12 12h.01M18 12h.01",
   newChat: "M5 5h14v11H9l-4 4V5Zm7 2v6m-3-3h6",
   save: "M5 4h12l2 2v14H5V4Zm3 0v6h8V4M8 20v-6h8v6",
-  clear: "M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5",
   send: "M4 4l17 8-17 8 3-8-3-8Zm3 8h14",
   "chevron-left": "m14 6-6 6 6 6",
   "chevron-right": "m10 6 6 6-6 6",
@@ -116,7 +135,7 @@ const ICON_PATHS: Record<IconName, string> = {
   explore: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-1 14 5-9-9 5 4 4Z",
   focus: "M4 9V5h4M16 5h4v4M4 15v4h4M16 19h4v-4M9 12h6",
   lock: "M7 11V8a5 5 0 0 1 10 0v3M5 11h14v10H5V11Z",
-  prompt: "M5 4h14v16H5V4Zm3 4h8M8 12h8M8 16h5",
+  prompt: "M5 4h14v16H5V4Zm3 5h8M8 14h8M8 18h5",
   trash: "M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5",
   paper: "M6 3h9l4 4v14H6V3Zm9 0v4h4M9 12h6M9 16h6M9 8h2",
   table: "M4 5h16v14H4V5Zm0 4h16M9 5v14M15 5v14",
@@ -134,8 +153,6 @@ const ICON_PATHS: Record<IconName, string> = {
     "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 5a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4Z",
   lightning: "M13 2 4 14h6l-1 8 9-12h-6l1-8Z",
   tool: "M14.7 6.3a4 4 0 0 0-5 5L4 17l3 3 5.7-5.7a4 4 0 0 0 5-5l-2.5 2.5-2-2 1.5-3.5Z",
-  wrench:
-    "M14.7 6.3a4 4 0 0 0-5 5L4 17l3 3 5.7-5.7a4 4 0 0 0 5-5l-2.5 2.5-2-2 1.5-3.5Z",
   brain:
     "M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 1 4 3 3 0 0 0 4 3 3 3 0 0 0 4-3 3 3 0 0 0 1-4 3 3 0 0 0-2-5 3 3 0 0 0-3-3Zm3 0v17",
   "image-stack": "M3 5h14v12H3V5Zm0 4 4-4 8 8",
@@ -145,7 +162,6 @@ const ICON_PATHS: Record<IconName, string> = {
   warning: "M12 4 2 20h20L12 4Zm0 6v4m0 3v.01",
   check: "M5 13l4 4 10-10",
   "check-circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-4 9 3 3 5-6",
-  x: "M6 6l12 12M18 6 6 18",
   "x-circle": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-4 5 8 8m0-8-8 8",
   question: "M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4m0 3v.01",
   help: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 7v.01M11 11a3 3 0 0 1 6 0c0 2-3 2-3 4",
@@ -159,8 +175,38 @@ const ICON_PATHS: Record<IconName, string> = {
     "M12 3c1 4 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 2 3 0-3-1-5 1-9ZM4 20h16",
   "thumbs-up":
     "M7 11v10H4V11h3Zm0 0 4-7a2 2 0 0 1 2 2v3h4a2 2 0 0 1 2 2.4l-1 5A2 2 0 0 1 17 19H7",
+  "thumbs-down":
+    "M7 13V3H4v10h3Zm0 0-4 7a2 2 0 0 0 2 2h3v3h4l1-3a2 2 0 0 0-2-2.4l-1-5A2 2 0 0 1 7 13Z",
   scale:
     "M12 3v18M5 7h14M5 7l-3 7a3 3 0 0 0 6 0L5 7Zm14 0-3 7a3 3 0 0 0 6 0l-3-7Z",
+  eye: "M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Zm10 3a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+  pin: "M12 2v8M9 10h6l-1 4H10l-1-4ZM12 14v8",
+  info: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 5v.01M11 12h1v5h1",
+  hourglass:
+    "M5 3h14M7 3v3a5 5 0 0 0 5 5 5 5 0 0 0 5-5V3M7 21v-3a5 5 0 0 1 5-5 5 5 0 0 1 5 5v3M5 21h14",
+  globe:
+    "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18",
+  home: "M4 11 12 4l8 7v9H4v-9Zm5 9v-5h6v5",
+  logout: "M14 3h5a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-5M10 17l5-5-5-5M15 12H3",
+  server: "M5 4h14v6H5V4Zm0 10h14v6H5v-6ZM9 7h.01M9 17h.01",
+  terminal: "M4 5h16v14H4V5Zm2 3 3 3-3 3M10 16h6",
+  swap: "M3 8h14l-3-3M21 16H7l3 3",
+  list: "M4 6h16M4 12h16M4 18h10",
+  rocket: "M12 3c5 0 8 4 8 9l-4 1-1 4-3 1-3-1-1-4-4-1c0-5 3-9 8-9Z",
+  robot:
+    "M5 8h14v10H5V8Zm3 0V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3M9 13h.01M15 13h.01M9 6h6",
+  compass: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-3 12 2-7 7-2-2 7-7 2Z",
+  database:
+    "M5 5c0-1 3-2 7-2s7 1 7 2-3 2-7 2-7-1-7-2Zm0 6c0-1 3-2 7-2s7 1 7 2-3 2-7 2-7-1-7-2Zm0 6c0-1 3-2 7-2s7 1 7 2-3 2-7 2-7-1-7-2Z",
+  share:
+    "M6 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm12 6a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-6-3a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-5 1 4-2m1-5 4 2",
+  star: "M12 3l3 6 6 1-4.5 4 1 6-5.5-3-5.5 3 1-6L3 10l6-1 3-6Z",
+  shield: "M12 3 4 6v6c0 5 3 8 8 9 5-1 8-4 8-9V6l-8-3Z",
+  zap: "M13 2 4 14h6l-1 8 9-12h-6l1-8Z",
+  cpu: "M5 8h14v8H5V8Zm3 0V5h2v3m4-3v3h2V5h-2m-2 14v-3h2v3m-4 0v-3h2v3M5 8h3M5 16h3m13-8h-3m3 8h-3",
+  message: "M5 5h14v10H9l-4 4V5Z",
+  sparkles:
+    "M12 3l1 4 4 1-4 1-1 4-1-4-4-1 4-1 1-4ZM5 13l1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2Zm12 2 1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2Z",
 };
 
 export interface CreateSvgIconOptions {
@@ -257,4 +303,39 @@ export function createIconButton(
     onClick();
   });
   return btn;
+}
+
+export function getIconPath(name: IconName): string {
+  return ICON_PATHS[name];
+}
+
+export const ALL_ICON_NAMES: IconName[] = Object.keys(ICON_PATHS) as IconName[];
+
+/**
+ * Replace the button contents with a small loading (hourglass) icon.
+ * Returns a function that restores the button to its prior state.
+ */
+export function setButtonLoading(
+  button: HTMLElement,
+  label = "",
+  size = 14,
+): () => void {
+  const doc = button.ownerDocument!;
+  const prevHTML = button.innerHTML;
+  const prevDisabled = (button as HTMLButtonElement).disabled;
+  const prevCursor = button.style.cursor;
+  button.replaceChildren(
+    createSvgIcon(doc, "hourglass", { size, strokeWidth: 1.8 }),
+  );
+  if (label) {
+    const span = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+    span.textContent = label;
+    button.appendChild(span);
+  }
+  button.style.cursor = "wait";
+  return () => {
+    button.innerHTML = prevHTML;
+    (button as HTMLButtonElement).disabled = prevDisabled;
+    button.style.cursor = prevCursor;
+  };
 }

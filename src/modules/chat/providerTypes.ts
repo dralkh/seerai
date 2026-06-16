@@ -1,3 +1,5 @@
+import type { IconName } from "./ui/icons";
+
 export type AuthMethod =
   | "bearer"
   | "x-api-key"
@@ -8,7 +10,7 @@ export type AuthMethod =
 export interface ProviderPreset {
   id: string;
   name: string;
-  icon?: string;
+  icon?: IconName;
   apiURL: string;
   modelsURL?: string;
   authMethod: AuthMethod;

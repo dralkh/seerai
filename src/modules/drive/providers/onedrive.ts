@@ -1,4 +1,5 @@
 import { CloudProvider } from "./base";
+import type { IconName } from "../../chat/ui/icons";
 import {
   FileNode,
   CloudProviderId,
@@ -52,7 +53,7 @@ const TEXT_MIME_TYPES = [
 export class OneDriveProvider implements CloudProvider {
   readonly id: CloudProviderId = "onedrive";
   readonly name = "OneDrive";
-  readonly icon = "\uD83C\uDF10";
+  readonly icon: IconName = "globe";
   readonly brandColor = "#0078D4";
 
   private authInProgress = false;

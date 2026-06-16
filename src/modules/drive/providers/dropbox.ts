@@ -1,4 +1,5 @@
 import { CloudProvider } from "./base";
+import type { IconName } from "../../chat/ui/icons";
 import {
   FileNode,
   CloudProviderId,
@@ -49,7 +50,7 @@ const TEXT_MIME_TYPES = [
 export class DropboxProvider implements CloudProvider {
   readonly id: CloudProviderId = "dropbox";
   readonly name = "Dropbox";
-  readonly icon = "\uD83D\uDCE6";
+  readonly icon: IconName = "folder";
   readonly brandColor = "#0061FF";
 
   private authInProgress = false;

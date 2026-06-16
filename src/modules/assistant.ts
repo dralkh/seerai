@@ -4954,7 +4954,7 @@ export class Assistant {
             const displayName = toolName.replace(/_/g, " ");
             if (label) label.textContent = `Calling ${displayName}...`;
             if (icon) {
-              setProcessIcon("wrench", {
+              setProcessIcon("tool", {
                 color: "var(--text-secondary)",
                 animate: "1s",
               });
@@ -6284,13 +6284,12 @@ export class Assistant {
 
     // Helper for side buttons (same pattern as search tab)
     const createSideBtn = (
-      icon: string,
+      icon: string | IconName,
       title: string,
       onClick: (e: Event) => void,
     ) => {
       const btn = ztoolkit.UI.createElement(doc, "button", {
         namespace: "html",
-        properties: { innerText: icon },
         attributes: { title: title },
         styles: {
           width: "24px",
@@ -6302,7 +6301,6 @@ export class Assistant {
           borderRadius: "4px",
           backgroundColor: "var(--background-primary)",
           cursor: "pointer",
-          fontSize: "14px",
           color: "var(--text-primary)",
           transition: "all 0.2s ease",
         },
@@ -6313,6 +6311,108 @@ export class Assistant {
           },
         ],
       });
+
+      const knownIcons = new Set<IconName>([
+        "agent",
+        "chat",
+        "settings",
+        "prompts",
+        "add",
+        "attachment",
+        "cloud",
+        "upload",
+        "image",
+        "video",
+        "web",
+        "stop",
+        "more",
+        "newChat",
+        "save",
+        "send",
+        "chevron-left",
+        "chevron-right",
+        "chevron-down",
+        "chevron-up",
+        "play",
+        "pause",
+        "stop-circle",
+        "copy",
+        "edit",
+        "refresh",
+        "tts",
+        "loading",
+        "close",
+        "tag",
+        "search",
+        "library",
+        "review",
+        "explore",
+        "focus",
+        "lock",
+        "prompt",
+        "trash",
+        "paper",
+        "table",
+        "folder",
+        "folder-open",
+        "user",
+        "users",
+        "calendar",
+        "calendar-star",
+        "target",
+        "lightning",
+        "tool",
+        "brain",
+        "image-stack",
+        "image-multiple",
+        "download",
+        "open-link",
+        "warning",
+        "check",
+        "check-circle",
+        "x-circle",
+        "question",
+        "help",
+        "block",
+        "sparkle",
+        "idea",
+        "bookmark",
+        "flag",
+        "fire",
+        "firecrawl",
+        "thumbs-up",
+        "thumbs-down",
+        "scale",
+        "eye",
+        "pin",
+        "info",
+        "hourglass",
+        "globe",
+        "home",
+        "logout",
+        "server",
+        "terminal",
+        "swap",
+        "list",
+        "rocket",
+        "robot",
+        "compass",
+        "database",
+        "share",
+        "star",
+        "shield",
+        "zap",
+        "cpu",
+        "message",
+        "sparkles",
+      ] as IconName[]);
+      if (typeof icon === "string" && knownIcons.has(icon as IconName)) {
+        btn.appendChild(
+          createSvgIcon(doc, icon as IconName, { size: 14, strokeWidth: 1.7 }),
+        );
+      } else {
+        btn.textContent = icon as string;
+      }
 
       // Hover effects
       btn.addEventListener("mouseenter", () => {
@@ -6331,7 +6431,7 @@ export class Assistant {
 
     // 1. (+) Add Column - immediately adds a new column with inline editing
     const addColumnBtn = createSideBtn(
-      "➕",
+      "add",
       "Add Analysis Column",
       async (e) => {
         e.stopPropagation();
@@ -6341,15 +6441,19 @@ export class Assistant {
     stickyContainer.appendChild(addColumnBtn);
 
     // 2. (⚡) Generate All
-    const generateAllBtn = createSideBtn("⚡", "Generate All Analysis", (e) => {
-      e.stopPropagation();
-      this.generateAllEmptyColumns(doc, item);
-    });
+    const generateAllBtn = createSideBtn(
+      "lightning",
+      "Generate All Analysis",
+      (e) => {
+        e.stopPropagation();
+        this.generateAllEmptyColumns(doc, item);
+      },
+    );
     stickyContainer.appendChild(generateAllBtn);
 
     // 3. (⚙️) Settings
     const settingsBtn = createSideBtn(
-      "⚙️",
+      "settings",
       "Manage Columns & Settings",
       (e) => {
         e.stopPropagation();
@@ -6380,7 +6484,7 @@ export class Assistant {
 
     // 3b. (📋) Copy Selected
     const copySelectedBtn = createSideBtn(
-      "📋",
+      "copy",
       "Copy Selected to Clipboard",
       async (e) => {
         e.stopPropagation();
@@ -6454,7 +6558,7 @@ export class Assistant {
 
     // 4. (💾) Save Selected
     const saveSelectedBtn = createSideBtn(
-      "💾",
+      "save",
       "Save Selected as Notes",
       async (e) => {
         e.stopPropagation();
@@ -6482,7 +6586,7 @@ export class Assistant {
 
     // Tag Selected (bulk tag generation)
     const tagSelectedBtn = createSideBtn(
-      "🏷️",
+      "tag",
       "Generate Tags for Selected",
       async (e) => {
         e.stopPropagation();
@@ -6493,7 +6597,7 @@ export class Assistant {
         );
         const btn = e.currentTarget as HTMLElement;
         const originalText = btn.innerText;
-        btn.innerText = "⏳";
+        btn.innerText = "";
         btn.style.cursor = "wait";
 
         let successCount = 0;
@@ -6511,8 +6615,11 @@ export class Assistant {
           }
         }
 
-        btn.innerText = "✓";
+        btn.innerText = "";
         btn.style.color = "#4CAF50";
+        btn.appendChild(
+          createSvgIcon(doc, "check", { size: 14, strokeWidth: 1.7 }),
+        );
         btn.title = `Tagged ${successCount} items${errorCount > 0 ? `, ${errorCount} errors` : ""}`;
         setTimeout(() => {
           btn.innerText = originalText;
@@ -6526,7 +6633,7 @@ export class Assistant {
 
     // 5. (⚡) Generate/Regenerate Selected
     const genSelectedBtn = createSideBtn(
-      "⚡",
+      "lightning",
       "Generate/Regenerate Selected",
       (e) => {
         e.stopPropagation();
@@ -6540,7 +6647,7 @@ export class Assistant {
 
     // 5b. (🔄) Regenerate Previously Generated
     const regenSelectedBtn = createSideBtn(
-      "🔄",
+      "refresh",
       "Regenerate Previously Generated",
       (e) => {
         e.stopPropagation();
@@ -6553,7 +6660,7 @@ export class Assistant {
 
     // 5c. (📁) Add to Folder
     const addToFolderBtn = createSideBtn(
-      "📁",
+      "folder",
       "Add Selected to Folder",
       async (e) => {
         e.stopPropagation();
@@ -6566,7 +6673,7 @@ export class Assistant {
 
     // 6. (🗑️) Trash (Remove from Table)
     const trashSelectedBtn = createSideBtn(
-      "🗑️",
+      "trash",
       "Remove Selected from Table",
       async (e) => {
         e.stopPropagation();
@@ -6838,7 +6945,7 @@ export class Assistant {
           fontSize: "12px",
         },
       });
-      loadingDiv.innerHTML = "⏳ Loading suggestions...";
+      loadingDiv.innerHTML = "Loading suggestions...";
       suggestionsDropdown.appendChild(loadingDiv);
       suggestionsDropdown.style.display = "block";
 
@@ -6913,7 +7020,7 @@ export class Assistant {
             fontSize: "12px",
           },
         });
-        errorDiv.innerHTML = "⚠️ Failed to load suggestions";
+        errorDiv.innerHTML = "Failed to load suggestions";
         suggestionsDropdown.appendChild(errorDiv);
       }
     });
@@ -6922,7 +7029,7 @@ export class Assistant {
     const aiRefineBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
       properties: {
-        innerText: "🤖",
+        innerText: "AI",
         title: "AI: Refine query for Semantic Scholar",
       },
       styles: {
@@ -7002,7 +7109,7 @@ export class Assistant {
           },
         });
         errorDiv.innerHTML =
-          "⚠️ No AI model configured. Please add a model in Settings.";
+          "No AI model configured. Please add a model in Settings.";
         aiRefineDropdown.appendChild(errorDiv);
         aiRefineDropdown.style.display = "block";
         return;
@@ -7018,7 +7125,7 @@ export class Assistant {
           fontSize: "12px",
         },
       });
-      loadingDiv.innerHTML = "🤖 AI is refining your query...";
+      loadingDiv.innerHTML = "AI is refining your query...";
       aiRefineDropdown.appendChild(loadingDiv);
       aiRefineDropdown.style.display = "block";
 
@@ -7072,7 +7179,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
                 styles: { padding: "12px" },
               });
               previewDiv.innerHTML = `
-                            <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">🤖 AI Refined Query:</div>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">AI Refined Query:</div>
                             <div style="font-family: monospace; font-size: 12px; padding: 8px; background: var(--background-secondary); border-radius: 4px; word-break: break-word;">${refinedQuery}</div>
                         `;
               aiRefineDropdown.appendChild(previewDiv);
@@ -7093,7 +7200,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
                   marginBottom: "8px",
                 },
               });
-              headerDiv.innerHTML = "🤖 AI Refined Query:";
+              headerDiv.innerHTML = "AI Refined Query:";
               resultDiv.appendChild(headerDiv);
 
               const queryDiv = ztoolkit.UI.createElement(doc, "div", {
@@ -7142,7 +7249,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
               const copyBtn = ztoolkit.UI.createElement(doc, "button", {
                 namespace: "html",
-                properties: { innerText: "📋 Copy" },
+                properties: { innerText: "Copy" },
                 styles: {
                   padding: "8px 12px",
                   backgroundColor: "var(--background-secondary)",
@@ -7159,7 +7266,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
                   .copy();
                 copyBtn.innerText = "✓ Copied!";
                 setTimeout(() => {
-                  copyBtn.innerText = "📋 Copy";
+                  copyBtn.innerText = "Copy";
                 }, 1500);
               });
 
@@ -7178,7 +7285,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
                   fontSize: "12px",
                 },
               });
-              errorDiv.innerHTML = `⚠️ AI Error: ${error.message}`;
+              errorDiv.innerHTML = `AI Error: ${error.message}`;
               aiRefineDropdown.appendChild(errorDiv);
             },
           },
@@ -7199,7 +7306,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
             fontSize: "12px",
           },
         });
-        errorDiv.innerHTML = "⚠️ Failed to refine query";
+        errorDiv.innerHTML = "Failed to refine query";
         aiRefineDropdown.appendChild(errorDiv);
       }
     });
@@ -7503,13 +7610,22 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     });
 
     const presetLabel = ztoolkit.UI.createElement(doc, "span", {
-      properties: { innerText: "📁 Presets:" },
+      properties: {},
       styles: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
         fontSize: "11px",
         fontWeight: "500",
         color: "var(--text-secondary)",
       },
     });
+    presetLabel.appendChild(
+      createSvgIcon(doc, "folder", { size: 11, strokeWidth: 1.7 }),
+    );
+    const presetLabelText = doc.createElement("span");
+    presetLabelText.textContent = "Presets:";
+    presetLabel.appendChild(presetLabelText);
     presetRow.appendChild(presetLabel);
 
     // Preset dropdown
@@ -7887,7 +8003,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
     const hasPdfCheck = this.createFilterCheckbox(
       doc,
-      "📄 Has PDF",
+      "Has PDF",
       currentSearchState.openAccessPdf,
       (val) => {
         currentSearchState.openAccessPdf = val;
@@ -8451,7 +8567,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
           color: "var(--text-secondary)",
         },
       });
-      loadingEl.innerHTML = `<div style="font-size: 24px; margin-bottom: 8px;">⏳</div><div>Searching Semantic Scholar...</div>`;
+      loadingEl.innerHTML = `<div class="seerai-search-loading"><div class="seerai-search-loading-spinner"></div><div>Searching Semantic Scholar...</div></div>`;
       resultsArea.appendChild(loadingEl);
     }
 
@@ -8569,7 +8685,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
             fontSize: "12px",
           },
         });
-        errorMsg.innerHTML = `⚠️ ${errorMessage}. <button id="retry-show-more" style="margin-left: 8px; cursor: pointer; padding: 4px 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--background-secondary);">Retry</button>`;
+        errorMsg.innerHTML = `${errorMessage}. <button id="retry-show-more" style="margin-left: 8px; cursor: pointer; padding: 4px 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--background-secondary);">Retry</button>`;
         resultsArea.appendChild(errorMsg);
         // Add retry handler
         const retryBtn = errorMsg.querySelector("#retry-show-more");
@@ -8589,7 +8705,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
             color: "var(--error-color, #d32f2f)",
           },
         });
-        errorEl.innerHTML = `<div style="font-size: 24px; margin-bottom: 8px;">⚠️</div><div>${errorMessage}</div>`;
+        errorEl.innerHTML = `<div style="color: var(--error-color, #d32f2f); font-size: 14px; margin-bottom: 8px;">!</div><div>${errorMessage}</div>`;
         resultsArea.appendChild(errorEl);
       }
     } finally {
@@ -8749,7 +8865,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
             e.stopPropagation();
             const btn = e.target as HTMLButtonElement;
             const originalText = btn.textContent;
-            btn.textContent = "⏳ Exporting...";
+            btn.textContent = "Exporting...";
             btn.disabled = true;
             try {
               await this.exportResultsAsBibtex();
@@ -8759,7 +8875,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
                 btn.disabled = false;
               }, 2000);
             } catch (err) {
-              btn.textContent = "⚠️ Failed";
+              btn.textContent = "Failed";
               setTimeout(() => {
                 btn.textContent = originalText;
                 btn.disabled = false;
@@ -8833,13 +8949,13 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
     // Show loading
     summaryContainer.style.display = "block";
-    summaryContainer.innerHTML = `<div style="text-align: center; color: var(--text-secondary); padding: 20px;">⏳ Analyzing ${currentSearchResults.length} papers from results...</div>`;
+    summaryContainer.innerHTML = `<div style="text-align: center; color: var(--text-secondary); padding: 20px;"> Analyzing ${currentSearchResults.length} papers from results...</div>`;
     summaryContainer.scrollIntoView({ behavior: "smooth", block: "start" });
 
     try {
       const activeModel = getActiveModelConfig();
       if (!activeModel) {
-        summaryContainer.innerHTML = `<div style="color: var(--error-color, #d32f2f); padding: 10px;">⚠️ No AI model configured. Please add a model in Settings.</div>`;
+        summaryContainer.innerHTML = `<div style="color: var(--error-color, #d32f2f); padding: 10px;">No AI model configured. Please add a model in Settings.</div>`;
         return;
       }
 
@@ -8917,7 +9033,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                             </div>
                             <div style="display: flex; gap: 6px;">
                                 <button id="settings-summary-btn" style="padding: 4px 8px; font-size: 14px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;" title="AI Settings">⚙️</button>
-                                <button id="copy-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;">📋 Copy</button>
+                                <button id="copy-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;">Copy</button>
                                 <button id="close-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;">✕ Close</button>
                             </div>
                         </div>
@@ -8951,7 +9067,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                   "copy-summary-btn",
                 ) as HTMLButtonElement;
                 btn.innerText = "✓ Copied!";
-                setTimeout(() => (btn.innerText = "📋 Copy"), 2000);
+                setTimeout(() => (btn.innerText = "Copy"), 2000);
               });
 
             doc
@@ -8975,7 +9091,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           },
           onError: (error) => {
             Zotero.debug(`[seerai] Search insights error: ${error}`);
-            summaryContainer.innerHTML = `<div style="color: var(--error-color, #d32f2f); padding: 10px;">⚠️ AI Error: ${error.message}</div>`;
+            summaryContainer.innerHTML = `<div style="color: var(--error-color, #d32f2f); padding: 10px;">AI Error: ${error.message}</div>`;
           },
         },
         {
@@ -8986,7 +9102,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       );
     } catch (e) {
       Zotero.debug(`[seerai] Failed to generate insights: ${e}`);
-      summaryContainer.innerHTML = `<div style="color: var(--error-color, #d32f2f); padding: 10px;">⚠️ Failed to generate insights: ${e}</div>`;
+      summaryContainer.innerHTML = `<div style="color: var(--error-color, #d32f2f); padding: 10px;">Failed to generate insights: ${e}</div>`;
     }
   }
 
@@ -9011,7 +9127,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         </div>
         <div style="display: flex; gap: 6px;">
           <button id="settings-summary-btn" style="padding: 4px 8px; font-size: 14px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;" title="AI Settings">⚙️</button>
-          <button id="copy-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;">📋 Copy</button>
+          <button id="copy-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;">Copy</button>
           <button id="close-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;">✕ Close</button>
         </div>
       </div>
@@ -9039,7 +9155,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       new ztoolkit.Clipboard().addText(cachedContent, "text/unicode").copy();
       const btn = doc.getElementById("copy-summary-btn") as HTMLButtonElement;
       btn.innerText = "✓ Copied!";
-      setTimeout(() => (btn.innerText = "📋 Copy"), 2000);
+      setTimeout(() => (btn.innerText = "Copy"), 2000);
     });
 
     doc.getElementById("close-summary-btn")?.addEventListener("click", () => {
@@ -9169,7 +9285,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     try {
       const activeModel = getActiveModelConfig();
       if (!activeModel) {
-        responseArea.innerHTML += `<div style="color: var(--error-color);">⚠️ No AI model configured.</div>`;
+        responseArea.innerHTML += `<div style="color: var(--error-color);">No AI model configured.</div>`;
         return;
       }
 
@@ -10083,7 +10199,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                   fontSize: "12px",
                 },
               });
-              loadingDiv.innerHTML = "⏳ Loading more papers...";
+              loadingDiv.innerHTML = "Loading more papers...";
               showMoreBtn.replaceWith(loadingDiv);
 
               await this.performSearch(doc);
@@ -10306,7 +10422,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               if (result.item) {
                 if (result.pdfAttached) {
                   // Show imported status with green styling when PDF attached
-                  btn.textContent = "✅ Imported";
+                  btn.textContent = "Imported";
                   btn.style.backgroundColor = "#e8f5e9";
                   btn.style.color = "#2e7d32";
                 } else if (result.sourceUrl) {
@@ -10364,7 +10480,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                                   file: fp.file,
                                   parentItemID: createdItem.id,
                                 });
-                                container.innerHTML = `<span style="color: #2e7d32; font-size: 11px;">✅ Imported</span>`;
+                                container.innerHTML = `<span style="color: #2e7d32; font-size: 11px;">Imported</span>`;
                               } else {
                                 (
                                   attachEvent.target as HTMLButtonElement
@@ -10407,7 +10523,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                             retryEvent.stopPropagation();
                             (
                               retryEvent.target as HTMLButtonElement
-                            ).textContent = "⏳ Searching...";
+                            ).textContent = "Searching...";
                             (retryEvent.target as HTMLButtonElement).disabled =
                               true;
                             // Clear caches and retry PDF discovery
@@ -10431,7 +10547,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                                 createdItem,
                               );
                               if (pdfUrl) {
-                                container.innerHTML = `<span style="color: #2e7d32; font-size: 11px;">✅ Imported</span>`;
+                                container.innerHTML = `<span style="color: #2e7d32; font-size: 11px;">Imported</span>`;
                               } else {
                                 (
                                   retryEvent.target as HTMLButtonElement
@@ -10465,7 +10581,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                   btn.disabled = false;
                 }
               } else {
-                btn.textContent = "⚠️ Failed";
+                btn.textContent = "Failed";
                 btn.style.backgroundColor = "#ffebee";
                 btn.style.color = "#c62828";
                 setTimeout(() => {
@@ -10477,7 +10593,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               }
             } catch (error) {
               Zotero.debug(`[seerai] Add to Zotero error: ${error}`);
-              btn.textContent = "⚠️ Error";
+              btn.textContent = "Error";
               btn.style.backgroundColor = "#ffebee";
               btn.style.color = "#c62828";
               setTimeout(() => {
@@ -10530,7 +10646,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               if (result.item) {
                 if (result.pdfAttached) {
                   // Show imported status with green styling when PDF attached
-                  btn.textContent = "✅ Imported";
+                  btn.textContent = "Imported";
                   btn.style.backgroundColor = "#e8f5e9";
                   btn.style.color = "#2e7d32";
                 } else if (result.sourceUrl) {
@@ -10587,7 +10703,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                                   file: fp.file,
                                   parentItemID: createdItem.id,
                                 });
-                                container.innerHTML = `<span style="color: #2e7d32; font-size: 11px;">✅ Imported</span>`;
+                                container.innerHTML = `<span style="color: #2e7d32; font-size: 11px;">Imported</span>`;
                               } else {
                                 (
                                   attachEvent.target as HTMLButtonElement
@@ -10630,7 +10746,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                             retryEvent.stopPropagation();
                             (
                               retryEvent.target as HTMLButtonElement
-                            ).textContent = "⏳ Searching...";
+                            ).textContent = "Searching...";
                             (retryEvent.target as HTMLButtonElement).disabled =
                               true;
                             const zoteroCacheKey =
@@ -10652,7 +10768,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                                 createdItem,
                               );
                               if (pdfUrl) {
-                                container.innerHTML = `<span style="color: #2e7d32; font-size: 11px;">✅ Imported</span>`;
+                                container.innerHTML = `<span style="color: #2e7d32; font-size: 11px;">Imported</span>`;
                               } else {
                                 (
                                   retryEvent.target as HTMLButtonElement
@@ -10686,7 +10802,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                   btn.disabled = false;
                 }
               } else {
-                btn.textContent = "⚠️ Failed";
+                btn.textContent = "Failed";
                 btn.style.backgroundColor = "#ffebee";
                 btn.style.color = "#c62828";
                 setTimeout(() => {
@@ -10698,7 +10814,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               }
             } catch (error) {
               Zotero.debug(`[seerai] Add to Table error: ${error}`);
-              btn.textContent = "⚠️ Error";
+              btn.textContent = "Error";
               btn.style.backgroundColor = "#ffebee";
               btn.style.color = "#c62828";
               setTimeout(() => {
@@ -10837,7 +10953,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           `[seerai] runPdfDiscovery started for: ${paper.title.slice(0, 50)}...`,
         );
         buttonState = "searching";
-        pdfDiscoveryBtn.textContent = "📚 Zotero Lookup...";
+        pdfDiscoveryBtn.textContent = "Zotero Lookup...";
         pdfDiscoveryBtn.style.backgroundColor = "#e3f2fd";
         pdfDiscoveryBtn.style.color = "#1976d2";
         pdfDiscoveryBtn.style.border = "1px solid #90caf9";
@@ -10856,7 +10972,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             Zotero.debug(`[seerai] Zotero found PDF: ${zoteroResult}`);
             buttonState = "pdf";
             pdfUrl = zoteroResult;
-            pdfDiscoveryBtn.textContent = "📚 Zotero PDF";
+            pdfDiscoveryBtn.textContent = "Zotero PDF";
             pdfDiscoveryBtn.style.backgroundColor = "#e8f5e9";
             pdfDiscoveryBtn.style.color = "#2e7d32";
             pdfDiscoveryBtn.style.border = "1px solid #a5d6a7";
@@ -10866,13 +10982,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
           // Step 2: Try arXiv if ArXiv ID available (100% reliable)
           if (paper.externalIds?.ArXiv) {
-            pdfDiscoveryBtn.textContent = "📄 arXiv...";
+            pdfDiscoveryBtn.textContent = "arXiv...";
             const arxivResult = await findPdfViaArxiv(paper.externalIds.ArXiv);
             if (arxivResult) {
               Zotero.debug(`[seerai] arXiv found PDF: ${arxivResult}`);
               buttonState = "pdf";
               pdfUrl = arxivResult;
-              pdfDiscoveryBtn.textContent = "📄 arXiv PDF";
+              pdfDiscoveryBtn.textContent = "arXiv PDF";
               pdfDiscoveryBtn.style.backgroundColor = "#e8f5e9";
               pdfDiscoveryBtn.style.color = "#2e7d32";
               pdfDiscoveryBtn.style.border = "1px solid #a5d6a7";
@@ -10931,7 +11047,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               unpaywallPdfCache.set(paper.paperId, unpaywallResult);
               buttonState = "pdf";
               pdfUrl = unpaywallResult;
-              pdfDiscoveryBtn.textContent = "📄 Unpaywall PDF";
+              pdfDiscoveryBtn.textContent = "Unpaywall PDF";
               pdfDiscoveryBtn.style.backgroundColor = "#e8f5e9";
               pdfDiscoveryBtn.style.color = "#2e7d32";
               pdfDiscoveryBtn.style.border = "1px solid #a5d6a7";
@@ -12137,9 +12253,17 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     });
 
     const filterLabel = ztoolkit.UI.createElement(doc, "span", {
-      properties: { innerText: "📁" },
-      styles: { fontSize: "12px" },
+      properties: {},
+      styles: {
+        display: "inline-flex",
+        alignItems: "center",
+        fontSize: "12px",
+        color: "var(--text-secondary)",
+      },
     });
+    filterLabel.appendChild(
+      createSvgIcon(doc, "folder", { size: 12, strokeWidth: 1.7 }),
+    );
     filterContainer.appendChild(filterLabel);
 
     const filterSelect = ztoolkit.UI.createElement(doc, "select", {
@@ -12276,7 +12400,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       namespace: "html",
       properties: {
         className: "table-btn extract-all-btn",
-        innerText: "📄 Extract All",
+        innerText: "Extract All",
       },
       attributes: { id: "extract-all-btn" },
       styles: {
@@ -12363,7 +12487,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // Save as Notes button (Data Traceability)
     const saveAsNotesBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { className: "table-btn", innerText: "📋 Notes" },
+      properties: { className: "table-btn", innerText: "Notes" },
       attributes: { title: "Save table data as notes attached to each paper" },
       styles: {
         padding: "6px 12px",
@@ -12423,7 +12547,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // Copy All Data button
     const copyAllBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { className: "table-btn", innerText: "📋" },
+      properties: { className: "table-btn", innerText: "Notes" },
       attributes: { title: "Copy all table data to clipboard" },
       styles: {
         padding: "6px 10px",
@@ -12448,9 +12572,12 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // Export to Workspace button
     const exportWsBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { className: "table-btn", innerText: "📁 Workspace" },
+      properties: { className: "table-btn" },
       attributes: { title: "Export table to workspace" },
       styles: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
         padding: "6px 10px",
         fontSize: "11px",
         border: "1px solid var(--border-primary)",
@@ -12468,14 +12595,23 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
+    exportWsBtn.appendChild(
+      createSvgIcon(doc, "folder", { size: 11, strokeWidth: 1.7 }),
+    );
+    const exportWsLbl = doc.createElement("span");
+    exportWsLbl.textContent = "Workspace";
+    exportWsBtn.appendChild(exportWsLbl);
     toolbar.appendChild(exportWsBtn);
 
     // History button
     const historyBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { className: "table-btn", innerText: "📜" },
+      properties: { className: "table-btn" },
       attributes: { title: "Load from history" },
       styles: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
         padding: "6px 10px",
         fontSize: "11px",
         border: "1px solid var(--border-primary)",
@@ -12493,12 +12629,18 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
+    historyBtn.appendChild(
+      createSvgIcon(doc, "library", { size: 11, strokeWidth: 1.7 }),
+    );
+    const historyLbl = doc.createElement("span");
+    historyLbl.textContent = "History";
+    historyBtn.appendChild(historyLbl);
     toolbar.appendChild(historyBtn);
 
     // Start Fresh button
     const startFreshBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { className: "table-btn", innerText: "🔄 New" },
+      properties: { className: "table-btn", innerText: "New" },
       attributes: { title: "Start fresh workspace" },
       styles: {
         padding: "6px 10px",
@@ -12671,7 +12813,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         // Library option
         const libOption = doc.createElement("option");
         libOption.value = `lib_${library.libraryID}`;
-        libOption.textContent = `📚 ${library.name}`;
+        libOption.textContent = `${library.name}`;
         if (
           currentTableConfig?.filterLibraryId === library.libraryID &&
           !currentTableConfig?.filterCollectionId
@@ -12728,7 +12870,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             colOption.value = `col_${col.id}`;
             // Add indentation based on level
             const prefix = "  ".repeat(level + 1);
-            colOption.textContent = `${prefix}📁 ${col.name}`;
+            colOption.textContent = `${prefix}${col.name}`;
 
             if (currentTableConfig?.filterCollectionId === col.id) {
               colOption.selected = true;
@@ -12768,7 +12910,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           library.libraryID === Zotero.Libraries.userLibraryID
             ? "user"
             : `lib_${library.libraryID}`;
-        libOption.textContent = `📚 ${library.name}`;
+        libOption.textContent = `${library.name}`;
         if (currentSearchState.saveLocation === libOption.value) {
           libOption.selected = true;
         }
@@ -12822,7 +12964,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             colOption.value = `col_${col.id}`;
             // Add indentation based on level
             const prefix = "  ".repeat(level + 1); // +1 for initial indent under library
-            colOption.textContent = `${prefix}📁 ${col.name}`;
+            colOption.textContent = `${prefix}${col.name}`;
 
             if (currentSearchState.saveLocation === colOption.value) {
               colOption.selected = true;
@@ -12950,7 +13092,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         // Library header (as disabled option)
         const libHeader = doc.createElement("option");
         libHeader.value = "";
-        libHeader.textContent = `📚 ${library.name}`;
+        libHeader.textContent = `${library.name}`;
         libHeader.disabled = true;
         libHeader.style.fontWeight = "bold";
         select.appendChild(libHeader);
@@ -12963,7 +13105,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             const colOption = doc.createElement("option");
             colOption.value = `${col.id}`;
             const prefix = "  ".repeat(level + 1);
-            colOption.textContent = `${prefix}📁 ${col.name}`;
+            colOption.textContent = `${prefix}${col.name}`;
             select.appendChild(colOption);
 
             const children = childrenMap.get(col.id);
@@ -13151,7 +13293,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     });
 
     const headerTitle = ztoolkit.UI.createElement(doc, "div", {
-      properties: { innerText: "📚 Add Papers" },
+      properties: { innerText: "Add Papers" },
       styles: {
         fontSize: "14px",
         fontWeight: "600",
@@ -13502,7 +13644,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
       // Show loading
       const loadingEl = ztoolkit.UI.createElement(doc, "div", {
-        properties: { innerText: "⏳ Loading papers..." },
+        properties: { innerText: "Loading papers..." },
         styles: {
           padding: "20px",
           textAlign: "center",
@@ -13846,7 +13988,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         });
 
         // Immediate visual feedback
-        td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">⏳ Generating...</span>`;
+        td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Generating...</span>`;
         td.style.cursor = "wait";
       }
     }
@@ -13862,14 +14004,14 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     const generateBtn = doc.getElementById(
       "generate-all-btn",
     ) as HTMLButtonElement | null;
-    const originalBtnText = generateBtn?.innerText || "⚡ Generate All";
+    const originalBtnText = generateBtn?.innerText || "Generate All";
     let completed = 0;
     let generated = 0;
     let failed = 0;
 
     const updateProgress = () => {
       if (generateBtn) {
-        generateBtn.innerText = `⏳ ${completed}/${tasks.length}`;
+        generateBtn.innerText = ` ${completed}/${tasks.length}`;
         generateBtn.disabled = true;
         generateBtn.style.cursor = "wait";
       }
@@ -14089,7 +14231,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         });
 
         // Immediate visual feedback
-        td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">🔄 Regenerating...</span>`;
+        td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Regenerating...</span>`;
         td.style.cursor = "wait";
       }
     }
@@ -14285,7 +14427,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
       // Immediate feedback
       tds.forEach((td) => {
-        td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">📄 Queued...</span>`;
+        td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Queued...</span>`;
         td.style.cursor = "wait";
       });
     }
@@ -14300,14 +14442,14 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     const extractBtn = doc.getElementById(
       "extract-all-btn",
     ) as HTMLButtonElement | null;
-    const originalBtnText = extractBtn?.innerText || "📄 Extract All";
+    const originalBtnText = extractBtn?.innerText || "Extract All";
     let completed = 0;
     let success = 0;
     let failed = 0;
 
     const updateProgress = () => {
       if (extractBtn) {
-        extractBtn.innerText = `📄 OCR ${completed}/${tasks.length}`;
+        extractBtn.innerText = `OCR ${completed}/${tasks.length}`;
         extractBtn.disabled = true;
         extractBtn.style.cursor = "wait";
       }
@@ -14317,7 +14459,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       try {
         // Update cells to "Processing"
         task.tds.forEach((td) => {
-          td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">📄 OCR Processing...</span>`;
+          td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">OCR Processing...</span>`;
         });
 
         // Run silent OCR
@@ -14497,7 +14639,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           content.includes("Search PDF") ||
           content.includes("Source-Link") ||
           content.includes("Searching") ||
-          content.includes("⏳") ||
+          content.includes("") ||
           content.includes("↻")
         ) {
           const cell = td as HTMLElement;
@@ -14509,7 +14651,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               cell.innerHTML = `<span style="color: #f57c00; font-size: 11px;">↻ Retrying...</span>`;
               break;
             case "found":
-              cell.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">📄 Process PDF</span>`;
+              cell.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Process PDF</span>`;
               break;
             case "skipped":
               cell.innerHTML = `<span style="color: #f57c00; font-size: 11px;">⏭ ${message || "Skipped"}</span>`;
@@ -14521,7 +14663,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             case "notfound": {
               const taskItem = tasks.find((t) => t.paperId === paperId);
               if (!taskItem) {
-                cell.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">❌ Not found</span>`;
+                cell.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">Not found</span>`;
                 break;
               }
 
@@ -14673,7 +14815,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     }, 30000); // Keep states for 30 seconds
 
     // Restore button with summary
-    btn.innerText = `✓ ${succeeded}📄 ${failed > 0 ? `${failed}✗` : ""}`;
+    btn.innerText = `✓ ${succeeded} (${failed} failed)`;
     (btn as HTMLButtonElement).disabled = false;
     btn.style.cursor = "pointer";
     setTimeout(() => {
@@ -14690,7 +14832,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     btn: HTMLElement,
   ): Promise<void> {
     const originalText = btn.innerText;
-    btn.innerHTML = "⏳";
+    btn.innerHTML = "";
     (btn as HTMLButtonElement).disabled = true;
     btn.style.cursor = "wait";
 
@@ -14699,7 +14841,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       const title = item.getField("title") as string;
       if (!title) {
         btn.title = "No title to search";
-        btn.innerText = "❌";
+        btn.innerText = "!";
         return;
       }
 
@@ -14772,7 +14914,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               const cells = tr.querySelectorAll("td");
               cells.forEach((td: HTMLElement) => {
                 if (td.contains(btn)) {
-                  td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">📄 Process PDF</span>`;
+                  td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Process PDF</span>`;
                 }
               });
             }
@@ -14809,19 +14951,19 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           btn.title = "Opened Semantic Scholar page (no PDF found)";
         } else if (!pdfAttached) {
           btn.title = "No PDF found via any source";
-          btn.innerText = "❌";
+          btn.innerText = "!";
         }
       } else {
         btn.title = "Not found on Semantic Scholar";
-        btn.innerText = "❌";
+        btn.innerText = "!";
       }
     } catch (e) {
       Zotero.debug(`[seerai] SS Search error: ${e}`);
       btn.title = `Error: ${e}`;
-      btn.innerText = "⚠️";
+      btn.innerText = "!";
     } finally {
       if (
-        btn.innerText === "⏳" ||
+        btn.innerText === "" ||
         btn.innerText.includes("📥") ||
         btn.innerText.includes("🔍")
       ) {
@@ -14840,7 +14982,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     btn: HTMLElement,
   ): Promise<void> {
     const originalText = btn.innerText;
-    btn.innerHTML = "⏳";
+    btn.innerHTML = "";
     (btn as HTMLButtonElement).disabled = true;
     btn.style.cursor = "wait";
 
@@ -14879,7 +15021,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               // Update UI to "Process PDF" on success
               const cell = btn.parentElement?.parentElement;
               if (cell) {
-                cell.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">📄 Process PDF</span>`;
+                cell.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Process PDF</span>`;
               }
             } else {
               // User cancelled, revert button
@@ -14888,18 +15030,18 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           }
         } else {
           btn.title = "No suitable URL found";
-          btn.innerText = "❌";
+          btn.innerText = "!";
         }
       } else {
         btn.title = "Not found via Firecrawl";
-        btn.innerText = "❌";
+        btn.innerText = "!";
       }
     } catch (e) {
       Zotero.debug(`[seerai] Firecrawl search error: ${e}`);
       btn.title = `Error: ${e}`;
-      btn.innerText = "⚠️";
+      btn.innerText = "!";
     } finally {
-      if (btn.innerText === "⏳") btn.innerText = originalText;
+      if (btn.innerText === "") btn.innerText = originalText;
       (btn as HTMLButtonElement).disabled = false;
       btn.style.cursor = "pointer";
     }
@@ -14915,7 +15057,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     td: HTMLElement,
   ): Promise<void> {
     // Show loading indicator
-    td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">⏳ Generating...</span>`;
+    td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Generating...</span>`;
     td.style.cursor = "wait";
 
     try {
@@ -14952,7 +15094,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     td: HTMLElement,
   ): Promise<void> {
     // Show loading indicator
-    td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">📄 Extracting PDF...</span>`;
+    td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Extracting PDF...</span>`;
     td.style.cursor = "wait";
 
     try {
@@ -14996,7 +15138,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       }
 
       // Now generate with PDF context
-      td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">⚡ Generating...</span>`;
+      td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Generating...</span>`;
 
       const content = await this.generateColumnContentFromText(
         item,
@@ -15317,7 +15459,7 @@ Task: ${columnPrompt}`;
     btn: HTMLElement,
   ): Promise<void> {
     const originalText = btn.innerText;
-    btn.innerText = "⏳";
+    btn.innerText = "";
     btn.style.cursor = "wait";
 
     try {
@@ -15374,7 +15516,7 @@ Task: ${columnPrompt}`;
       }
 
       if (!sourceText.trim()) {
-        btn.innerText = "❌";
+        btn.innerText = "!";
         btn.title = "No content available to generate tags";
         setTimeout(() => {
           btn.innerText = originalText;
@@ -15533,7 +15675,7 @@ Call the generate_tags function with an array of 3-7 high-quality tags.`;
       );
     } catch (err) {
       Zotero.debug(`[seerai] Error generating tags: ${err}`);
-      btn.innerText = "❌";
+      btn.innerText = "!";
       btn.style.color = "#c62828";
       btn.title = `Error: ${err}`;
       setTimeout(() => {
@@ -15953,9 +16095,7 @@ You MUST call the generate_tags function.`;
         const genBtn = ztoolkit.UI.createElement(doc, "button", {
           namespace: "html",
           properties: {
-            innerText: hasNotes
-              ? "⚡ Generate from Notes"
-              : "📄 Generate from PDF",
+            innerText: hasNotes ? "Generate from Notes" : "Generate from PDF",
           },
           styles: {
             padding: "10px 16px",
@@ -15970,7 +16110,7 @@ You MUST call the generate_tags function.`;
             {
               type: "click",
               listener: async () => {
-                genBtn.innerText = "⏳ Generating...";
+                genBtn.innerText = "Generating...";
                 (genBtn as HTMLButtonElement).disabled = true;
                 try {
                   const content = hasNotes
@@ -15984,7 +16124,7 @@ You MUST call the generate_tags function.`;
                   contentArea.value = `Error: ${e}`;
                   previewArea.innerHTML = `<span style="color: #c62828;">Error: ${e}</span>`;
                 }
-                genBtn.innerText = hasNotes ? "⚡ Regenerate" : "📄 Regenerate";
+                genBtn.innerText = hasNotes ? "Regenerate" : "Regenerate";
                 (genBtn as HTMLButtonElement).disabled = false;
               },
             },
@@ -16014,13 +16154,13 @@ You MUST call the generate_tags function.`;
             {
               type: "click",
               listener: async () => {
-                searchPdfBtn.innerText = "⏳ Searching...";
+                searchPdfBtn.innerText = "Searching...";
                 (searchPdfBtn as HTMLButtonElement).disabled = true;
                 try {
                   const success = await findAndAttachPdfForItem(
                     item!,
                     (step) => {
-                      searchPdfBtn.innerText = `⏳ ${step}`;
+                      searchPdfBtn.innerText = ` ${step}`;
                     },
                   );
                   if (success) {
@@ -16028,7 +16168,7 @@ You MUST call the generate_tags function.`;
                       searchPdfBtn.replaceWith(
                         ztoolkit.UI.createElement(doc, "button", {
                           namespace: "html",
-                          properties: { innerText: "⚡ Generate from PDF" },
+                          properties: { innerText: "Generate from PDF" },
                           styles: {
                             padding: "10px 16px",
                             border: "none",
@@ -16045,7 +16185,7 @@ You MUST call the generate_tags function.`;
                                 const btn = buttonRow.querySelector(
                                   "button",
                                 ) as HTMLButtonElement;
-                                btn.innerText = "⏳ Generating...";
+                                btn.innerText = "Generating...";
                                 btn.disabled = true;
                                 try {
                                   const content = await this.generateFromPDF(
@@ -16061,7 +16201,7 @@ You MUST call the generate_tags function.`;
                                   contentArea.value = `Error: ${e}`;
                                   previewArea.innerHTML = `<span style="color: #c62828;">Error: ${e}</span>`;
                                 }
-                                btn.innerText = "📄 Regenerate";
+                                btn.innerText = "Regenerate";
                                 btn.disabled = false;
                               },
                             },
@@ -16109,7 +16249,7 @@ You MUST call the generate_tags function.`;
                         }),
                       );
                     } else {
-                      searchPdfBtn.innerText = "❌ Not found";
+                      searchPdfBtn.innerText = "Not found";
                       searchPdfBtn.style.backgroundColor =
                         "var(--background-secondary)";
                       searchPdfBtn.style.color = "var(--text-tertiary)";
@@ -16133,7 +16273,7 @@ You MUST call the generate_tags function.`;
     // Copy button
     const copyBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "📋 Copy" },
+      properties: { innerText: "Copy" },
       styles: {
         padding: "10px 16px",
         border: "1px solid var(--border-primary)",
@@ -16156,7 +16296,7 @@ You MUST call the generate_tags function.`;
     // Save as Note button
     const saveAsNoteBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "📝 Save as Note" },
+      properties: { innerText: "Save as Note" },
       attributes: { title: "Save content as a new note" },
       styles: {
         padding: "10px 16px",
@@ -16171,7 +16311,7 @@ You MUST call the generate_tags function.`;
           type: "click",
           listener: async () => {
             const originalText = saveAsNoteBtn.innerText;
-            saveAsNoteBtn.innerText = "⏳ Saving...";
+            saveAsNoteBtn.innerText = "Saving...";
             saveAsNoteBtn.style.cursor = "wait";
 
             try {
@@ -16193,7 +16333,7 @@ You MUST call the generate_tags function.`;
                 throw new Error("Item not found");
               }
             } catch (e) {
-              saveAsNoteBtn.innerText = "❌ Error";
+              saveAsNoteBtn.innerText = "Error";
               Zotero.debug(`[seerai] Error saving as note: ${e}`);
               setTimeout(() => {
                 saveAsNoteBtn.innerText = originalText;
@@ -16505,7 +16645,7 @@ You MUST call the generate_tags function.`;
     // Copy button
     const copyBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "📋 Copy" },
+      properties: { innerText: "Copy" },
       styles: {
         padding: "10px 16px",
         border: "1px solid var(--border-primary)",
@@ -16721,19 +16861,28 @@ You MUST call the generate_tags function.`;
     });
 
     const headerTitle = ztoolkit.UI.createElement(doc, "div", {
-      properties: { innerText: "📂 Saved Workspaces" },
+      properties: {},
       styles: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
         fontSize: "13px",
         fontWeight: "600",
         color: "var(--highlight-text)",
         textShadow: "0 1px 2px rgba(0,0,0,0.1)",
       },
     });
+    headerTitle.appendChild(
+      createSvgIcon(doc, "folder", { size: 14, strokeWidth: 1.8 }),
+    );
+    const headerTitleText = doc.createElement("span");
+    headerTitleText.textContent = "Saved Workspaces";
+    headerTitle.appendChild(headerTitleText);
     header.appendChild(headerTitle);
 
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "✕" },
+      properties: {},
       styles: {
         background: "rgba(0,0,0,0.1)",
         border: "none",
@@ -16742,7 +16891,6 @@ You MUST call the generate_tags function.`;
         height: "22px",
         cursor: "pointer",
         color: "var(--highlight-text)",
-        fontSize: "11px",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -16757,6 +16905,9 @@ You MUST call the generate_tags function.`;
         },
       ],
     });
+    closeBtn.appendChild(
+      createSvgIcon(doc, "close", { size: 12, strokeWidth: 2 }),
+    );
     header.appendChild(closeBtn);
     dropdown.appendChild(header);
 
@@ -17454,7 +17605,7 @@ You MUST call the generate_tags function.`;
     });
 
     const icon = ztoolkit.UI.createElement(doc, "div", {
-      properties: { className: "table-empty-state-icon", innerText: "📋" },
+      properties: { className: "table-empty-state-icon", innerText: "" },
       styles: { fontSize: "32px", opacity: "0.5" },
     });
 
@@ -18120,7 +18271,7 @@ You MUST call the generate_tags function.`;
         year ? `(${year})` : "",
         zoteroKey ? `[${zoteroKey}]` : "",
         doi ? `DOI: ${doi}` : "",
-        `📝 ${sources}`,
+        `${sources} (note)`,
       ]
         .filter(Boolean)
         .join(" · ");
@@ -18180,11 +18331,11 @@ You MUST call the generate_tags function.`;
 
           if (hasNotes) {
             if (hasPDFForIndicator) {
-              td.innerHTML = `<span class="generate-indexed-btn" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">⚡ Generate</span>`;
+              td.innerHTML = `<span class="generate-indexed-btn" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">Generate</span>`;
               td.title = "Generate: uses existing notes";
             } else {
               td.innerHTML = `<span style="font-size: 11px;">
-                              <span class="generate-indexed-btn" style="color: var(--highlight-primary); cursor: pointer;">⚡ Generate</span>
+                              <span class="generate-indexed-btn" style="color: var(--highlight-primary); cursor: pointer;">Generate</span>
                               <span style="margin: 0 4px; color: var(--text-tertiary);">|</span>
                               <span class="search-pdf-btn" style="color: var(--text-secondary); cursor: pointer;">🔍 Search PDF</span>
                           </span>`;
@@ -18194,9 +18345,9 @@ You MUST call the generate_tags function.`;
           } else if (hasPDFForIndicator) {
             // Show both options: Generate (uses indexed PDF text) and OCR (creates refined notes)
             td.innerHTML = `<span style="font-size: 11px;">
-                            <span class="generate-indexed-btn" style="color: var(--highlight-primary); cursor: pointer;">⚡ Generate</span>
+                            <span class="generate-indexed-btn" style="color: var(--highlight-primary); cursor: pointer;">Generate</span>
                             <span style="margin: 0 4px; color: var(--text-tertiary);">|</span>
-                            <span class="process-pdf-btn" style="color: var(--text-secondary); cursor: pointer;">📄 OCR</span>
+                            <span class="process-pdf-btn" style="color: var(--text-secondary); cursor: pointer;">OCR</span>
                         </span>`;
             td.title = "Generate: uses PDF text | OCR: extracts refined notes";
           } else {
@@ -18219,7 +18370,7 @@ You MUST call the generate_tags function.`;
                     td.innerHTML = `<span style="color: #f57c00; font-size: 11px;">↻ Retrying...</span>`;
                     break;
                   case "found":
-                    td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">📄 Process PDF</span>`;
+                    td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Process PDF</span>`;
                     break;
                   case "notfound": {
                     // Show source link if we can resolve one
@@ -18237,7 +18388,7 @@ You MUST call the generate_tags function.`;
                     if (sourceLink) {
                       td.innerHTML = `<span class="source-link-btn" data-url="${sourceLink}" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔗 Source Link</span>`;
                     } else {
-                      td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">❌ No PDF found</span>`;
+                      td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">No PDF found</span>`;
                     }
                     break;
                   }
@@ -18254,14 +18405,14 @@ You MUST call the generate_tags function.`;
                   currentTableConfig?.pdfDiscoveryData?.[row.paperId];
                 if (persistedDiscovery) {
                   if (persistedDiscovery.status === "found") {
-                    td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">📄 Process PDF</span>`;
+                    td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Process PDF</span>`;
                   } else if (
                     persistedDiscovery.status === "source_link" &&
                     persistedDiscovery.sourceUrl
                   ) {
                     td.innerHTML = `<span class="source-link-btn" data-url="${persistedDiscovery.sourceUrl}" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔗 Source-Link</span>`;
                   } else if (persistedDiscovery.status === "not_found") {
-                    td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">❌ Not found</span>`;
+                    td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">Not found</span>`;
                   } else {
                     td.innerHTML = `<span class="search-pdf-btn" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔍 Search PDF</span>`;
                   }
@@ -18318,7 +18469,7 @@ You MUST call the generate_tags function.`;
                     parentItemID: item.id,
                     contentType: "application/pdf",
                   });
-                  td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">📄 Process PDF</span>`;
+                  td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Process PDF</span>`;
                 } catch (e) {
                   td.innerHTML = `<span style="color: #c62828; font-size: 11px;">Attach failed</span>`;
                 }
@@ -18331,7 +18482,7 @@ You MUST call the generate_tags function.`;
               ".generate-indexed-btn",
             );
             if (generateIndexedBtn && item) {
-              td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">⏳ Generating...</span>`;
+              td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Generating...</span>`;
               td.style.cursor = "wait";
               try {
                 // Use generateFromPDF which now uses indexed text first
@@ -18369,7 +18520,7 @@ You MUST call the generate_tags function.`;
                 td.innerHTML = `<span style="color: #c62828; font-size: 11px;">No PDF found</span>`;
                 return;
               }
-              td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">📄 OCR Processing...</span>`;
+              td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">OCR Processing...</span>`;
               td.style.cursor = "wait";
               try {
                 await ocrService.convertToMarkdown(pdf);
@@ -18396,7 +18547,7 @@ You MUST call the generate_tags function.`;
                           ? `${author.length > 30 ? author.substring(0, 30) + "..." : author}`
                           : "",
                         year ? `(${year})` : "",
-                        `📝 ${sources}`,
+                        `${sources} (note)`,
                       ]
                         .filter(Boolean)
                         .join(" · ");
@@ -18442,16 +18593,16 @@ You MUST call the generate_tags function.`;
             );
             if (searchPdfBtn && !hasNotes && !hasPDF && item) {
               // Run PDF discovery pipeline
-              td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">⏳ Searching...</span>`;
+              td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Searching...</span>`;
               td.style.cursor = "wait";
 
               try {
                 const success = await findAndAttachPdfForItem(item, (step) => {
-                  td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">⏳ ${step}</span>`;
+                  td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">${step}</span>`;
                 });
 
                 if (success) {
-                  td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">📄 Process PDF</span>`;
+                  td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Process PDF</span>`;
                   td.style.cursor = "pointer";
                   // Persist the discovery result
                   if (currentTableConfig) {
@@ -18494,7 +18645,7 @@ You MUST call the generate_tags function.`;
                       await tableStore.saveConfig(currentTableConfig);
                     }
                   } else {
-                    td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">❌ Not found</span>`;
+                    td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">Not found</span>`;
                     td.style.cursor = "pointer";
                     // Persist the not-found result
                     if (currentTableConfig) {
@@ -18537,7 +18688,7 @@ You MUST call the generate_tags function.`;
                 td.innerHTML = `<span style="font-size: 11px;">
                                     <span class="attach-pdf-btn" data-item-id="${row.paperId}" style="color: var(--highlight-primary); cursor: pointer; margin-right: 8px;">⬇️ Attach</span>
                                     <span class="search-pdf-btn" style="color: var(--highlight-primary); cursor: pointer; margin-right: 8px;">🔁 Retry</span>
-                                    <span class="add-note-btn" data-item-id="${row.paperId}" style="color: var(--highlight-primary); cursor: pointer;">📝 Add Note</span>
+                                    <span class="add-note-btn" data-item-id="${row.paperId}" style="color: var(--highlight-primary); cursor: pointer;">Add Note</span>
                                 </span>`;
                 td.style.cursor = "pointer";
               }
@@ -18548,7 +18699,7 @@ You MUST call the generate_tags function.`;
             const addNoteBtn = (e.target as Element).closest(".add-note-btn");
             if (addNoteBtn && item) {
               try {
-                td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">⏳ Creating note...</span>`;
+                td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Creating note...</span>`;
                 td.style.cursor = "wait";
 
                 // Create a new note with the paper title as the note title
@@ -18580,7 +18731,7 @@ You MUST call the generate_tags function.`;
                 row.data["sources"] = String(row.noteIds.length);
 
                 // Show "Generate" button now that we have a note
-                td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">⚡ Generate</span>`;
+                td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Generate</span>`;
                 td.style.cursor = "pointer";
 
                 Zotero.debug(`[seerai] Created note for paper: ${paperTitle}`);
@@ -18593,7 +18744,7 @@ You MUST call the generate_tags function.`;
             }
 
             if (hasNotes || hasPDF) {
-              td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">⏳ ${hasNotes ? "Generating..." : "Processing..."}</span>`;
+              td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">${hasNotes ? "Generating..." : "Processing..."}</span>`;
               td.style.cursor = "wait";
 
               try {
@@ -18677,7 +18828,7 @@ You MUST call the generate_tags function.`;
             listener: async (e: Event) => {
               e.stopPropagation();
               const btn = e.target as HTMLElement;
-              btn.innerText = "⏳";
+              btn.innerText = "";
               btn.style.cursor = "wait";
 
               const cols = currentTableConfig?.columns || defaultColumns;
@@ -18808,7 +18959,7 @@ You MUST call the generate_tags function.`;
                 await this.forceRefreshTable();
               } catch (err) {
                 Zotero.debug(`[seerai] Error deleting item: ${err}`);
-                btn.innerText = "❌";
+                btn.innerText = "!";
               }
             },
           },
@@ -18851,7 +19002,7 @@ You MUST call the generate_tags function.`;
               // Confirm removal with visual feedback
               if (btn.dataset.confirmRemove !== "true") {
                 btn.dataset.confirmRemove = "true";
-                btn.innerText = "❌";
+                btn.innerText = "!";
                 btn.style.color = "#c62828";
                 btn.style.backgroundColor = "rgba(198,40,40,0.15)";
                 btn.title = "Click again to confirm removal";
@@ -20878,7 +21029,7 @@ You MUST call the generate_tags function.`;
                 e.stopPropagation();
                 const btn = e.target as HTMLButtonElement;
                 const originalText = btn.innerText;
-                btn.innerText = "⏳ Thinking...";
+                btn.innerText = "Thinking...";
                 btn.disabled = true;
 
                 try {
@@ -20920,7 +21071,7 @@ You MUST call the generate_tags function.`;
                   contentDiv.innerHTML = parseMarkdown(result);
                   td.appendChild(contentDiv);
                 } catch (err) {
-                  btn.innerText = "❌ Error";
+                  btn.innerText = "Error";
                   btn.title = String(err);
                   setTimeout(() => {
                     btn.innerText = originalText;
@@ -21253,7 +21404,7 @@ You MUST call the generate_tags function.`;
                 fontSize: "12px",
               },
             });
-            loadingDiv.innerHTML = "⏳ Loading more papers...";
+            loadingDiv.innerHTML = "Loading more papers...";
             showMoreBtn.replaceWith(loadingDiv);
             await this.performSearch(doc);
           },
@@ -21334,10 +21485,14 @@ You MUST call the generate_tags function.`;
     sideStrip.appendChild(addColumnBtn);
 
     // 2. (⚡) Generate All
-    const generateAllBtn = createSideBtn("⚡", "Generate All Analysis", (e) => {
-      e.stopPropagation();
-      this.generateAllSearchColumns(doc, wrapper);
-    });
+    const generateAllBtn = createSideBtn(
+      "lightning",
+      "Generate All Analysis",
+      (e) => {
+        e.stopPropagation();
+        this.generateAllSearchColumns(doc, wrapper);
+      },
+    );
     sideStrip.appendChild(generateAllBtn);
 
     // 3. (⚙️) Settings
@@ -22858,7 +23013,7 @@ You MUST call the generate_tags function.`;
         // Generate button
         const generateBtn = ztoolkit.UI.createElement(doc, "button", {
           namespace: "html",
-          properties: { innerText: "🔄 Generate" },
+          properties: { innerText: "Generate" },
           styles: {
             padding: "3px 8px",
             fontSize: "10px",
@@ -22874,7 +23029,7 @@ You MUST call the generate_tags function.`;
               listener: async (e: Event) => {
                 e.stopPropagation();
                 const btn = e.target as HTMLButtonElement;
-                btn.textContent = "⏳ Analyzing...";
+                btn.textContent = "Analyzing...";
                 btn.disabled = true;
 
                 try {
@@ -22885,7 +23040,7 @@ You MUST call the generate_tags function.`;
                   // Update display
                   valueEl.textContent = result;
                 } catch (err) {
-                  valueEl.textContent = `❌ Error: ${err}`;
+                  valueEl.textContent = `Error: ${err}`;
                 }
               },
             },
@@ -25202,9 +25357,15 @@ ${tableRows}  </tbody>
         font-weight: ${isSelected ? "600" : "normal"};
       `;
 
-      opt.replaceChildren(
-        createSvgIcon(doc, icon, { size: 14, strokeWidth: 1.7 }),
-      );
+      const optIcon = createSvgIcon(doc, icon, {
+        size: 16,
+        strokeWidth: 2,
+      });
+      optIcon.style.flexShrink = "0";
+      optIcon.style.color = isSelected ? "#fff" : "var(--text-secondary)";
+      optIcon.style.display = "inline-block";
+      optIcon.style.verticalAlign = "middle";
+      opt.replaceChildren(optIcon);
       const labelSpan = doc.createElementNS(HTML_NS, "span") as HTMLElement;
       labelSpan.style.flexGrow = "1";
       labelSpan.textContent = label;
@@ -25296,6 +25457,9 @@ ${tableRows}  </tbody>
         !anchorEl.contains(e.target as Node)
       ) {
         dropdown.remove();
+        anchorEl.replaceChildren(
+          createSvgIcon(doc, "chevron-down", { size: 12 }),
+        );
         doc.removeEventListener("mousedown", closeHandler);
       }
     };
@@ -25903,7 +26067,7 @@ ${tableRows}  </tbody>
               // Reset after 3 seconds if not clicked
               clearConfirmTimeout = setTimeout(() => {
                 clearConfirmState = false;
-                setToolbarIcon(clearBtn as HTMLElement, "clear", "Clear chat");
+                setToolbarIcon(clearBtn as HTMLElement, "trash", "Clear chat");
                 (clearBtn as HTMLElement).style.backgroundColor =
                   "var(--background-secondary)";
                 (clearBtn as HTMLElement).style.borderColor =
@@ -25925,7 +26089,7 @@ ${tableRows}  </tbody>
               }
 
               // Reset button appearance
-              setToolbarIcon(clearBtn as HTMLElement, "clear", "Clear chat");
+              setToolbarIcon(clearBtn as HTMLElement, "trash", "Clear chat");
               (clearBtn as HTMLElement).style.backgroundColor =
                 "var(--background-secondary)";
               (clearBtn as HTMLElement).style.borderColor =
@@ -25938,7 +26102,7 @@ ${tableRows}  </tbody>
       ],
     });
     applyToolbarButtonStyle(clearBtn as HTMLElement);
-    setToolbarIcon(clearBtn as HTMLElement, "clear", "Clear chat");
+    setToolbarIcon(clearBtn as HTMLElement, "trash", "Clear chat");
 
     // Save button
     const saveBtn = ztoolkit.UI.createElement(doc, "button", {
@@ -26056,117 +26220,114 @@ ${tableRows}  </tbody>
         : "var(--border-primary)";
     };
 
-    const agenticBtn = ztoolkit.UI.createElement(doc, "button", {
-      namespace: "html",
-      properties: {
-        title: "Toggle Agentic Mode (tool calling)",
-      },
-      styles: {
-        width: "32px",
-        height: "32px",
-        border: "1px solid var(--border-primary)",
-        borderRadius: "6px 0 0 6px",
-        backgroundColor: agenticEnabled
-          ? "var(--accent-blue, #007AFF)"
-          : "var(--background-secondary)",
-        color: agenticEnabled ? "#fff" : "var(--text-secondary)",
-        cursor: "pointer",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: "14px",
-        transition: "all 0.15s ease",
-      },
-      listeners: [
-        {
-          type: "click",
-          listener: () => {
-            agenticEnabled = !agenticEnabled;
-            try {
-              Zotero.Prefs.set("extensions.seerai.agenticMode", agenticEnabled);
-            } catch (e) {
-              Zotero.debug(`[seerai] Error saving agentic mode pref: ${e}`);
-            }
-            updateAgenticBtnStyle(agenticBtn as HTMLElement, agenticEnabled);
-            // Update scope button visibility
-            (scopeBtn as HTMLElement).style.display = agenticEnabled
-              ? "flex"
-              : "none";
-            Zotero.debug(`[seerai] Agentic mode toggled: ${agenticEnabled}`);
-          },
-        },
-      ],
+    const agenticBtn = doc.createElement("button") as HTMLButtonElement;
+    agenticBtn.title = "Toggle Agentic Mode (tool calling)";
+    Object.assign(agenticBtn.style, {
+      width: "32px",
+      height: "32px",
+      border: "1px solid var(--border-primary)",
+      borderRadius: "7px 0 0 7px",
+      backgroundColor: agenticEnabled
+        ? "var(--accent-blue, #007AFF)"
+        : "var(--background-secondary)",
+      color: agenticEnabled ? "#fff" : "var(--text-primary, #333)",
+      cursor: "pointer",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "0",
+      flexShrink: "0",
+      transition: "all 0.15s ease",
     });
-    applyToolbarButtonStyle(agenticBtn as HTMLElement, agenticEnabled);
-    (agenticBtn as HTMLElement).style.borderRadius = "7px 0 0 7px";
-    setToolbarIcon(
-      agenticBtn as HTMLElement,
+    agenticBtn.addEventListener("click", () => {
+      agenticEnabled = !agenticEnabled;
+      try {
+        Zotero.Prefs.set("extensions.seerai.agenticMode", agenticEnabled);
+      } catch (e) {
+        Zotero.debug(`[seerai] Error saving agentic mode pref: ${e}`);
+      }
+      updateAgenticBtnStyle(agenticBtn, agenticEnabled);
+      Zotero.debug(`[seerai] Agentic mode toggled: ${agenticEnabled}`);
+    });
+    setButtonIcon(
+      agenticBtn,
       agenticEnabled ? "agent" : "chat",
       agenticEnabled ? "Agentic mode on" : "Agentic mode off",
+      16,
     );
 
     // Scope selector button (dropdown trigger)
-    const scopeBtn = ztoolkit.UI.createElement(doc, "button", {
-      namespace: "html",
-      properties: {
-        title: `Scope: ${this.getScopeLabel(this.getScopePref())}`,
-      },
-      styles: {
-        width: "18px",
-        height: "28px",
-        border: "1px solid var(--accent-blue, #007AFF)",
-        borderLeft: "none",
-        borderRadius: "0 6px 6px 0",
-        backgroundColor: "var(--accent-blue, #007AFF)",
-        color: "#fff",
-        cursor: "pointer",
-        display: agenticEnabled ? "flex" : "none",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: "10px",
-        transition: "all 0.15s ease",
-      },
-      listeners: [
-        {
-          type: "click",
-          listener: (e: Event) => {
-            e.stopPropagation();
-            this.showScopeDropdown(
-              doc,
-              scopeBtn as HTMLElement,
-              (newScope: string) => {
-                try {
-                  Zotero.Prefs.set("extensions.seerai.libraryScope", newScope);
-                  (scopeBtn as HTMLElement).title =
-                    `Scope: ${this.getScopeLabel(newScope)}`;
-                  updateAgenticBtnStyle(
-                    agenticBtn as HTMLElement,
-                    agenticEnabled,
-                  );
-                  // Persist per-chat scope
-                  const sm = getChatStateManager();
-                  sm.setOptions({ libraryScope: newScope });
-                  getMessageStore()
-                    .saveConversationState(
-                      sm.getStates(),
-                      sm.getOptions(),
-                      ChatContextManager.getInstance().getSerializableItems(),
-                    )
-                    .catch((e) =>
-                      Zotero.debug(`[seerai] Error saving chat scope: ${e}`),
-                    );
-                  Zotero.debug(`[seerai] Agent scope changed to: ${newScope}`);
-                } catch (err) {
-                  Zotero.debug(`[seerai] Error saving scope: ${err}`);
-                }
-              },
-            );
-          },
-        },
-      ],
+    const scopeBtn = doc.createElement("button") as HTMLButtonElement;
+    scopeBtn.title = `Scope: ${this.getScopeLabel(this.getScopePref())} (click to change)`;
+    Object.assign(scopeBtn.style, {
+      minWidth: "26px",
+      width: "26px",
+      height: "32px",
+      border: "1px solid var(--border-primary)",
+      borderLeft: "none",
+      borderRadius: "0 6px 6px 0",
+      backgroundColor: "var(--background-primary, #fff)",
+      color: "var(--text-primary, #333)",
+      cursor: "pointer",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "0",
+      flexShrink: "0",
+      transition: "all 0.15s ease",
     });
-    (scopeBtn as HTMLElement).replaceChildren(
-      createToolbarSvg("chevron-down", 12),
+    scopeBtn.addEventListener("click", (e: Event) => {
+      e.stopPropagation();
+      const isOpen = !!doc.getElementById("agentic-scope-dropdown");
+      if (isOpen) {
+        doc.getElementById("agentic-scope-dropdown")?.remove();
+        setButtonIcon(
+          scopeBtn,
+          "chevron-up",
+          `Scope: ${this.getScopeLabel(this.getScopePref())} (click to change)`,
+          14,
+        );
+        return;
+      }
+      setButtonIcon(
+        scopeBtn,
+        "chevron-down",
+        `Scope: ${this.getScopeLabel(this.getScopePref())} (click to change)`,
+        14,
+      );
+      this.showScopeDropdown(doc, scopeBtn, (newScope: string) => {
+        try {
+          Zotero.Prefs.set("extensions.seerai.libraryScope", newScope);
+          setButtonIcon(
+            scopeBtn,
+            "chevron-up",
+            `Scope: ${this.getScopeLabel(newScope)} (click to change)`,
+            14,
+          );
+          updateAgenticBtnStyle(agenticBtn as HTMLElement, agenticEnabled);
+          // Persist per-chat scope
+          const sm = getChatStateManager();
+          sm.setOptions({ libraryScope: newScope });
+          getMessageStore()
+            .saveConversationState(
+              sm.getStates(),
+              sm.getOptions(),
+              ChatContextManager.getInstance().getSerializableItems(),
+            )
+            .catch((e) =>
+              Zotero.debug(`[seerai] Error saving chat scope: ${e}`),
+            );
+          Zotero.debug(`[seerai] Agent scope changed to: ${newScope}`);
+        } catch (err) {
+          Zotero.debug(`[seerai] Error saving scope: ${err}`);
+        }
+      });
+    });
+    setButtonIcon(
+      scopeBtn,
+      "chevron-up",
+      `Scope: ${this.getScopeLabel(this.getScopePref())} (click to change)`,
+      14,
     );
 
     const agenticContainer = doc.createElement("div");
@@ -28155,7 +28316,7 @@ Rules:
           },
           {
             label: "Clear chat",
-            icon: "clear",
+            icon: "trash",
             danger: true,
             action: async () => {
               if (
@@ -31118,7 +31279,6 @@ Note: Context was automatically reduced using stricter semantic search due to si
         "more",
         "newChat",
         "save",
-        "clear",
         "send",
         "chevron-left",
         "chevron-right",
@@ -31153,7 +31313,6 @@ Note: Context was automatically reduced using stricter semantic search due to si
         "target",
         "lightning",
         "tool",
-        "wrench",
         "brain",
         "image-stack",
         "image-multiple",
@@ -31162,7 +31321,6 @@ Note: Context was automatically reduced using stricter semantic search due to si
         "warning",
         "check",
         "check-circle",
-        "x",
         "x-circle",
         "question",
         "help",
@@ -31174,6 +31332,30 @@ Note: Context was automatically reduced using stricter semantic search due to si
         "fire",
         "firecrawl",
         "thumbs-up",
+        "thumbs-down",
+        "scale",
+        "eye",
+        "pin",
+        "info",
+        "hourglass",
+        "globe",
+        "home",
+        "logout",
+        "server",
+        "terminal",
+        "swap",
+        "list",
+        "rocket",
+        "robot",
+        "compass",
+        "database",
+        "share",
+        "star",
+        "shield",
+        "zap",
+        "cpu",
+        "message",
+        "sparkles",
       ].includes(icon)
     ) {
       setButtonIcon(btn as HTMLElement, icon as IconName, tooltip, 13);

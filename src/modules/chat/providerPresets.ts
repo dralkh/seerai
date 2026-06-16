@@ -1,4 +1,22 @@
 import type { ProviderPreset } from "./providerTypes";
+import type { IconName } from "./ui/icons";
+
+const ICON_OPENAI: IconName = "sparkles";
+const ICON_ANTHROPIC: IconName = "brain";
+const ICON_GOOGLE: IconName = "sparkle";
+const ICON_XAI: IconName = "zap";
+const ICON_MISTRAL: IconName = "idea";
+const ICON_DEEPSEEK: IconName = "terminal";
+const ICON_TOGETHER: IconName = "users";
+const ICON_GROQ: IconName = "lightning";
+const ICON_FIREWORKS: IconName = "fire";
+const ICON_COHERE: IconName = "compass";
+const ICON_OPENROUTER: IconName = "swap";
+const ICON_OLLAMA: IconName = "server";
+const ICON_LMSTUDIO: IconName = "home";
+const ICON_AZURE: IconName = "cloud";
+const ICON_HERMES: IconName = "robot";
+const ICON_OPENCODE: IconName = "terminal";
 
 export const providerPresets: ProviderPreset[] = [
   {
@@ -6,7 +24,7 @@ export const providerPresets: ProviderPreset[] = [
     name: "OpenAI",
     requiresApiKey: true,
     isLocal: false,
-    icon: "🟢",
+    icon: ICON_OPENAI,
     apiURL: "https://api.openai.com/v1/",
     authMethod: "bearer",
     apiKeyPlaceholder: "sk-...",
@@ -18,7 +36,7 @@ export const providerPresets: ProviderPreset[] = [
     name: "Anthropic (Claude)",
     requiresApiKey: true,
     isLocal: false,
-    icon: "🟣",
+    icon: ICON_ANTHROPIC,
     apiURL: "https://api.anthropic.com/v1/",
     authMethod: "x-api-key",
     authHeaderName: "x-api-key",
@@ -34,7 +52,7 @@ export const providerPresets: ProviderPreset[] = [
     name: "Google Gemini",
     requiresApiKey: true,
     isLocal: false,
-    icon: "🔵",
+    icon: ICON_GOOGLE,
     apiURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
     authMethod: "bearer",
     apiKeyPlaceholder: "AIza...",
@@ -46,7 +64,7 @@ export const providerPresets: ProviderPreset[] = [
     name: "xAI (Grok)",
     requiresApiKey: true,
     isLocal: false,
-    icon: "✖",
+    icon: ICON_XAI,
     apiURL: "https://api.x.ai/v1/",
     authMethod: "bearer",
     apiKeyPlaceholder: "xai-...",
@@ -58,7 +76,7 @@ export const providerPresets: ProviderPreset[] = [
     name: "Mistral AI",
     requiresApiKey: true,
     isLocal: false,
-    icon: "🟠",
+    icon: ICON_MISTRAL,
     apiURL: "https://api.mistral.ai/v1/",
     authMethod: "bearer",
     defaultModel: "mistral-large-latest",
@@ -69,7 +87,7 @@ export const providerPresets: ProviderPreset[] = [
     name: "DeepSeek",
     requiresApiKey: true,
     isLocal: false,
-    icon: "🐋",
+    icon: ICON_DEEPSEEK,
     apiURL: "https://api.deepseek.com/v1/",
     authMethod: "bearer",
     defaultModel: "deepseek-chat",
@@ -80,7 +98,7 @@ export const providerPresets: ProviderPreset[] = [
     name: "Together AI",
     requiresApiKey: true,
     isLocal: false,
-    icon: "🤝",
+    icon: ICON_TOGETHER,
     apiURL: "https://api.together.xyz/v1/",
     authMethod: "bearer",
     defaultModel: "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
@@ -91,7 +109,7 @@ export const providerPresets: ProviderPreset[] = [
     name: "Groq",
     requiresApiKey: true,
     isLocal: false,
-    icon: "⚡",
+    icon: ICON_GROQ,
     apiURL: "https://api.groq.com/openai/v1/",
     authMethod: "bearer",
     apiKeyPlaceholder: "gsk_...",
@@ -103,7 +121,7 @@ export const providerPresets: ProviderPreset[] = [
     name: "Fireworks AI",
     requiresApiKey: true,
     isLocal: false,
-    icon: "🎆",
+    icon: ICON_FIREWORKS,
     apiURL: "https://api.fireworks.ai/inference/v1/",
     authMethod: "bearer",
     apiKeyPlaceholder: "fw_...",
@@ -115,7 +133,7 @@ export const providerPresets: ProviderPreset[] = [
     name: "Cohere",
     requiresApiKey: true,
     isLocal: false,
-    icon: "🔷",
+    icon: ICON_COHERE,
     apiURL: "https://api.cohere.com/compatibility/v1/",
     authMethod: "bearer",
     defaultModel: "command-r-plus",
@@ -126,7 +144,7 @@ export const providerPresets: ProviderPreset[] = [
     name: "OpenRouter",
     requiresApiKey: true,
     isLocal: false,
-    icon: "🔀",
+    icon: ICON_OPENROUTER,
     apiURL: "https://openrouter.ai/api/v1/",
     authMethod: "bearer",
     apiKeyPlaceholder: "sk-or-...",
@@ -137,7 +155,7 @@ export const providerPresets: ProviderPreset[] = [
   {
     id: "ollama",
     name: "Ollama (Local)",
-    icon: "🦙",
+    icon: ICON_OLLAMA,
     apiURL: "http://localhost:11434/v1/",
     authMethod: "none",
     requiresApiKey: false,
@@ -148,7 +166,7 @@ export const providerPresets: ProviderPreset[] = [
   {
     id: "lmstudio",
     name: "LM Studio (Local)",
-    icon: "🏠",
+    icon: ICON_LMSTUDIO,
     apiURL: "http://localhost:1234/v1/",
     authMethod: "none",
     requiresApiKey: false,
@@ -161,7 +179,7 @@ export const providerPresets: ProviderPreset[] = [
     name: "Azure OpenAI",
     requiresApiKey: true,
     isLocal: false,
-    icon: "☁️",
+    icon: ICON_AZURE,
     apiURL:
       "https://{resource}.openai.azure.com/openai/deployments/{deployment}/",
     authMethod: "api-key-header",
@@ -172,7 +190,7 @@ export const providerPresets: ProviderPreset[] = [
   {
     id: "hermes-agent",
     name: "Hermes Agent",
-    icon: "🤖",
+    icon: ICON_HERMES,
     apiURL: "http://localhost:8642/v1/",
     authMethod: "bearer",
     apiKeyPlaceholder: "change-me-local-dev",
@@ -187,7 +205,7 @@ export const providerPresets: ProviderPreset[] = [
   {
     id: "opencode",
     name: "OpenCode",
-    icon: "📝",
+    icon: ICON_OPENCODE,
     apiURL: "http://localhost:3000/v1/",
     authMethod: "none",
     requiresApiKey: false,

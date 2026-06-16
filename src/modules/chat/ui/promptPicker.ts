@@ -298,8 +298,10 @@ export async function showPromptPicker(
     `;
 
   const newBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-  newBtn.textContent = "+ New Prompt";
   newBtn.style.cssText = `
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         padding: 8px 14px;
         border: 1px dashed var(--button-dashed-border-blue);
         border-radius: 6px;
@@ -308,6 +310,10 @@ export async function showPromptPicker(
         font-size: 12px;
         cursor: pointer;
     `;
+  newBtn.appendChild(createSvgIcon(doc, "add", { size: 14, strokeWidth: 1.8 }));
+  const newLbl = doc.createElement("span");
+  newLbl.textContent = "New Prompt";
+  newBtn.appendChild(newLbl);
   newBtn.addEventListener("click", () => {
     showPromptEditor(doc, container, undefined, async (newPrompt) => {
       await renderPromptList();
@@ -315,8 +321,10 @@ export async function showPromptPicker(
   });
 
   const insertBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-  insertBtn.textContent = "Insert ▸";
   insertBtn.style.cssText = `
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         padding: 8px 16px;
         border: none;
         border-radius: 6px;
@@ -328,6 +336,12 @@ export async function showPromptPicker(
         opacity: 0.5;
     `;
   insertBtn.disabled = true;
+  insertBtn.appendChild(
+    createSvgIcon(doc, "chevron-right", { size: 14, strokeWidth: 1.8 }),
+  );
+  const insertLbl = doc.createElement("span");
+  insertLbl.textContent = "Insert";
+  insertBtn.appendChild(insertLbl);
   insertBtn.addEventListener("click", () => {
     if (selectedPrompt) {
       options.onSelect(selectedPrompt);
@@ -451,8 +465,13 @@ function createPromptCard(
     "display: flex; align-items: center; gap: 8px; margin-bottom: 4px;";
 
   const icon = doc.createElement("span");
-  icon.textContent = getCategoryIcon(prompt.category);
-  icon.style.fontSize = "14px";
+  icon.style.cssText = "display: inline-flex; align-items: center;";
+  icon.appendChild(
+    createSvgIcon(doc, getCategoryIcon(prompt.category), {
+      size: 14,
+      strokeWidth: 1.7,
+    }),
+  );
 
   const name = doc.createElement("span");
   name.style.cssText =
@@ -644,8 +663,10 @@ async function showPromptEditor(
     `;
 
   const backBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-  backBtn.textContent = "← Back";
   backBtn.style.cssText = `
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
         background: none;
         border: none;
         color: var(--highlight-primary);
@@ -653,6 +674,12 @@ async function showPromptEditor(
         font-size: 12px;
         padding: 4px 8px;
     `;
+  backBtn.appendChild(
+    createSvgIcon(doc, "chevron-left", { size: 12, strokeWidth: 1.8 }),
+  );
+  const backLbl = doc.createElement("span");
+  backLbl.textContent = "Back";
+  backBtn.appendChild(backLbl);
   backBtn.addEventListener("click", () => editorOverlay.remove());
 
   const editorTitle = doc.createElement("span");

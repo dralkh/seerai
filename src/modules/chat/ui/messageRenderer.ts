@@ -285,7 +285,6 @@ const ICON_NAMES_SET: ReadonlySet<string> = new Set<IconName>([
   "more",
   "newChat",
   "save",
-  "clear",
   "send",
   "chevron-left",
   "chevron-right",
@@ -320,7 +319,6 @@ const ICON_NAMES_SET: ReadonlySet<string> = new Set<IconName>([
   "target",
   "lightning",
   "tool",
-  "wrench",
   "brain",
   "image-stack",
   "image-multiple",
@@ -329,7 +327,6 @@ const ICON_NAMES_SET: ReadonlySet<string> = new Set<IconName>([
   "warning",
   "check",
   "check-circle",
-  "x",
   "x-circle",
   "question",
   "help",
@@ -341,6 +338,30 @@ const ICON_NAMES_SET: ReadonlySet<string> = new Set<IconName>([
   "fire",
   "firecrawl",
   "thumbs-up",
+  "thumbs-down",
+  "scale",
+  "eye",
+  "pin",
+  "info",
+  "hourglass",
+  "globe",
+  "home",
+  "logout",
+  "server",
+  "terminal",
+  "swap",
+  "list",
+  "rocket",
+  "robot",
+  "compass",
+  "database",
+  "share",
+  "star",
+  "shield",
+  "zap",
+  "cpu",
+  "message",
+  "sparkles",
 ]);
 
 /**
@@ -1511,7 +1532,7 @@ export function createRAGProgressUI(doc: Document): {
         thumbsDown.setAttribute("aria-label", "Not helpful");
         thumbsDown.style.cssText =
           "background: none; border: 1px solid var(--border-secondary); border-radius: 3px; padding: 1px 5px; cursor: pointer; font-size: 11px; color: var(--text-secondary); line-height: 1; display: inline-flex; align-items: center;";
-        setButtonIcon(thumbsDown, "x", "Not helpful", 12);
+        setButtonIcon(thumbsDown, "thumbs-down", "Not helpful", 12);
         thumbsDown.onclick = () => {
           thumbsDown.style.background = "var(--accent-red, #FF3B30)";
           thumbsDown.style.color = "#fff";

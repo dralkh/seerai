@@ -13,6 +13,7 @@ import { persistDriveContext, driveFileMetadata } from "./cloudContext";
 import { extractCodeFromUrl } from "./pkce";
 import { CloudProvider } from "./providers/base";
 import { config } from "../../../package.json";
+import { createSvgIcon } from "../chat/ui/icons";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 const DRIVE_POPOVER_ID = "seerai-drive-popover";
@@ -309,7 +310,7 @@ function renderError(container: HTMLElement, doc: Document, error: any): void {
     doc,
     "padding: 24px; text-align: center; display: flex; flex-direction: column; align-items: center;",
   );
-  inner.appendChild(div(doc, "font-size: 40px; margin-bottom: 16px;", "⚠️"));
+  inner.appendChild(div(doc, "font-size: 40px; margin-bottom: 16px;", "!"));
   inner.appendChild(
     div(
       doc,
@@ -386,8 +387,10 @@ function renderConnectView(
 
     const icon = span(
       doc,
-      "font-size: 24px; width: 36px; text-align: center;",
-      provider.icon,
+      "font-size: 24px; width: 36px; display: inline-flex; align-items: center; justify-content: center;",
+    );
+    icon.appendChild(
+      createSvgIcon(doc, provider.icon, { size: 22, strokeWidth: 1.7 }),
     );
     const info = div(doc, "flex: 1;");
     info.appendChild(div(doc, "font-weight: 600;", provider.name));
@@ -454,13 +457,17 @@ function renderOAuthSetup(
     header.appendChild(
       backBtn(doc, () => renderConnectView(container, doc, chatId)),
     );
-    header.appendChild(
-      div(
-        doc,
-        "font-weight: 700; font-size: 15px; flex: 1;",
-        `${provider.icon} ${provider.name} Setup`,
-      ),
+    const headerTitle = div(
+      doc,
+      "font-weight: 700; font-size: 15px; flex: 1; display: inline-flex; align-items: center; gap: 6px;",
     );
+    headerTitle.appendChild(
+      createSvgIcon(doc, provider.icon, { size: 16, strokeWidth: 1.7 }),
+    );
+    const headerTitleText = doc.createElement("span");
+    headerTitleText.textContent = `${provider.name} Setup`;
+    headerTitle.appendChild(headerTitleText);
+    header.appendChild(headerTitle);
     container.appendChild(header);
 
     const content = div(doc, STYLES.content);
@@ -625,13 +632,17 @@ function renderNextcloudSetup(
     header.appendChild(
       backBtn(doc, () => renderConnectView(container, doc, chatId)),
     );
-    header.appendChild(
-      div(
-        doc,
-        "font-weight: 700; font-size: 15px; flex: 1;",
-        `${provider.icon} Nextcloud Setup`,
-      ),
+    const headerTitle2 = div(
+      doc,
+      "font-weight: 700; font-size: 15px; flex: 1; display: inline-flex; align-items: center; gap: 6px;",
     );
+    headerTitle2.appendChild(
+      createSvgIcon(doc, provider.icon, { size: 16, strokeWidth: 1.7 }),
+    );
+    const headerTitleText2 = doc.createElement("span");
+    headerTitleText2.textContent = "Nextcloud Setup";
+    headerTitle2.appendChild(headerTitleText2);
+    header.appendChild(headerTitle2);
     container.appendChild(header);
 
     const content = div(doc, STYLES.content);
@@ -758,8 +769,10 @@ function renderConnecting(
 
     const icon = div(
       doc,
-      "font-size: 48px; margin-bottom: 20px;",
-      provider.icon,
+      "font-size: 48px; margin-bottom: 20px; display: flex; align-items: center; justify-content: center;",
+    );
+    icon.appendChild(
+      createSvgIcon(doc, provider.icon, { size: 40, strokeWidth: 1.6 }),
     );
     const title = div(
       doc,
@@ -902,9 +915,17 @@ async function renderMainView(
     for (const p of providers) {
       const tab = div(
         doc,
-        `padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; white-space: nowrap; transition: all 0.2s;`,
-        `${p.icon} ${p.name}`,
+        `padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 12px; white-space: nowrap; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px;`,
       );
+      const tabIcon = span(
+        doc,
+        "width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center;",
+      );
+      tabIcon.appendChild(
+        createSvgIcon(doc, p.icon, { size: 13, strokeWidth: 1.7 }),
+      );
+      tab.appendChild(tabIcon);
+      tab.appendChild(span(doc, "", p.name));
       tab.addEventListener("click", () => {
         currentProvider = p;
         updateUI();
@@ -915,8 +936,10 @@ async function renderMainView(
 
     const addBtn = div(
       doc,
-      `padding: 6px 10px; cursor: pointer; font-size: 20px; color: ${COLORS.textSecondary}; display: flex; align-items: center; justify-content: center;`,
-      "+",
+      `padding: 6px 10px; cursor: pointer; color: ${COLORS.textSecondary}; display: flex; align-items: center; justify-content: center;`,
+    );
+    addBtn.appendChild(
+      createSvgIcon(doc, "add", { size: 16, strokeWidth: 1.8 }),
     );
     addBtn.title = "Connect more providers";
     addBtn.addEventListener("click", () =>
@@ -926,8 +949,10 @@ async function renderMainView(
 
     const logoutBtn = div(
       doc,
-      `margin-left: auto; padding: 8px; cursor: pointer; font-size: 14px; color: ${COLORS.textSecondary}; opacity: 0.7;`,
-      "🚪",
+      `margin-left: auto; padding: 8px; cursor: pointer; color: ${COLORS.textSecondary}; opacity: 0.7; display: flex; align-items: center;`,
+    );
+    logoutBtn.appendChild(
+      createSvgIcon(doc, "logout", { size: 14, strokeWidth: 1.8 }),
     );
     logoutBtn.title = `Logout from ${currentProvider.name}`;
     logoutBtn.addEventListener("click", () => {
@@ -1189,8 +1214,13 @@ function createFileRow(
 
   const icon = span(
     doc,
-    "font-size: 20px; width: 24px; text-align: center;",
-    node.isFolder ? "📁" : "📄",
+    "font-size: 16px; width: 24px; display: inline-flex; align-items: center; justify-content: center;",
+  );
+  icon.appendChild(
+    createSvgIcon(doc, node.isFolder ? "folder" : "paper", {
+      size: 16,
+      strokeWidth: 1.7,
+    }),
   );
   const name = span(
     doc,

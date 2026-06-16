@@ -16,6 +16,7 @@ import {
 } from "../fileViewer";
 import { extractCodeFromUrl } from "../drive/pkce";
 import { config } from "../../../package.json";
+import { createSvgIcon, type IconName } from "../chat/ui/icons";
 import {
   isDocxFile,
   isDocFile,
@@ -29,13 +30,12 @@ const MIN_LEFT_WIDTH = 200;
 const MIN_RIGHT_WIDTH = 300;
 const MAX_EDITOR_TABS = 5;
 
-function getFileIcon(mimeType: string, isFolder: boolean): string {
-  if (isFolder) return "\uD83D\uDCC1";
-  if (mimeType.includes("pdf")) return "\uD83D\uDCD5";
-  if (mimeType.includes("image") || mimeType.includes("svg"))
-    return "\uD83D\uDDBC\uFE0F";
-  if (mimeType.includes("video")) return "\uD83C\uDFAC";
-  if (mimeType.includes("audio")) return "\uD83C\uDFB5";
+function getFileIcon(mimeType: string, isFolder: boolean): IconName {
+  if (isFolder) return "folder";
+  if (mimeType.includes("pdf")) return "paper";
+  if (mimeType.includes("image") || mimeType.includes("svg")) return "image";
+  if (mimeType.includes("video")) return "video";
+  if (mimeType.includes("audio")) return "play";
   if (
     mimeType.includes("zip") ||
     mimeType.includes("rar") ||
@@ -43,22 +43,22 @@ function getFileIcon(mimeType: string, isFolder: boolean): string {
     mimeType.includes("gzip") ||
     mimeType.includes("7z")
   )
-    return "\uD83D\uDCE6";
+    return "folder";
   if (
     mimeType.includes("spreadsheet") ||
     mimeType.includes("excel") ||
     mimeType.includes("csv")
   )
-    return "\uD83D\uDCCA";
+    return "list";
   if (mimeType.includes("presentation") || mimeType.includes("powerpoint"))
-    return "\uD83D\uDCFD\uFE0F";
+    return "idea";
   if (
     mimeType.includes("document") ||
     mimeType.includes("word") ||
     mimeType.includes("msword")
   )
-    return "\uD83D\uDCDD";
-  return "\uD83D\uDCC4";
+    return "paper";
+  return "paper";
 }
 
 function getFileExtension(mimeType: string, name: string): string {
@@ -241,9 +241,14 @@ function renderEmptyState(doc: Document): HTMLElement {
   const header = div(doc, "padding: 24px 24px 0 24px; flex-shrink: 0;");
   const title = div(
     doc,
-    "font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--text-primary);",
-    "\u2601\uFE0F Cloud Storage",
+    "font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--text-primary); display: inline-flex; align-items: center; gap: 6px;",
   );
+  title.appendChild(
+    createSvgIcon(doc, "cloud", { size: 18, strokeWidth: 1.7 }),
+  );
+  const titleText = doc.createElement("span");
+  titleText.textContent = "Cloud Storage";
+  title.appendChild(titleText);
   header.appendChild(title);
   const subtitle = div(
     doc,
@@ -276,8 +281,13 @@ function renderEmptyState(doc: Document): HTMLElement {
 
     const icon = span(
       doc,
-      "font-size: 32px; width: 40px; text-align: center; flex-shrink: 0;",
-      provider.icon,
+      "width: 40px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;",
+    );
+    icon.appendChild(
+      createSvgIcon(doc, provider.icon || "cloud", {
+        size: 28,
+        strokeWidth: 1.7,
+      }),
     );
     card.appendChild(icon);
 
@@ -300,8 +310,10 @@ function renderEmptyState(doc: Document): HTMLElement {
 
     const arrow = span(
       doc,
-      "font-size: 14px; color: var(--text-secondary); flex-shrink: 0;",
-      "\u2192",
+      "color: var(--text-secondary); flex-shrink: 0; display: inline-flex; align-items: center;",
+    );
+    arrow.appendChild(
+      createSvgIcon(doc, "chevron-right", { size: 14, strokeWidth: 1.8 }),
     );
     card.appendChild(arrow);
 
@@ -341,7 +353,7 @@ function showInlineConnect(
   );
   const backBtn = btn(
     doc,
-    "\u2190 Back",
+    "Back",
     "background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 13px; padding: 4px 8px; border-radius: 4px;",
     async () => {
       const root = wrapper.closest("[data-cloud-root]") as HTMLElement;
@@ -365,8 +377,13 @@ function showInlineConnect(
 
   const iconBig = div(
     doc,
-    "font-size: 48px; margin-bottom: 16px; text-align: center;",
-    provider.icon,
+    "margin-bottom: 16px; display: flex; align-items: center; justify-content: center;",
+  );
+  iconBig.appendChild(
+    createSvgIcon(doc, provider.icon || "cloud", {
+      size: 40,
+      strokeWidth: 1.6,
+    }),
   );
   wrapper.appendChild(iconBig);
 
@@ -393,7 +410,7 @@ function showInlineConnect(
       signInBtn.textContent = "Opening browser...";
       try {
         await provider.login();
-        signInBtn.textContent = "Browser opened \u2705";
+        signInBtn.textContent = "Browser opened";
         signInBtn.style.background = "#188038";
       } catch (e: any) {
         signInBtn.textContent = "Try Again";
@@ -499,7 +516,7 @@ function renderNextcloudForm(doc: Document, container: HTMLElement): void {
   );
   const backBtn = btn(
     doc,
-    "\u2190 Back",
+    "Back",
     "background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 13px; padding: 4px 8px; border-radius: 4px;",
     async () => {
       const root = wrapper.closest("[data-cloud-root]") as HTMLElement;
@@ -786,9 +803,17 @@ function showAddProviderDropdown(doc: Document, anchorBtn: HTMLElement): void {
       doc,
       "display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; transition: background 0.15s; font-size: 13px;",
     );
-    item.appendChild(
-      span(doc, "font-size: 18px; flex-shrink: 0;", provider.icon),
+    const provIcon = span(
+      doc,
+      "width: 18px; height: 18px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;",
     );
+    provIcon.appendChild(
+      createSvgIcon(doc, provider.icon || "cloud", {
+        size: 16,
+        strokeWidth: 1.7,
+      }),
+    );
+    item.appendChild(provIcon);
     item.appendChild(
       span(doc, "color: var(--text-primary); font-weight: 500;", provider.name),
     );
@@ -828,9 +853,20 @@ function renderProviderBar(doc: Document): HTMLElement {
   for (const provider of loggedIn) {
     const pill = div(
       doc,
-      "padding: 6px 14px; border-radius: 20px; cursor: pointer; font-size: 12px; font-weight: 500; white-space: nowrap; transition: all 0.2s ease; user-select: none;",
-      `${provider.icon} ${provider.name}`,
+      "padding: 6px 14px; border-radius: 20px; cursor: pointer; font-size: 12px; font-weight: 500; white-space: nowrap; transition: all 0.2s ease; user-select: none; display: inline-flex; align-items: center; gap: 6px;",
     );
+    const pillIcon = span(
+      doc,
+      "width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center;",
+    );
+    pillIcon.appendChild(
+      createSvgIcon(doc, provider.icon || "cloud", {
+        size: 13,
+        strokeWidth: 1.7,
+      }),
+    );
+    pill.appendChild(pillIcon);
+    pill.appendChild(span(doc, "", provider.name));
 
     const isActive = state.currentProvider?.id === provider.id;
     if (isActive) {
@@ -1025,7 +1061,7 @@ async function performSearch(doc: Document, query: string): Promise<void> {
     const backLink = span(
       doc,
       "cursor: pointer; color: var(--highlight-primary); font-weight: 600;",
-      "\u2190 Back to browse",
+      "Back to browse",
     );
     backLink.addEventListener("click", () => {
       const input = currentPaneRefs.searchInput;
@@ -1260,8 +1296,13 @@ function createFileRow(
 
   const icon = span(
     doc,
-    "font-size: 18px; width: 22px; text-align: center; flex-shrink: 0;",
-    getFileIcon(node.mimeType, node.isFolder),
+    "font-size: 18px; width: 22px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;",
+  );
+  icon.appendChild(
+    createSvgIcon(doc, getFileIcon(node.mimeType, node.isFolder), {
+      size: 16,
+      strokeWidth: 1.7,
+    }),
   );
   row.appendChild(icon);
 
@@ -1472,37 +1513,37 @@ function showRowDropdown(
 
   const items: {
     label: string;
-    icon: string;
-    handler: () => void;
+    icon: IconName;
+    handler: () => void | Promise<void>;
     disabled?: boolean;
   }[] = [
     {
       label: "Preview",
-      icon: "\uD83D\uDC41\uFE0F",
+      icon: "eye",
       handler: () => openFilePreview(doc, node, provider),
       disabled: !isEditable,
     },
     {
       label: "Edit",
-      icon: "\u270F\uFE0F",
+      icon: "edit",
       handler: () => openFileEditor(doc, node, provider),
       disabled: !isEditable,
     },
     {
       label: "Download",
-      icon: "\u2B07\uFE0F",
+      icon: "download",
       handler: () => handleFileDownload(doc, node, provider),
     },
     {
       label: "Add to Context",
-      icon: "\uD83D\uDCCC",
+      icon: "pin",
       handler: () => addFileToContext(doc, node, provider),
     },
     ...(isDocxFile(node.name, node.mimeType)
       ? [
           {
             label: "Add to workspace as markdown",
-            icon: "\u2139\uFE0F",
+            icon: "info" as IconName,
             handler: () => convertAndImportDocx(doc, node, provider),
           },
         ]
@@ -1510,7 +1551,7 @@ function showRowDropdown(
         ? [
             {
               label: "Legacy .doc — Not supported",
-              icon: "\u26A0\uFE0F",
+              icon: "warning" as IconName,
               handler: () => {},
               disabled: true,
             },
@@ -1518,7 +1559,7 @@ function showRowDropdown(
         : []),
     {
       label: "Add to workspace",
-      icon: "\uD83D\uDCC2",
+      icon: "folder" as IconName,
       handler: () => importFileToWorkspace(doc, node, provider),
     },
   ];
@@ -1528,7 +1569,13 @@ function showRowDropdown(
       doc,
       `display: flex; align-items: center; gap: 8px; padding: 6px 12px; cursor: ${item.disabled ? "not-allowed" : "pointer"}; font-size: 12px; color: ${item.disabled ? "var(--text-tertiary)" : "var(--text-primary)"}; transition: background 0.1s;`,
     );
-    const iconSpan = span(doc, "font-size: 14px; flex-shrink: 0;", item.icon);
+    const iconSpan = span(
+      doc,
+      "font-size: 14px; flex-shrink: 0; display: inline-flex; align-items: center;",
+    );
+    iconSpan.appendChild(
+      createSvgIcon(doc, item.icon, { size: 14, strokeWidth: 1.7 }),
+    );
     itemRow.appendChild(iconSpan);
     const labelSpan = span(doc, "", item.label);
     itemRow.appendChild(labelSpan);
@@ -1807,7 +1854,7 @@ async function renderImagePreview(
             lastKnownModifiedTime: node.modifiedTime,
             extractedContent: `[Image: ${node.name}]`,
           });
-          btnEl.textContent = "\u2713";
+          btnEl.textContent = "Done";
           btnEl.style.color = "#188038";
           btnEl.style.borderColor = "#188038";
         } catch (err) {
@@ -1892,7 +1939,7 @@ async function renderDocxPreviewInPanel(
           lastKnownModifiedTime: node.modifiedTime,
           extractedContent: `[DOCX: ${node.name}]`,
         });
-        btnEl.textContent = "\u2713";
+        btnEl.textContent = "Done";
         btnEl.style.color = "#188038";
       } finally {
         setTimeout(() => {
@@ -1926,8 +1973,13 @@ function renderUnsupportedFile(
 
   const icon = div(
     doc,
-    "font-size: 48px; margin-bottom: 16px;",
-    getFileIcon(node.mimeType, false),
+    "font-size: 48px; margin-bottom: 16px; display: flex; align-items: center; justify-content: center;",
+  );
+  icon.appendChild(
+    createSvgIcon(doc, getFileIcon(node.mimeType, false), {
+      size: 40,
+      strokeWidth: 1.6,
+    }),
   );
   card.appendChild(icon);
 
@@ -1975,7 +2027,7 @@ function renderUnsupportedFile(
           `Imported from ${provider.name}`,
           "user",
         );
-        btn.textContent = "\u2713 Imported to workspace";
+        btn.textContent = "Imported to workspace";
         btn.style.background = "#188038";
         if (statusBar) {
           statusBar.textContent = `Imported "${node.name}" to workspace`;
@@ -2028,7 +2080,7 @@ function renderUnsupportedFile(
         }
 
         await IOUtils.write(fp.file, new Uint8Array(buffer));
-        btn.textContent = "\u2713 Downloaded";
+        btn.textContent = "Downloaded";
         btn.style.borderColor = "#188038";
         btn.style.color = "#188038";
       } catch (err: any) {
@@ -2263,7 +2315,7 @@ function renderEditorToolbar(doc: Document, tab: EditorFileTab): void {
             );
           }
           tab.isModified = false;
-          saveBtn.textContent = "\u2713 Saved to cloud";
+          saveBtn.textContent = "Saved to cloud";
           saveBtn.style.background = "#188038";
           refreshEditorToolbar(doc, tab, false);
         } catch (err: any) {
@@ -2346,7 +2398,7 @@ function renderEditorToolbar(doc: Document, tab: EditorFileTab): void {
           driveFileMetadata(contextData),
         );
         persistDriveContext(chatId, contextData);
-        btnEl.textContent = "\u2713";
+        btnEl.textContent = "Done";
         btnEl.style.color = "#188038";
         btnEl.style.borderColor = "#188038";
       } catch (err) {

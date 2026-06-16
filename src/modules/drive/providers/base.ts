@@ -1,9 +1,10 @@
 import { FileNode, CloudProviderId } from "../types";
+import type { IconName } from "../../chat/ui/icons";
 
 export interface CloudProvider {
   readonly id: CloudProviderId;
   readonly name: string;
-  readonly icon: string;
+  readonly icon: IconName;
   readonly brandColor: string;
 
   isLoggedIn(): boolean;

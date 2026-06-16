@@ -579,7 +579,7 @@ function showCopyFeedback(
     );
   } else {
     copyIcon.appendChild(
-      createSvgIcon(doc, "x", {
+      createSvgIcon(doc, "x-circle", {
         size: 10,
         strokeWidth: 1.8,
       }),

@@ -1,4 +1,5 @@
 import { CloudProvider } from "./base";
+import type { IconName } from "../../chat/ui/icons";
 import {
   FileNode,
   CloudProviderId,
@@ -55,7 +56,7 @@ const TEXT_MIME_TYPES = [
 export class GoogleDriveProvider implements CloudProvider {
   readonly id: CloudProviderId = "google";
   readonly name = "Google Drive";
-  readonly icon = "\u2601\uFE0F";
+  readonly icon: IconName = "cloud";
   readonly brandColor = "#4285F4";
 
   private authInProgress = false;

@@ -1,4 +1,5 @@
 import { CloudProvider } from "./base";
+import type { IconName } from "../../chat/ui/icons";
 import { FileNode, CloudProviderId } from "../types";
 import { config } from "../../../../package.json";
 import { stringToBase64 } from "../utils";
@@ -38,7 +39,7 @@ const TEXT_MIME_TYPES = [
 export class NextcloudProvider implements CloudProvider {
   readonly id: CloudProviderId = "nextcloud";
   readonly name = "Nextcloud";
-  readonly icon = "\uD83D\uDCBB";
+  readonly icon: IconName = "server";
   readonly brandColor = "#0082C9";
 
   getRedirectUri(): string {
