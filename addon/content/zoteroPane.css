@@ -359,6 +359,30 @@ html.dark .chip-tables {
   pointer-events: none;
 }
 
+.seerai-icon-button {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s ease;
+}
+
+.seerai-icon-button:hover {
+  background-color: var(--background-primary);
+  color: var(--text-primary);
+}
+
+.seerai-icon-button svg {
+  pointer-events: none;
+}
+
 /* Tab Bar Styles */
 .tab-bar {
   display: flex;
@@ -1207,4 +1231,23 @@ html.dark .prompt-picker-overlay {
 
 .sr-layout-narrow .sr-art {
   padding: 2px 3px !important;
+}
+
+/* Abstract section: prevent long PDF text from forcing horizontal overflow */
+.sr-abstract-section {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.sr-abstract-section > div {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.sr-screening-detail,
+.sr-article-detail-scroll {
+  min-width: 0;
+  max-width: 100%;
 }

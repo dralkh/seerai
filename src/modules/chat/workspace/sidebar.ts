@@ -18,6 +18,7 @@ import {
   convertDocxToMarkdown,
 } from "../../docxConverter";
 import { ChatContextManager } from "../context/contextManager";
+import { createIconButton } from "../ui/icons";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -1410,42 +1411,6 @@ function createTinyActionBtn(
     e.stopPropagation();
     action();
   });
-  return btn;
-}
-
-export function createIconButton(
-  doc: Document,
-  icon: string,
-  title: string,
-  onClick: () => void,
-): HTMLElement {
-  const btn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-  btn.textContent = icon;
-  btn.title = title;
-  btn.style.cssText = `
-    width: 22px;
-    height: 22px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 14px;
-    padding: 0;
-    transition: all 0.15s ease;
-  `;
-  btn.addEventListener("mouseenter", () => {
-    btn.style.backgroundColor = "var(--background-primary)";
-    btn.style.color = "var(--text-primary)";
-  });
-  btn.addEventListener("mouseleave", () => {
-    btn.style.backgroundColor = "transparent";
-    btn.style.color = "var(--text-secondary)";
-  });
-  btn.addEventListener("click", onClick);
   return btn;
 }
 

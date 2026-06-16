@@ -331,6 +331,61 @@ export async function executeSystematicReview(
         summary: `Started ${job.kind} job ${job.id}`,
       };
     }
+    case "run_evidence_analysis": {
+      selectProject(params.project_id);
+      const job = await service.startEvidenceAnalysisJob(
+        state,
+        params.paper_ids,
+      );
+      return {
+        success: true,
+        data: job,
+        summary: `Queued evidence analysis for ${job.paperIds.length} paper(s)`,
+      };
+    }
+    case "run_gap_analysis": {
+      selectProject(params.project_id);
+      const job = await service.startGapAnalysisJob(state, params.paper_ids);
+      return {
+        success: true,
+        data: job,
+        summary: `Queued full gap analysis for ${job.paperIds.length} paper(s)`,
+      };
+    }
+    case "retry_failed_extractions": {
+      selectProject(params.project_id);
+      const job = await service.startFailedExtractionRetry(state);
+      if (!job) {
+        return {
+          success: true,
+          data: null,
+          summary: "No papers with failed extractions to retry",
+        };
+      }
+      return {
+        success: true,
+        data: job,
+        summary: `Queued retry for ${job.paperIds.length} paper(s) with failed metrics`,
+      };
+    }
+    case "get_extraction_logs": {
+      selectProject(params.project_id);
+      const { collectPaperExtractionLog, getIncludedPapers } =
+        await import("../../systematicReview/extractionHealth");
+      const included = getIncludedPapers(state);
+      const targets = params.paper_id
+        ? included.filter((paper) => paper.id === params.paper_id)
+        : included;
+      const logs = targets.map((paper) => ({
+        paper_id: paper.id,
+        ...collectPaperExtractionLog(state, paper.id),
+      }));
+      return {
+        success: true,
+        data: logs,
+        summary: `Returned extraction logs for ${logs.length} paper(s)`,
+      };
+    }
     case "get_review_job": {
       selectProject(params.project_id);
       const job = state.reviewJobs.find(

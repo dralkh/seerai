@@ -7,8 +7,22 @@
  */
 
 import { convertDocxToMarkdown } from "../docxConverter";
-import { FRAMEWORK_DEFS } from "./types";
-import { ProtocolRevision, ReviewProtocol } from "./types";
+import {
+  FRAMEWORK_DEFS,
+  ProtocolDimension,
+  ProtocolRevision,
+  ReviewProtocol,
+  ExtractionTemplate,
+  LabelDefinition,
+  LlmChatCompletion,
+  ProtocolGenerationContext,
+  ProtocolGenerationResult,
+  ProtocolGenerationStep,
+  ScopeProposal,
+  EligibilityProposal,
+  MappingProposal,
+  ProtocolProvenance,
+} from "./types";
 import { openAIService } from "../openai";
 import { z } from "zod";
 import { modelConfidenceSchema } from "./modelOutput";
@@ -20,6 +34,11 @@ import {
   newEligibilityRule,
   validateProtocolRevision,
 } from "./protocol";
+import {
+  proposeExtractionTemplate,
+  proposeExtractionTemplateFromContext,
+} from "./extractionWorkflow";
+import type { ReviewCancellationSignal } from "./cancellation";
 
 export interface ExtractedDocument {
   fileName: string;
@@ -66,7 +85,7 @@ const KeywordsSchema = z.object({
     .max(20),
 });
 
-const GeneratedProtocolSchema = z.object({
+const ScopeStepSchema = z.object({
   researchQuestion: z.string(),
   framework: z.string(),
   frameworkReason: z.string(),
@@ -81,21 +100,37 @@ const GeneratedProtocolSchema = z.object({
       confidence: modelConfidenceSchema.optional(),
     }),
   ),
+});
+
+const EligibilityStepSchema = z.object({
   inclusionRules: z.array(z.string()).max(30),
   exclusionRules: z.array(z.string()).max(30),
   includeKeywordAids: z.array(z.string()).max(30),
   excludeKeywordAids: z.array(z.string()).max(30),
+  dimensionKeywordAids: z
+    .record(z.string(), z.array(z.string()).max(20))
+    .optional()
+    .default({}),
+});
+
+const MappingStepSchema = z.object({
+  evidenceLabels: z.record(z.string(), z.array(z.string()).max(20)),
 });
 
 async function callLLMForJSON(
   systemPrompt: string,
   userPrompt: string,
+  llm?: LlmChatCompletion,
 ): Promise<Record<string, unknown> | null> {
+  const chat = llm ?? openAIService.chatCompletion.bind(openAIService);
   try {
-    const content = await openAIService.chatCompletion([
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ]);
+    const content = await chat(
+      [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      { timeoutMs: 180000, isolated: true },
+    );
     if (!content) {
       throw new Error("AI returned empty response");
     }
@@ -220,12 +255,14 @@ function normalizeEvidenceText(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-export async function generateProtocolRevision(
+export async function proposeScope(
   documents: ExtractedDocument[],
-  protocol: ReviewProtocol,
-  evidenceLabels: { k: string; name: string }[],
-): Promise<ProtocolRevision> {
-  const current = getActiveProtocolRevision(protocol);
+  currentRevision: ProtocolRevision,
+  options?: {
+    llm?: LlmChatCompletion;
+    signal?: ReviewCancellationSignal;
+  },
+): Promise<ScopeProposal> {
   const sourceText = combineDocuments(documents);
   const frameworkList = Object.entries(FRAMEWORK_DEFS)
     .map(
@@ -235,68 +272,62 @@ export async function generateProtocolRevision(
           .join(", ")}`,
     )
     .join("\n");
-  const currentCriteria = current.dimensions
+  const currentCriteria = currentRevision.dimensions
     .map((dimension) => `${dimension.label}: ${dimension.value}`)
     .join("\n");
   const response = await callLLMForJSON(
-    "You design auditable systematic review protocols. Return valid JSON only. Select the framework that best matches the question rather than defaulting to PICO. Keywords are discovery and triage aids only and must never be described as screening decisions. Do not invent criteria. Ground document-derived fields with short verbatim quotes.",
-    `Create one coherent review protocol from all available sources.
+    "You design auditable systematic review protocols. Return valid JSON only. Select the framework that best matches the question rather than defaulting to PICO. Do not invent criteria. Ground document-derived fields with short verbatim quotes. Preserve useful current criteria when sources do not contradict them; you may replace or add values when sources suggest something better.",
+    `Step 1 of 4 — Scope (research question, framework, dimensions).
 
 Current research question:
-${current.researchQuestion || "(not set)"}
+${currentRevision.researchQuestion || "(not set)"}
 
-Current protocol:
-Framework: ${current.framework}
+Current framework: ${currentRevision.framework}
+Current criteria:
 ${currentCriteria || "(no criteria set)"}
 
 Supported frameworks:
 ${frameworkList}
 
-Available evidence labels for synthesis and gap-analysis mappings:
-${evidenceLabels.map((label) => `${label.k}=${label.name}`).join(", ")}
-
 Uploaded source documents:
 ${sourceText || "(none)"}
 
-Return:
-{"researchQuestion":string,"framework":string,"frameworkReason":string,"dimensions":[{"key":string,"value":string,"keywordAids":string[],"evidenceLabels":string[],"source"?:string,"quote"?:string,"confidence"?:number}],"inclusionRules":string[],"exclusionRules":string[],"includeKeywordAids":string[],"excludeKeywordAids":string[]}
+Return JSON with this exact shape:
+{"researchQuestion":string,"framework":string,"frameworkReason":string,"dimensions":[{"key":string,"value":string,"keywordAids":string[],"evidenceLabels":string[],"source"?:string,"quote"?:string,"confidence"?:number}]}
 
-Use only framework keys listed above. Preserve useful current criteria when sources do not contradict them. Return exactly one dimensions entry for every dimension in the selected framework. For every dimension, select all scientifically relevant evidence labels from the supplied keys. Use an empty evidenceLabels array only when none of the available categories is appropriate; never force an unrelated mapping.`,
+Use only framework keys listed above. Return exactly one dimensions entry for every dimension in the selected framework.`,
+    options?.llm,
   );
-  if (!response) throw new Error("AI returned no protocol");
-  const generated = GeneratedProtocolSchema.parse(response);
+  if (!response) throw new Error("AI returned no scope proposal");
+  const generated = ScopeStepSchema.parse(response);
   const framework = FRAMEWORK_DEFS[generated.framework]
     ? generated.framework
-    : current.framework;
+    : currentRevision.framework;
   const generatedByKey = new Map(
     generated.dimensions.map((dimension) => [dimension.key, dimension]),
   );
-  const allowedLabels = new Set(evidenceLabels.map((label) => label.k));
-  const dimensions = dimensionsForFramework(framework, current.dimensions).map(
-    (dimension) => {
-      const proposed = generatedByKey.get(dimension.key);
-      return {
-        ...dimension,
-        value: proposed?.value.trim() || dimension.value,
-        keywordAids: Array.from(
-          new Set(
-            (proposed?.keywordAids || dimension.keywordAids)
-              .map((keyword) => keyword.trim().toLowerCase())
-              .filter(Boolean),
-          ),
+  const dimensions: ProtocolDimension[] = dimensionsForFramework(
+    framework,
+    currentRevision.dimensions,
+  ).map((dimension) => {
+    const proposed = generatedByKey.get(dimension.key);
+    return {
+      ...dimension,
+      value: proposed?.value.trim() || dimension.value,
+      keywordAids: Array.from(
+        new Set(
+          (proposed?.keywordAids || dimension.keywordAids)
+            .map((keyword) => keyword.trim().toLowerCase())
+            .filter(Boolean),
         ),
-        evidenceLabels: Array.from(
-          new Set(
-            (proposed?.evidenceLabels || dimension.evidenceLabels).filter(
-              (label) => allowedLabels.has(label),
-            ),
-          ),
-        ),
-      };
-    },
-  );
+      ),
+      evidenceLabels: Array.from(
+        new Set(proposed?.evidenceLabels || dimension.evidenceLabels),
+      ),
+    };
+  });
   const normalizedSource = normalizeEvidenceText(sourceText);
-  const provenance = generated.dimensions
+  const provenance: ProtocolProvenance[] = generated.dimensions
     .filter(
       (dimension) =>
         dimension.quote &&
@@ -308,51 +339,304 @@ Use only framework keys listed above. Preserve useful current criteria when sour
       quote: dimension.quote,
       confidence: dimension.confidence,
     }));
-  const revision = createProtocolRevision({
-    actor: "model",
-    model: getActiveModelConfig()?.model || "configured model",
-    researchQuestion:
-      generated.researchQuestion.trim() || current.researchQuestion,
-    framework,
-    frameworkReason: generated.frameworkReason,
-    dimensions,
-    eligibilityRules: [
-      ...generated.inclusionRules
-        .map((text) => text.trim())
-        .filter(Boolean)
-        .map((text) => newEligibilityRule("include", text)),
-      ...generated.exclusionRules
-        .map((text) => text.trim())
-        .filter(Boolean)
-        .map((text) => newEligibilityRule("exclude", text)),
-    ],
-    includeKeywordAids: generated.includeKeywordAids,
-    excludeKeywordAids: generated.excludeKeywordAids,
-    provenance,
-    warnings: [],
-  });
-  revision.warnings = validateProtocolRevision(revision);
+  const warnings: string[] = [];
   const unverifiedQuotes = generated.dimensions.filter(
     (dimension) =>
       dimension.quote &&
       !normalizedSource.includes(normalizeEvidenceText(dimension.quote)),
   ).length;
   if (unverifiedQuotes > 0) {
-    revision.warnings.push(
+    warnings.push(
       `${unverifiedQuotes} model source quote${unverifiedQuotes === 1 ? " was" : "s were"} not found in uploaded documents`,
     );
   }
-  const unmappedDimensions = revision.dimensions.filter(
-    (dimension) => dimension.evidenceLabels.length === 0,
+  return {
+    researchQuestion: generated.researchQuestion.trim(),
+    framework,
+    frameworkReason: generated.frameworkReason,
+    dimensions,
+    warnings,
+    provenance,
+  };
+}
+
+export async function proposeEligibility(
+  scope: ScopeProposal,
+  documents: ExtractedDocument[],
+  currentRevision: ProtocolRevision,
+  options?: {
+    llm?: LlmChatCompletion;
+    signal?: ReviewCancellationSignal;
+  },
+): Promise<EligibilityProposal> {
+  const sourceText = combineDocuments(documents);
+  const criteriaList = scope.dimensions
+    .map(
+      (dimension) =>
+        `${dimension.key} · ${dimension.label}: ${dimension.value}`,
+    )
+    .join("\n");
+  const existingInclude = currentRevision.eligibilityRules
+    .filter((rule) => rule.type === "include")
+    .map((rule) => rule.text);
+  const existingExclude = currentRevision.eligibilityRules
+    .filter((rule) => rule.type === "exclude")
+    .map((rule) => rule.text);
+  const response = await callLLMForJSON(
+    "You design auditable systematic review eligibility criteria. Return valid JSON only. Use the supplied scope and source documents. Keep existing rules that are still well supported; you may add, remove, or rewrite rules when documents warrant it.",
+    `Step 2 of 4 — Eligibility (inclusion/exclusion rules and keyword aids).
+
+Research question: ${scope.researchQuestion}
+Framework: ${scope.framework}
+
+Scope criteria:
+${criteriaList}
+
+Existing inclusion rules:
+${existingInclude.length ? existingInclude.map((text) => `- ${text}`).join("\n") : "(none)"}
+
+Existing exclusion rules:
+${existingExclude.length ? existingExclude.map((text) => `- ${text}`).join("\n") : "(none)"}
+
+Existing include keyword aids: ${currentRevision.includeKeywordAids.join(", ") || "(none)"}
+Existing exclude keyword aids: ${currentRevision.excludeKeywordAids.join(", ") || "(none)"}
+
+Uploaded source documents:
+${sourceText || "(none)"}
+
+Return JSON:
+{"inclusionRules":string[],"exclusionRules":string[],"includeKeywordAids":string[],"excludeKeywordAids":string[],"dimensionKeywordAids":{"<dimensionKey>":string[]}}`,
+    options?.llm,
   );
-  if (evidenceLabels.length > 0 && unmappedDimensions.length > 0) {
-    revision.warnings.push(
-      `No relevant evidence mapping was selected for: ${unmappedDimensions
-        .map((dimension) => dimension.label)
-        .join(", ")}`,
+  if (!response) throw new Error("AI returned no eligibility proposal");
+  const generated = EligibilityStepSchema.parse(response);
+  return {
+    inclusionRules: generated.inclusionRules
+      .map((text) => text.trim())
+      .filter(Boolean),
+    exclusionRules: generated.exclusionRules
+      .map((text) => text.trim())
+      .filter(Boolean),
+    includeKeywordAids: generated.includeKeywordAids
+      .map((keyword) => keyword.trim().toLowerCase())
+      .filter(Boolean),
+    excludeKeywordAids: generated.excludeKeywordAids
+      .map((keyword) => keyword.trim().toLowerCase())
+      .filter(Boolean),
+    dimensionKeywordAids: Object.fromEntries(
+      Object.entries(generated.dimensionKeywordAids).map(([key, values]) => [
+        key,
+        values.map((value) => value.trim().toLowerCase()).filter(Boolean),
+      ]),
+    ),
+  };
+}
+
+export async function proposeEvidenceMapping(
+  scope: ScopeProposal,
+  eligibility: EligibilityProposal,
+  documents: ExtractedDocument[],
+  labelDefs: LabelDefinition[],
+  currentRevision: ProtocolRevision,
+  options?: {
+    llm?: LlmChatCompletion;
+    signal?: ReviewCancellationSignal;
+  },
+): Promise<MappingProposal> {
+  const sourceText = combineDocuments(documents);
+  const allowedLabels = labelDefs
+    .map((definition) => `${definition.k}=${definition.name}`)
+    .join(", ");
+  const existing = Object.fromEntries(
+    currentRevision.dimensions.map((dimension) => [
+      dimension.key,
+      dimension.evidenceLabels,
+    ]),
+  );
+  const response = await callLLMForJSON(
+    "You connect each protocol dimension to evidence categories used by synthesis and gap analysis. Return valid JSON only. Pick only from the supplied label keys. Keep existing mappings that are still well supported; you may add or remove mappings when documents warrant it.",
+    `Step 3 of 4 — Evidence mapping.
+
+Research question: ${scope.researchQuestion}
+Framework: ${scope.framework}
+
+Scope criteria:
+${scope.dimensions
+  .map(
+    (dimension) => `${dimension.key} · ${dimension.label}: ${dimension.value}`,
+  )
+  .join("\n")}
+
+Eligibility rules:
+${
+  [...eligibility.inclusionRules, ...eligibility.exclusionRules]
+    .map((rule) => `- ${rule}`)
+    .join("\n") || "(none)"
+}
+
+Available evidence labels (use these keys only):
+${allowedLabels || "(none configured)"}
+
+Existing per-dimension mappings:
+${Object.entries(existing)
+  .map(([key, values]) => `${key}: ${values.join(", ") || "(none)"}`)
+  .join("\n")}
+
+Uploaded source documents:
+${sourceText || "(none)"}
+
+Return JSON:
+{"evidenceLabels":{"<dimensionKey>":["labelKey1","labelKey2"]}}`,
+    options?.llm,
+  );
+  if (!response) throw new Error("AI returned no evidence mapping");
+  const generated = MappingStepSchema.parse(response);
+  const allowed = new Set(labelDefs.map((definition) => definition.k));
+  const filtered: Record<string, string[]> = {};
+  for (const [key, values] of Object.entries(generated.evidenceLabels)) {
+    filtered[key] = Array.from(
+      new Set(values.filter((value) => allowed.has(value))),
     );
   }
-  return revision;
+  return { evidenceLabels: filtered };
+}
+
+export interface RunProtocolGenerationInput {
+  documents: ExtractedDocument[];
+  baselineRevision?: ProtocolRevision;
+  baselineTemplate?: ExtractionTemplate;
+  labelDefs: LabelDefinition[];
+  space: { protocol: ReviewProtocol };
+  onStep?: (
+    step: ProtocolGenerationStep,
+    result: ProtocolGenerationResult,
+  ) => void;
+  options?: { llm?: LlmChatCompletion; signal?: ReviewCancellationSignal };
+}
+
+export async function runProtocolGeneration(
+  input: RunProtocolGenerationInput,
+): Promise<ProtocolGenerationResult> {
+  const { documents, baselineTemplate, labelDefs, space, onStep, options } =
+    input;
+  const baselineRevision =
+    input.baselineRevision ?? getActiveProtocolRevision(space.protocol);
+  const result: ProtocolGenerationResult = {
+    scope: {
+      researchQuestion: baselineRevision.researchQuestion,
+      framework: baselineRevision.framework,
+      frameworkReason: baselineRevision.frameworkReason || "",
+      dimensions: baselineRevision.dimensions,
+      warnings: [],
+      provenance: [],
+    },
+    eligibility: {
+      inclusionRules: baselineRevision.eligibilityRules
+        .filter((rule) => rule.type === "include")
+        .map((rule) => rule.text),
+      exclusionRules: baselineRevision.eligibilityRules
+        .filter((rule) => rule.type === "exclude")
+        .map((rule) => rule.text),
+      includeKeywordAids: [...baselineRevision.includeKeywordAids],
+      excludeKeywordAids: [...baselineRevision.excludeKeywordAids],
+      dimensionKeywordAids: Object.fromEntries(
+        baselineRevision.dimensions.map((dimension) => [
+          dimension.key,
+          [...dimension.keywordAids],
+        ]),
+      ),
+    },
+    mapping: {
+      evidenceLabels: Object.fromEntries(
+        baselineRevision.dimensions.map((dimension) => [
+          dimension.key,
+          [...dimension.evidenceLabels],
+        ]),
+      ),
+    },
+    template: baselineTemplate || emptyExtractionTemplate(baselineRevision),
+    summary: {},
+    errors: {},
+  };
+  try {
+    result.scope = await proposeScope(documents, baselineRevision, options);
+    result.summary.scope = `${result.scope.framework} · ${result.scope.dimensions.length} dimensions`;
+    onStep?.("scope", result);
+  } catch (error) {
+    result.errors.scope =
+      error instanceof Error ? error.message : String(error);
+    onStep?.("scope", result);
+  }
+  try {
+    result.eligibility = await proposeEligibility(
+      result.scope,
+      documents,
+      baselineRevision,
+      options,
+    );
+    result.summary.eligibility = `${result.eligibility.inclusionRules.length} include · ${result.eligibility.exclusionRules.length} exclude`;
+    onStep?.("eligibility", result);
+  } catch (error) {
+    result.errors.eligibility =
+      error instanceof Error ? error.message : String(error);
+    onStep?.("eligibility", result);
+  }
+  try {
+    result.mapping = await proposeEvidenceMapping(
+      result.scope,
+      result.eligibility,
+      documents,
+      labelDefs,
+      baselineRevision,
+      options,
+    );
+    const labelCount = Object.values(result.mapping.evidenceLabels).reduce(
+      (sum, values) => sum + values.length,
+      0,
+    );
+    result.summary.mapping = `${labelCount} label mapping${labelCount === 1 ? "" : "s"}`;
+    onStep?.("mapping", result);
+  } catch (error) {
+    result.errors.mapping =
+      error instanceof Error ? error.message : String(error);
+    onStep?.("mapping", result);
+  }
+  try {
+    result.template = await proposeExtractionTemplateFromContext(
+      result.scope,
+      result.eligibility,
+      result.mapping,
+      documents,
+      baselineTemplate,
+      baselineRevision.id,
+      options,
+    );
+    result.summary.template = `${result.template.outcomes.length} outcome${result.template.outcomes.length === 1 ? "" : "s"}`;
+    onStep?.("template", result);
+  } catch (error) {
+    result.errors.template =
+      error instanceof Error ? error.message : String(error);
+    onStep?.("template", result);
+  }
+  return result;
+}
+
+function emptyExtractionTemplate(
+  baselineRevision: ProtocolRevision,
+): ExtractionTemplate {
+  const now = new Date().toISOString();
+  return {
+    id: `template_${Date.now()}`,
+    revisionId: `template_${Date.now()}_r1`,
+    protocolRevisionId: baselineRevision.id,
+    name: "Extraction template",
+    instructions: "",
+    outcomes: [],
+    status: "draft",
+    source: "user",
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 export async function analyzeDocuments(

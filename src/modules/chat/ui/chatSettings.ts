@@ -10,6 +10,9 @@ import { TOOL_NAMES } from "../tools/toolTypes";
 import { isTtsConfigured } from "./messageRenderer";
 import { getEmbeddingService } from "../rag/embeddingService";
 import { getRAGConfig } from "../rag/retrievalEngine";
+import { createSvgIcon, setButtonIcon, type IconName } from "./icons";
+
+const HTML_NS = "http://www.w3.org/1999/xhtml";
 
 export interface ChatSettingsOptions {
   onModeChange?: (mode: "lock" | "default" | "explore") => void;
@@ -394,9 +397,24 @@ export function showChatSettings(
   });
 
   const modes = [
-    { value: "lock", label: "🔒", title: "Lock: Manual only" },
-    { value: "default", label: "📌", title: "Focus: Single item" },
-    { value: "explore", label: "📚", title: "Explore: Additive" },
+    {
+      value: "lock",
+      label: "Lock",
+      icon: "lock" as IconName,
+      title: "Lock: Manual only",
+    },
+    {
+      value: "default",
+      label: "Focus",
+      icon: "target" as IconName,
+      title: "Focus: Single item",
+    },
+    {
+      value: "explore",
+      label: "Explore",
+      icon: "explore" as IconName,
+      title: "Explore: Additive",
+    },
   ];
 
   modes.forEach((m) => {
@@ -409,8 +427,17 @@ export function showChatSettings(
       cursor: "pointer",
       borderRadius: "3px",
       transition: "background 0.2s",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: "4px",
     });
-    btn.innerText = m.label;
+    btn.replaceChildren(
+      createSvgIcon(doc, m.icon, { size: 13, strokeWidth: 1.7 }),
+    );
+    const lbl = doc.createElementNS(HTML_NS, "span");
+    lbl.textContent = m.label;
+    btn.appendChild(lbl);
     btn.title = m.title;
 
     if (m.value === currentMode) {
@@ -1010,9 +1037,11 @@ export function showChatSettings(
   const permLabel = doc.createElement("div");
   permLabel.innerText = "Tool Permissions";
   const permIcon = doc.createElement("span");
-  permIcon.innerText = "▶"; // Collapsed state
-  permIcon.style.fontSize = "8px";
-  permIcon.style.transition = "transform 0.2s";
+  permIcon.style.cssText =
+    "display: inline-flex; align-items: center; transition: transform 0.2s;";
+  permIcon.appendChild(
+    createSvgIcon(doc, "chevron-right", { size: 10, strokeWidth: 1.8 }),
+  );
 
   permHeader.appendChild(permLabel);
   permHeader.appendChild(permIcon);
@@ -1066,7 +1095,12 @@ export function showChatSettings(
     padding: "0 2px",
   });
 
-  const createBulkBtn = (label: string, mode: string, title: string) => {
+  const createBulkBtn = (
+    label: string,
+    mode: string,
+    title: string,
+    icon: IconName,
+  ) => {
     const btn = doc.createElement("div");
     Object.assign(btn.style, {
       fontSize: "10px",
@@ -1076,8 +1110,14 @@ export function showChatSettings(
       backgroundColor: "var(--background-secondary)",
       border: "1px solid var(--border-primary)",
       color: "var(--text-primary)",
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "4px",
     });
-    btn.innerText = label;
+    btn.appendChild(createSvgIcon(doc, icon, { size: 11, strokeWidth: 1.7 }));
+    const lbl = doc.createElementNS(HTML_NS, "span");
+    lbl.textContent = label;
+    btn.appendChild(lbl);
     btn.title = title;
 
     btn.onmouseover = () =>
@@ -1103,13 +1143,13 @@ export function showChatSettings(
   };
 
   bulkContainer.appendChild(
-    createBulkBtn("✅ All", "allow", "Allow All Tools"),
+    createBulkBtn("All", "allow", "Allow All Tools", "check-circle"),
   );
   bulkContainer.appendChild(
-    createBulkBtn("❓ All", "ask", "Ask for All Tools"),
+    createBulkBtn("All", "ask", "Ask for All Tools", "help"),
   );
   bulkContainer.appendChild(
-    createBulkBtn("⛔ All", "deny", "Disable All Tools"),
+    createBulkBtn("All", "deny", "Disable All Tools", "block"),
   );
   permList.appendChild(bulkContainer);
 
@@ -1154,16 +1194,13 @@ export function showChatSettings(
 
       const updateStatusIcon = (p: string) => {
         if (p === "allow") {
-          statusBtn.innerText = "✅";
-          statusBtn.title = "Allowed";
+          setButtonIcon(statusBtn, "check-circle", "Allowed", 12);
           statusBtn.style.opacity = "1";
         } else if (p === "ask") {
-          statusBtn.innerText = "❓";
-          statusBtn.title = "Ask Me";
+          setButtonIcon(statusBtn, "help", "Ask Me", 12);
           statusBtn.style.opacity = "0.8";
         } else {
-          statusBtn.innerText = "⛔";
-          statusBtn.title = "Disabled";
+          setButtonIcon(statusBtn, "block", "Disabled", 12);
           statusBtn.style.opacity = "0.6";
         }
       };
@@ -1173,6 +1210,9 @@ export function showChatSettings(
       statusBtn.style.fontSize = "12px";
       statusBtn.style.width = "20px";
       statusBtn.style.textAlign = "center";
+      statusBtn.style.display = "inline-flex";
+      statusBtn.style.alignItems = "center";
+      statusBtn.style.justifyContent = "center";
 
       // Cycle Click Handler
       statusBtn.addEventListener("click", (e) => {

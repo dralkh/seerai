@@ -207,7 +207,10 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
     if (!addToSRMenu) {
       addToSRMenu = win.document.createXULElement("menuitem") as XUL.MenuItem;
       addToSRMenu.setAttribute("id", addToSRMenuId);
-      addToSRMenu.setAttribute("label", "Add Paper to Systematic Review");
+      addToSRMenu.setAttribute(
+        "label",
+        "Add Selected Paper(s) to Systematic Review",
+      );
       addToSRMenu.setAttribute("class", "menuitem-iconic");
       addToSRMenu.addEventListener("command", async () => {
         const items = Zotero.getActiveZoteroPane().getSelectedItems();

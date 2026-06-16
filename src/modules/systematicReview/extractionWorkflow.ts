@@ -9,6 +9,11 @@ import {
   ExtractionOutcomeDefinition,
   ExtractionRow,
   ExtractionTemplate,
+  LlmChatCompletion,
+  ProtocolRevision,
+  ScopeProposal,
+  EligibilityProposal,
+  MappingProposal,
   SystematicReviewPaper,
   SystematicReviewSpace,
 } from "./types";
@@ -16,6 +21,7 @@ import {
   getReviewSourceDocument,
   ReviewSourceSummary,
 } from "./reviewSourceService";
+import type { ExtractedDocument } from "./documentAnalyzer";
 
 const TemplateProposalSchema = z.object({
   name: z.string().min(1),
@@ -129,6 +135,115 @@ Return:
     id,
     revisionId: `${id}_r1`,
     protocolRevisionId: revision.id,
+    name: parsed.name,
+    instructions: parsed.instructions,
+    outcomes,
+    status: "draft",
+    source: "model",
+    model: getActiveModelConfig()?.model || "configured model",
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export async function proposeExtractionTemplateFromContext(
+  scope: ScopeProposal,
+  eligibility: EligibilityProposal,
+  mapping: MappingProposal,
+  documents: ExtractedDocument[],
+  baselineTemplate: ExtractionTemplate | undefined,
+  protocolRevisionId: string,
+  options?: {
+    llm?: LlmChatCompletion;
+    signal?: ReviewCancellationSignal;
+    instructions?: string;
+  },
+): Promise<ExtractionTemplate> {
+  const sourceText = documents
+    .filter((doc) => !doc.error)
+    .map((doc) => `=== ${doc.fileName} ===\n${doc.text}`)
+    .join("\n\n");
+  const dimensions = scope.dimensions
+    .map(
+      (dimension) =>
+        `${dimension.key} · ${dimension.label}: ${dimension.value || "not specified"}`,
+    )
+    .join("\n");
+  const rules = [
+    ...eligibility.inclusionRules.map((text) => `include: ${text}`),
+    ...eligibility.exclusionRules.map((text) => `exclude: ${text}`),
+  ].join("\n");
+  const mappings = Object.entries(mapping.evidenceLabels)
+    .map(
+      ([key, values]) =>
+        `${key}: ${values.length ? values.join(", ") : "(no mapping)"}`,
+    )
+    .join("\n");
+  const baselineSummary = baselineTemplate
+    ? `Existing template has ${baselineTemplate.outcomes.length} outcome(s): ${baselineTemplate.outcomes
+        .map((outcome) => outcome.name)
+        .join(", ")}`
+    : "No existing template.";
+  const response = await (
+    options?.llm ?? openAIService.chatCompletion.bind(openAIService)
+  )(
+    [
+      {
+        role: "system",
+        content:
+          "You design practical systematic-review extraction templates. Return one JSON object only. Define outcomes that can be applied consistently across included studies. Use the full protocol context to produce rich outcome definitions (name, aliases, description, measures, timepoints, unit, direction, required). Preserve existing outcomes that remain well supported; add new outcomes, measures, or timepoints when the context warrants it. Do not invent outcome values or study results.",
+      },
+      {
+        role: "user",
+        content: `Step 4 of 4 — Extraction template.
+
+Research question: ${scope.researchQuestion}
+Framework: ${scope.framework}
+
+Scope criteria:
+${dimensions}
+
+Eligibility rules:
+${rules || "(none)"}
+
+Evidence mappings:
+${mappings || "(none)"}
+
+${baselineSummary}
+
+Reviewer instructions:
+${options?.instructions || "None"}
+
+Uploaded source documents (excerpts):
+${sourceText ? sourceText.substring(0, 60000) : "(none)"}
+
+Return JSON with this exact shape:
+{"name":string,"instructions":string,"outcomes":[{"name":string,"aliases":string[],"description":string,"measures":("OR"|"RR"|"HR"|"MD"|"SMD")[],"timepoints":string[],"unit"?:string,"direction"?:("higher_better"|"lower_better"),"required":boolean}]}`,
+      },
+    ],
+    { signal: options?.signal, timeoutMs: 180000, isolated: true },
+  );
+  if (options?.signal?.aborted) {
+    throw new Error("Request was cancelled");
+  }
+  const parsed = TemplateProposalSchema.parse(parseJSON(response));
+  const now = new Date().toISOString();
+  const baseId = baselineTemplate?.id || `template_${Date.now()}`;
+  const baseRevision = baselineTemplate
+    ? `${baseId}_r${
+        (Number(baselineTemplate.revisionId.match(/_r(\d+)$/)?.[1]) || 0) + 1
+      }`
+    : `${baseId}_r1`;
+  const outcomes: ExtractionOutcomeDefinition[] = parsed.outcomes.map(
+    (outcome, index) => ({
+      ...outcome,
+      id: `outcome_${stablePart(outcome.name) || index + 1}_${index + 1}`,
+    }),
+  );
+  return {
+    id: baseRevision,
+    revisionId: baseRevision,
+    protocolRevisionId,
     name: parsed.name,
     instructions: parsed.instructions,
     outcomes,

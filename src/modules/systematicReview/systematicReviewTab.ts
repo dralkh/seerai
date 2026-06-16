@@ -22,6 +22,8 @@ import {
   ProtocolRevision,
   SRFolderConfig,
   ZoteroCollectionTreeNode,
+  ProtocolGenerationResult,
+  ProtocolGenerationStep,
 } from "./types";
 import { getSRStore } from "./store";
 import { getSRService } from "./service";
@@ -31,13 +33,17 @@ import {
   validateExtractionRow,
 } from "./scientific";
 import { calculateKeywordConfidence } from "./modelOutput";
-import { ICONS, createSvgIcon, createSvgButton } from "./utils";
+import {
+  ICONS,
+  createSvgIcon,
+  createSvgButton,
+  generateSourceLabel,
+} from "./utils";
 import {
   extractDocumentContent,
   analyzeDocuments,
   AnalysisProgress,
   ExtractedDocument,
-  generateProtocolRevision,
 } from "./documentAnalyzer";
 import { ChatContextManager } from "../chat/context/contextManager";
 import {
@@ -49,8 +55,12 @@ import {
 import {
   applyProtocolPreset,
   deleteProtocolPreset,
+  importProtocolPreset,
   loadProtocolPresets,
+  parseProtocolPresetJson,
+  protocolPresetToJson,
   ProtocolPreset,
+  revisionToProtocolPreset,
   saveProtocolPreset,
 } from "./protocolPresets";
 import {
@@ -58,9 +68,28 @@ import {
   discoverZoteroCollectionTree,
   sourceConfigFromCollection,
 } from "./sources";
+import {
+  collectPaperExtractionLog,
+  getIncludedPapers,
+  getPapersNeedingExtraction,
+  getPapersWithFailedExtractions,
+  hasFailedExtractionMetrics,
+} from "./extractionHealth";
+import {
+  findSameTitleNoteAbstract,
+  resolveItemAbstract,
+} from "./reviewSourceService";
+import { ReviewCancellationController } from "./cancellation";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 const SVG_NS = "http://www.w3.org/2000/svg";
+const SR_SIDEBAR_MIN_WIDTH = 160;
+const SR_SIDEBAR_COLLAPSED_WIDTH = 30;
+const SR_SIDEBAR_MAX_WIDTH = 500;
+const SR_AUTO_COLLAPSE_THRESHOLD = 480;
+const SR_FILTERS_AUTO_COLLAPSE_THRESHOLD = 400;
+const SR_ARTICLE_LIST_AUTO_COLLAPSE_THRESHOLD = 320;
+const SR_RESERVED_FOR_CONTENT = 360;
 
 function appendToBody(doc: Document, el: HTMLElement): void {
   const target = doc.body || doc.documentElement;
@@ -139,6 +168,7 @@ let quickSkip = false;
 let showNote = false;
 let showReason = false;
 let showLabelRow = false;
+let showSourceLabelRow = false;
 let kwFilterActive = false;
 let kwFilterKeyword: string | null = null;
 let evTab: "overview" | "ai" = "overview";
@@ -160,18 +190,30 @@ const filterOpen: Set<string> = new Set([
 let currentPanel: SRSubTab = "screening";
 let picoLabelMap: Record<string, string[]> = {};
 let sidebarCollapsed = false;
+let sidebarAutoCollapsed = false;
+let sidebarUserTouched = false;
 let filtersCollapsed = false;
+let filtersAutoCollapsed = false;
+let filtersUserTouched = false;
+let articleListAutoCollapsed = false;
+let articleListUserTouched = false;
 let reviewSidebarWidth = 210;
 let reviewArticleListWidth = 260;
 let reviewFiltersWidth = 200;
 let articleListCollapsed = false;
 let refreshReviewLayout: (() => void) | null = null;
 let lastReviewLayoutWidth = 0;
+let reviewLayoutRafPending = false;
 
 interface ItemMeta {
   id: number;
   title: string;
   abstract: string;
+  abstractSource: "field" | "same_title_note" | "pdf" | "notes" | "none";
+  abstractNoteIds: number[];
+  abstractAttachmentId?: number;
+  abstractPending: boolean;
+  abstractFallback?: boolean;
   year: string;
   authors: string;
   journal: string;
@@ -180,16 +222,49 @@ interface ItemMeta {
   creators: any[];
 }
 const itemMetaCache: Map<number, ItemMeta> = new Map();
+const itemAbstractInflight: Map<number, Promise<void>> = new Map();
 
 function cacheItemMeta(id: number): ItemMeta {
   let m = itemMetaCache.get(id);
   if (m) return m;
   const zItem = Zotero.Items.get(id);
   const creators = zItem ? zItem.getCreators() : [];
+  const fieldAbstract =
+    (zItem ? (zItem.getField("abstractNote") as string) : "") || "";
+  let abstract = fieldAbstract;
+  let abstractSource: ItemMeta["abstractSource"] = fieldAbstract
+    ? "field"
+    : "none";
+  let abstractNoteIds: number[] = [];
+  let abstractAttachmentId: number | undefined;
+  let abstractPending = false;
+  if (!abstract && zItem) {
+    const noteHit = findSameTitleNoteAbstract(zItem);
+    if (noteHit.matched) {
+      abstract = noteHit.text;
+      abstractSource = "same_title_note";
+      abstractNoteIds = noteHit.noteIds;
+    }
+  }
+  if (!abstract && zItem) {
+    const attachmentIds = zItem.getAttachments();
+    for (const attId of attachmentIds) {
+      const att = Zotero.Items.get(attId);
+      if (att && att.attachmentContentType === "application/pdf") {
+        abstractAttachmentId = attId;
+        abstractPending = true;
+        break;
+      }
+    }
+  }
   m = {
     id,
     title: (zItem ? (zItem.getField("title") as string) : "") || "",
-    abstract: (zItem ? (zItem.getField("abstractNote") as string) : "") || "",
+    abstract,
+    abstractSource,
+    abstractNoteIds,
+    abstractAttachmentId,
+    abstractPending,
     year: (zItem ? (zItem.getField("year") as string) : "") || "",
     authors: creators
       .map((c: any) => c.lastName || c.name || "")
@@ -207,6 +282,73 @@ function cacheItemMeta(id: number): ItemMeta {
 
 function getItemMeta(id: number): ItemMeta {
   return itemMetaCache.get(id) || cacheItemMeta(id);
+}
+
+function applyAbstractResolution(
+  id: number,
+  resolution: {
+    text: string;
+    kind: ItemMeta["abstractSource"];
+    noteIds: number[];
+    attachmentId?: number;
+    fallback?: boolean;
+  },
+): boolean {
+  const m = itemMetaCache.get(id);
+  if (!m) return false;
+  if (resolution.text && resolution.kind !== "none") {
+    m.abstract = resolution.text;
+    m.abstractSource = resolution.kind;
+    m.abstractNoteIds = resolution.noteIds;
+    m.abstractAttachmentId = resolution.attachmentId;
+    m.abstractPending = false;
+    m.abstractFallback = resolution.fallback;
+    return true;
+  }
+  m.abstractPending = false;
+  return false;
+}
+
+async function enrichItemAbstractFromPdf(id: number): Promise<void> {
+  if (itemAbstractInflight.has(id)) {
+    return itemAbstractInflight.get(id);
+  }
+  const promise = (async () => {
+    const m = itemMetaCache.get(id);
+    if (!m) return;
+    if (!m.abstractPending) return;
+    const zItem = Zotero.Items.get(id);
+    if (!zItem) return;
+    const controller = new ReviewCancellationController();
+    try {
+      const resolution = await resolveItemAbstract(zItem, controller.signal);
+      if (controller.signal.aborted) return;
+      const changed = applyAbstractResolution(id, resolution);
+      if (changed) {
+        notifyAbstractResolved(id);
+      }
+    } catch (err) {
+      Zotero.debug(
+        `[seerai] review tab: abstract fallback failed for ${id}: ${err}`,
+      );
+      const cached = itemMetaCache.get(id);
+      if (cached) cached.abstractPending = false;
+    } finally {
+      itemAbstractInflight.delete(id);
+    }
+  })();
+  itemAbstractInflight.set(id, promise);
+  return promise;
+}
+
+function warmItemAbstracts(ids: number[]): void {
+  for (const id of ids) {
+    if (!itemMetaCache.has(id)) cacheItemMeta(id);
+    const m = itemMetaCache.get(id);
+    if (m?.abstractPending && !itemAbstractInflight.has(id)) {
+      enrichItemAbstractFromPdf(id).catch(() => undefined);
+    }
+  }
 }
 
 function getPaperSources(
@@ -237,6 +379,25 @@ function warmItemCache(ids: number[]): void {
   for (const id of ids) {
     if (!itemMetaCache.has(id)) cacheItemMeta(id);
   }
+  warmItemAbstracts(ids);
+}
+
+type AbstractListener = (id: number) => void;
+const abstractListeners: Set<AbstractListener> = new Set();
+
+function onAbstractResolved(listener: AbstractListener): () => void {
+  abstractListeners.add(listener);
+  return () => abstractListeners.delete(listener);
+}
+
+function notifyAbstractResolved(id: number): void {
+  for (const listener of abstractListeners) {
+    try {
+      listener(id);
+    } catch (err) {
+      Zotero.debug(`[seerai] review tab abstract listener error: ${err}`);
+    }
+  }
 }
 
 function invalidateItemCache(id?: number): void {
@@ -245,6 +406,28 @@ function invalidateItemCache(id?: number): void {
   } else {
     itemMetaCache.clear();
   }
+}
+
+function selectItemInZotero(itemId: number): void {
+  try {
+    const tabs = ztoolkit.getGlobal("Zotero_Tabs");
+    if (tabs && typeof tabs.select === "function") {
+      tabs.select("zotero-pane");
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const zp = ztoolkit.getGlobal("ZoteroPane");
+    if (zp && typeof zp.selectItem === "function") {
+      zp.selectItem(itemId);
+      return;
+    }
+  } catch {
+    // ignore
+  }
+  const zp2 = Zotero.getActiveZoteroPane();
+  if (zp2) zp2.selectItem(itemId);
 }
 
 const labelHierarchy: Record<string, { labels: string[] }> = {
@@ -295,6 +478,116 @@ function saveSRState(): void {
   if (!currentState) return;
   persistFilterUIState();
   getSRService().save(currentState);
+}
+interface ResponsiveSizes {
+  autoCollapseSidebar: boolean;
+  autoCollapseFilters: boolean;
+  autoCollapseArticleList: boolean;
+  sidebarWidth: number;
+  sidebarMinWidth: number;
+  articleListWidth: number;
+  articleListMinWidth: number;
+  filtersWidth: number;
+  filtersMinWidth: number;
+}
+
+function computeResponsiveSizes(outerWidth: number): ResponsiveSizes {
+  const autoCollapseSidebar =
+    !sidebarCollapsed &&
+    !sidebarUserTouched &&
+    outerWidth < SR_AUTO_COLLAPSE_THRESHOLD;
+  const effectiveCollapsed = sidebarCollapsed || autoCollapseSidebar;
+
+  let sidebarWidth: number;
+  let sidebarMinWidth: number;
+  if (effectiveCollapsed) {
+    sidebarWidth = SR_SIDEBAR_COLLAPSED_WIDTH;
+    sidebarMinWidth = SR_SIDEBAR_COLLAPSED_WIDTH;
+  } else {
+    sidebarWidth = Math.max(
+      SR_SIDEBAR_MIN_WIDTH,
+      Math.min(reviewSidebarWidth, outerWidth - SR_RESERVED_FOR_CONTENT),
+    );
+    sidebarMinWidth = SR_SIDEBAR_MIN_WIDTH;
+  }
+
+  const contentWidth = Math.max(0, outerWidth - sidebarWidth - 5);
+  const autoCollapseFilters =
+    !filtersCollapsed &&
+    !filtersUserTouched &&
+    contentWidth < SR_FILTERS_AUTO_COLLAPSE_THRESHOLD;
+  const effectiveFiltersCollapsed = filtersCollapsed || autoCollapseFilters;
+
+  const autoCollapseArticleList =
+    !articleListCollapsed &&
+    !articleListUserTouched &&
+    contentWidth < SR_ARTICLE_LIST_AUTO_COLLAPSE_THRESHOLD;
+  const effectiveArticleListCollapsed =
+    articleListCollapsed || autoCollapseArticleList;
+
+  const detailMinimum = contentWidth < 560 ? 120 : 260;
+  const listMinimum = contentWidth < 400 ? 60 : contentWidth < 560 ? 84 : 100;
+  const filterMinimum = contentWidth < 400 ? 60 : 80;
+  const articleListCollapsedWidth = 32;
+  const filterCollapsedWidth = 30;
+  const filterRequested = effectiveFiltersCollapsed
+    ? filterCollapsedWidth
+    : reviewFiltersWidth;
+  const listRequested = effectiveArticleListCollapsed
+    ? articleListCollapsedWidth
+    : reviewArticleListWidth;
+  const sideBudget = Math.max(
+    (effectiveArticleListCollapsed ? articleListCollapsedWidth : listMinimum) +
+      (effectiveFiltersCollapsed ? filterCollapsedWidth : filterMinimum),
+    contentWidth - detailMinimum - 8,
+  );
+  let responsiveListWidth = listRequested;
+  let responsiveFilterWidth = filterRequested;
+  const requestedTotal = responsiveListWidth + responsiveFilterWidth;
+  if (requestedTotal > sideBudget && requestedTotal > 0) {
+    const reducibleList = Math.max(
+      0,
+      responsiveListWidth -
+        (effectiveArticleListCollapsed
+          ? articleListCollapsedWidth
+          : listMinimum),
+    );
+    const reducibleFilter = Math.max(
+      0,
+      responsiveFilterWidth -
+        (effectiveFiltersCollapsed ? filterCollapsedWidth : filterMinimum),
+    );
+    const reducibleTotal = reducibleList + reducibleFilter;
+    const reduction = requestedTotal - sideBudget;
+    if (reducibleTotal > 0) {
+      responsiveListWidth -= reduction * (reducibleList / reducibleTotal);
+      responsiveFilterWidth -= reduction * (reducibleFilter / reducibleTotal);
+    }
+  }
+  responsiveListWidth = Math.max(
+    effectiveArticleListCollapsed ? articleListCollapsedWidth : listMinimum,
+    responsiveListWidth,
+  );
+  responsiveFilterWidth = Math.max(
+    effectiveFiltersCollapsed ? filterCollapsedWidth : filterMinimum,
+    responsiveFilterWidth,
+  );
+
+  return {
+    autoCollapseSidebar,
+    autoCollapseFilters,
+    autoCollapseArticleList,
+    sidebarWidth,
+    sidebarMinWidth,
+    articleListWidth: responsiveListWidth,
+    articleListMinWidth: effectiveArticleListCollapsed
+      ? articleListCollapsedWidth
+      : listMinimum,
+    filtersWidth: responsiveFilterWidth,
+    filtersMinWidth: effectiveFiltersCollapsed
+      ? filterCollapsedWidth
+      : filterMinimum,
+  };
 }
 
 export async function createSystematicReviewTabContent(
@@ -361,8 +654,14 @@ export async function createSystematicReviewTabContent(
     "position:relative;display:flex;flex:1;min-width:0;min-height:0;overflow:hidden;";
   mainWrapper.appendChild(mainRow);
 
+  const initialOuterWidth = mainWrapper.getBoundingClientRect().width || 900;
+  const initialSizes = computeResponsiveSizes(initialOuterWidth);
+  if (initialSizes.autoCollapseSidebar !== sidebarAutoCollapsed) {
+    sidebarAutoCollapsed = initialSizes.autoCollapseSidebar;
+  }
+
   // Left sidebar
-  sideNav = buildSidebar(doc);
+  sideNav = buildSidebar(doc, initialSizes);
   mainRow.appendChild(sideNav);
 
   // Drag handle
@@ -370,13 +669,11 @@ export async function createSystematicReviewTabContent(
   drag.className = "sr-drag-h";
   drag.style.cssText =
     "width:5px;flex-shrink:0;cursor:col-resize;background:transparent;z-index:5;";
-  sideNav.style.width = reviewSidebarWidth + "px";
-  sideNav.style.minWidth = "160px";
   sideNav.style.flexShrink = "0";
-  applySidebarCollapsedState(sideNav, sidebarCollapsed);
+  drag.style.display = sidebarCollapsed || sidebarAutoCollapsed ? "none" : "";
   let dragging = false;
   drag.addEventListener("mousedown", (e: MouseEvent) => {
-    if (sidebarCollapsed) return;
+    if (sidebarCollapsed || sidebarAutoCollapsed) return;
     dragging = true;
     drag.style.background = "var(--highlight-primary)";
     doc.addEventListener("mousemove", onDrag);
@@ -386,10 +683,15 @@ export async function createSystematicReviewTabContent(
     if (!dragging || !sideNav) return;
     const rect = sideNav.getBoundingClientRect();
     const availableWidth = mainWrapper?.getBoundingClientRect().width || 900;
-    const maxWidth = Math.max(90, Math.min(500, availableWidth - 360));
-    const w = Math.max(90, Math.min(maxWidth, e.clientX - rect.left));
-    sideNav.style.setProperty("width", `${w}px`, "important");
-    sideNav.style.setProperty("min-width", `${w}px`, "important");
+    const maxWidth = Math.max(
+      SR_SIDEBAR_MIN_WIDTH,
+      Math.min(SR_SIDEBAR_MAX_WIDTH, availableWidth - SR_RESERVED_FOR_CONTENT),
+    );
+    const w = Math.max(
+      SR_SIDEBAR_MIN_WIDTH,
+      Math.min(maxWidth, e.clientX - rect.left),
+    );
+    sideNav.style.setProperty("width", `${w}px`);
     reviewSidebarWidth = Math.round(w);
   };
   const onDragEnd = () => {
@@ -420,10 +722,18 @@ export async function createSystematicReviewTabContent(
   // Render active panel
   renderPanel(doc, currentState.activeSubTab);
 
-  const applyResponsiveLayout = () => {
+  const runResponsiveLayout = () => {
+    reviewLayoutRafPending = false;
     if (!mainWrapper || !sideNav) return;
     const availableWidth = mainWrapper.getBoundingClientRect().width;
-    if (!availableWidth || availableWidth === lastReviewLayoutWidth) return;
+    if (
+      !availableWidth ||
+      !Number.isFinite(availableWidth) ||
+      availableWidth <= 0
+    ) {
+      return;
+    }
+    if (availableWidth === lastReviewLayoutWidth) return;
     lastReviewLayoutWidth = availableWidth;
     const filters = mainWrapper.querySelector(
       ".sr-filters-panel",
@@ -441,97 +751,122 @@ export async function createSystematicReviewTabContent(
     mainWrapper.classList.toggle("sr-layout-narrow", availableWidth < 760);
     mainWrapper.classList.toggle("sr-layout-tight", availableWidth < 560);
 
-    if (!sidebarCollapsed) {
-      const responsiveWidth = Math.max(
-        90,
-        Math.min(reviewSidebarWidth, availableWidth - 360),
-      );
-      sideNav.style.setProperty("width", `${responsiveWidth}px`, "important");
-      sideNav.style.setProperty(
-        "min-width",
-        `${responsiveWidth}px`,
-        "important",
+    const sizes = computeResponsiveSizes(availableWidth);
+    if (sizes.autoCollapseSidebar !== sidebarAutoCollapsed) {
+      sidebarAutoCollapsed = sizes.autoCollapseSidebar;
+    }
+    const effectiveCollapsed = sidebarCollapsed || sidebarAutoCollapsed;
+
+    sideNav.style.setProperty("width", `${sizes.sidebarWidth}px`);
+    sideNav.style.setProperty("min-width", `${sizes.sidebarMinWidth}px`);
+    drag.style.display = effectiveCollapsed ? "none" : "";
+
+    const sidebarHeader = sideNav.querySelector(
+      "[data-sr-sidebar-header]",
+    ) as HTMLElement | null;
+    const sidebarLabel = sideNav.querySelector(
+      "[data-sr-sidebar-label]",
+    ) as HTMLElement | null;
+    const sidebarPath = sideNav.querySelector(
+      "[data-sr-sidebar-toggle-path]",
+    ) as SVGPathElement | null;
+    if (sidebarHeader) {
+      sidebarHeader.style.padding = effectiveCollapsed ? "5px" : "8px 12px 6px";
+      sidebarHeader.style.justifyContent = effectiveCollapsed
+        ? "center"
+        : "space-between";
+    }
+    if (sidebarLabel) {
+      sidebarLabel.style.display = effectiveCollapsed ? "none" : "";
+    }
+    if (sidebarPath) {
+      sidebarPath.setAttribute(
+        "d",
+        effectiveCollapsed ? "M6 3l5 5-5 5" : "M10 3L5 8l5 5",
       );
     }
-    drag.style.display = sidebarCollapsed ? "none" : "";
+    Array.from(sideNav.children).forEach((child) => {
+      if (child !== sidebarHeader) {
+        (child as HTMLElement).style.display = effectiveCollapsed ? "none" : "";
+      }
+    });
 
     if (filters && articleList) {
-      const contentWidth =
-        contentArea?.getBoundingClientRect().width || availableWidth;
-      const detailMinimum = contentWidth < 560 ? 150 : 260;
-      const listMinimum = contentWidth < 560 ? 84 : 100;
-      const filterMinimum = 80;
-      const filterRequested = filtersCollapsed ? 30 : reviewFiltersWidth;
-      const listRequested = articleListCollapsed ? 32 : reviewArticleListWidth;
-      const sideBudget = Math.max(
-        listMinimum + (filtersCollapsed ? 30 : filterMinimum),
-        contentWidth - detailMinimum - 8,
-      );
-      let responsiveListWidth = listRequested;
-      let responsiveFilterWidth = filterRequested;
-      const requestedTotal = responsiveListWidth + responsiveFilterWidth;
-      if (requestedTotal > sideBudget) {
-        const reducibleList = Math.max(
-          0,
-          responsiveListWidth - (articleListCollapsed ? 32 : listMinimum),
+      if (sizes.autoCollapseFilters !== filtersAutoCollapsed) {
+        filtersAutoCollapsed = sizes.autoCollapseFilters;
+      }
+      if (sizes.autoCollapseArticleList !== articleListAutoCollapsed) {
+        articleListAutoCollapsed = sizes.autoCollapseArticleList;
+      }
+      const effectiveFiltersCollapsed =
+        filtersCollapsed || filtersAutoCollapsed;
+      const effectiveArticleListCollapsed =
+        articleListCollapsed || articleListAutoCollapsed;
+      filters.style.setProperty("width", `${sizes.filtersWidth}px`);
+      filters.style.setProperty("min-width", `${sizes.filtersMinWidth}px`);
+      const filterBody = filters.querySelector(
+        "#sr-filters-body",
+      ) as HTMLElement | null;
+      if (filterBody) {
+        filterBody.style.display = effectiveFiltersCollapsed ? "none" : "";
+      }
+      const filterHdrLabel = filters.querySelector(
+        "[data-sr-filters-hdr-label]",
+      ) as HTMLElement | null;
+      if (filterHdrLabel) {
+        filterHdrLabel.style.display = effectiveFiltersCollapsed ? "none" : "";
+      }
+      const filterHdr = filters.querySelector(
+        "[data-sr-filters-hdr]",
+      ) as HTMLElement | null;
+      if (filterHdr) {
+        filterHdr.style.padding = effectiveFiltersCollapsed ? "5px" : "4px 8px";
+        filterHdr.style.justifyContent = effectiveFiltersCollapsed
+          ? "center"
+          : "space-between";
+      }
+      const filterTogglePath = filters.querySelector(
+        "[data-sr-filters-toggle-path]",
+      ) as SVGPathElement | null;
+      if (filterTogglePath) {
+        filterTogglePath.setAttribute(
+          "d",
+          effectiveFiltersCollapsed ? "M10 3L5 8l5 5" : "M6 3l5 5-5 5",
         );
-        const reducibleFilter = Math.max(
-          0,
-          responsiveFilterWidth - (filtersCollapsed ? 30 : filterMinimum),
-        );
-        const reducibleTotal = reducibleList + reducibleFilter;
-        const reduction = requestedTotal - sideBudget;
-        if (reducibleTotal > 0) {
-          responsiveListWidth -= reduction * (reducibleList / reducibleTotal);
-          responsiveFilterWidth -=
-            reduction * (reducibleFilter / reducibleTotal);
-        }
       }
 
-      filters.style.setProperty(
-        "width",
-        `${responsiveFilterWidth}px`,
-        "important",
-      );
-      filters.style.setProperty(
-        "min-width",
-        `${responsiveFilterWidth}px`,
-        "important",
-      );
-      filters.style.setProperty(
-        "max-width",
-        `${responsiveFilterWidth}px`,
-        "important",
-      );
-      articleList.style.setProperty(
-        "width",
-        `${responsiveListWidth}px`,
-        "important",
-      );
+      articleList.style.setProperty("width", `${sizes.articleListWidth}px`);
       articleList.style.setProperty(
         "min-width",
-        `${responsiveListWidth}px`,
-        "important",
+        `${sizes.articleListMinWidth}px`,
       );
-      articleList.style.setProperty(
-        "max-width",
-        `${responsiveListWidth}px`,
-        "important",
-      );
+
       articleList.classList.toggle(
         "sr-paper-list-compact",
-        !articleListCollapsed && responsiveListWidth < 190,
+        !effectiveArticleListCollapsed && sizes.articleListWidth < 190,
       );
       articleList.classList.toggle(
         "sr-paper-list-collapsed",
-        articleListCollapsed,
+        effectiveArticleListCollapsed,
       );
     }
     if (articleHandle)
-      articleHandle.style.display = articleListCollapsed ? "none" : "";
+      articleHandle.style.display =
+        articleListCollapsed || articleListAutoCollapsed ? "none" : "";
     if (filterHandle)
-      filterHandle.style.display = filtersCollapsed ? "none" : "";
+      filterHandle.style.display =
+        filtersCollapsed || filtersAutoCollapsed ? "none" : "";
   };
+
+  const applyResponsiveLayout = () => {
+    if (reviewLayoutRafPending) return;
+    reviewLayoutRafPending = true;
+    const raf =
+      doc.defaultView?.requestAnimationFrame ||
+      ((cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 16));
+    raf(runResponsiveLayout);
+  };
+
   refreshReviewLayout = applyResponsiveLayout;
   const ResizeObserverCtor = doc.defaultView?.ResizeObserver;
   if (ResizeObserverCtor) {
@@ -539,10 +874,7 @@ export async function createSystematicReviewTabContent(
     layoutObserver.observe(mainWrapper);
     (mainWrapper as any)._layoutObserver = layoutObserver;
   }
-  mainWrapper.addEventListener("click", () => {
-    setTimeout(applyResponsiveLayout, 0);
-  });
-  setTimeout(applyResponsiveLayout, 0);
+  applyResponsiveLayout();
 
   return mainWrapper;
 }
@@ -550,6 +882,7 @@ export async function createSystematicReviewTabContent(
 function applySidebarCollapsedState(
   nav: HTMLElement,
   collapsed: boolean,
+  overrideWidth?: number,
 ): void {
   const header = nav.querySelector(
     "[data-sr-sidebar-header]",
@@ -574,13 +907,13 @@ function applySidebarCollapsedState(
     path.setAttribute("d", collapsed ? "M6 3l5 5-5 5" : "M10 3L5 8l5 5");
   }
   if (collapsed) {
-    nav.style.setProperty("width", "30px", "important");
-    nav.style.setProperty("min-width", "30px", "important");
-    nav.style.setProperty("max-width", "30px", "important");
+    nav.style.setProperty("width", `${SR_SIDEBAR_COLLAPSED_WIDTH}px`);
+    nav.style.setProperty("min-width", `${SR_SIDEBAR_COLLAPSED_WIDTH}px`);
     nav.style.overflow = "hidden";
   } else {
-    nav.style.setProperty("width", `${reviewSidebarWidth}px`, "important");
-    nav.style.setProperty("min-width", "160px", "important");
+    const w = overrideWidth ?? reviewSidebarWidth;
+    nav.style.setProperty("width", `${w}px`);
+    nav.style.setProperty("min-width", `${SR_SIDEBAR_MIN_WIDTH}px`);
     nav.style.removeProperty("max-width");
     nav.style.overflowY = "auto";
     nav.style.overflowX = "hidden";
@@ -867,7 +1200,7 @@ function buildFolderBar(doc: Document): HTMLElement {
 
   // Add paper button
   const addBtn = doc.createElement("button");
-  addBtn.textContent = "Add Paper";
+  addBtn.textContent = "Add Papers";
   addBtn.style.cssText =
     "padding:3px 8px;font-size:11px;border:1px solid var(--highlight-primary);border-radius:4px;background:var(--highlight-primary);color:#fff;cursor:pointer;font-family:inherit;font-weight:500;";
   addBtn.addEventListener("click", async () => {
@@ -876,25 +1209,37 @@ function buildFolderBar(doc: Document): HTMLElement {
       const selected = pane
         .getSelectedItems()
         .filter((item: Zotero.Item) => item.isRegularItem());
-      if (selected.length !== 1) {
-        toast(doc, "Select exactly one regular Zotero item");
+      if (selected.length === 0) {
+        toast(doc, "Select at least one regular Zotero item");
         return;
       }
-      const paper = currentState!.papers.find(
-        (candidate) => candidate.id === selected[0].id,
+      const selectedIds = selected.map((item) => item.id);
+      const sourceLabel = generateSourceLabel();
+      const added = getSRService().addPapers(
+        currentState!,
+        selectedIds,
+        sourceLabel,
       );
-      if (paper?.manualAdded) {
-        toast(doc, "Paper is already manually added to this review");
-        return;
-      }
-      getSRService().addPapers(currentState!, [selected[0].id]);
-      _srPaperIdSet.add(selected[0].id);
-      warmItemCache([selected[0].id]);
+      const existingCount = selectedIds.length - added.length;
+      selectedIds.forEach((id) => _srPaperIdSet.add(id));
+      warmItemCache(selectedIds);
       await getSRService().save(currentState!);
-      toast(
-        doc,
-        paper ? "Paper manual membership preserved" : "Paper added to review",
-      );
+      if (added.length > 0 && existingCount > 0) {
+        toast(
+          doc,
+          `Added ${added.length} paper${added.length === 1 ? "" : "s"} · ${existingCount} already in review · label "${sourceLabel}"`,
+        );
+      } else if (added.length > 0) {
+        toast(
+          doc,
+          `Added ${added.length} paper${added.length === 1 ? "" : "s"} · label "${sourceLabel}"`,
+        );
+      } else {
+        toast(
+          doc,
+          `Selected papers are already in this review (label "${sourceLabel}")`,
+        );
+      }
       reRender(doc);
     } catch (e) {
       Zotero.debug(`[seerai] Error adding papers: ${e}`);
@@ -947,7 +1292,10 @@ function buildPicoSummary(doc: Document): HTMLElement {
 // ============================================================
 // LEFT SIDEBAR
 // ============================================================
-function buildSidebar(doc: Document): HTMLElement {
+function buildSidebar(
+  doc: Document,
+  initialSizes?: ResponsiveSizes,
+): HTMLElement {
   if (!currentState) return doc.createElement("div");
   const nav = doc.createElement("div");
   nav.className = "sr-sidebar";
@@ -985,13 +1333,21 @@ function buildSidebar(doc: Document): HTMLElement {
   toggleBtn.appendChild(toggleSvg);
   toggleBtn.addEventListener("click", () => {
     if (!sideNav) return;
-    sidebarCollapsed = !sidebarCollapsed;
-    applySidebarCollapsedState(sideNav, sidebarCollapsed);
+    const effectiveCollapsed = sidebarCollapsed || sidebarAutoCollapsed;
+    sidebarCollapsed = !effectiveCollapsed;
+    sidebarAutoCollapsed = false;
+    sidebarUserTouched = true;
+    const shellWidth =
+      mainWrapper?.getBoundingClientRect().width ||
+      sideNav.getBoundingClientRect().width ||
+      900;
+    const sizes = computeResponsiveSizes(shellWidth);
+    applySidebarCollapsedState(sideNav, sidebarCollapsed, sizes.sidebarWidth);
     Zotero.Prefs.set(
       "extensions.zotero.seerai.srSidebarCollapsed",
       sidebarCollapsed,
     );
-    setTimeout(() => refreshReviewLayout?.(), 0);
+    refreshReviewLayout?.();
   });
   hdr.appendChild(toggleBtn);
   nav.appendChild(hdr);
@@ -1084,7 +1440,12 @@ function buildSidebar(doc: Document): HTMLElement {
   });
   nav.appendChild(tableBtn2);
 
-  applySidebarCollapsedState(nav, sidebarCollapsed);
+  const effectiveCollapsed = sidebarCollapsed || sidebarAutoCollapsed;
+  applySidebarCollapsedState(
+    nav,
+    effectiveCollapsed,
+    initialSizes?.sidebarWidth,
+  );
 
   return nav;
 }
@@ -1120,7 +1481,12 @@ function buildNavButton(
     saveSRState();
     renderPanel(doc, panel);
     if (sideNav) {
-      const newNav = buildSidebar(doc);
+      const sidebarWidth = mainWrapper?.getBoundingClientRect().width || 900;
+      const sidebarSizes = computeResponsiveSizes(sidebarWidth);
+      if (sidebarSizes.autoCollapseSidebar !== sidebarAutoCollapsed) {
+        sidebarAutoCollapsed = sidebarSizes.autoCollapseSidebar;
+      }
+      const newNav = buildSidebar(doc, sidebarSizes);
       sideNav.replaceWith(newNav);
       sideNav = newNav;
     }
@@ -1231,8 +1597,25 @@ function buildScreeningPanel(doc: Document): HTMLElement {
     "display:flex;flex:1;min-width:0;min-height:0;overflow:hidden;";
   panel.appendChild(row);
 
+  const outerWidth =
+    mainWrapper?.getBoundingClientRect().width ||
+    contentArea?.getBoundingClientRect().width ||
+    900;
+  const initialSizes = computeResponsiveSizes(outerWidth);
+  if (initialSizes.autoCollapseSidebar !== sidebarAutoCollapsed) {
+    sidebarAutoCollapsed = initialSizes.autoCollapseSidebar;
+  }
+  if (initialSizes.autoCollapseFilters !== filtersAutoCollapsed) {
+    filtersAutoCollapsed = initialSizes.autoCollapseFilters;
+  }
+  if (initialSizes.autoCollapseArticleList !== articleListAutoCollapsed) {
+    articleListAutoCollapsed = initialSizes.autoCollapseArticleList;
+  }
+  mainWrapper?.classList.toggle("sr-layout-narrow", outerWidth < 760);
+  mainWrapper?.classList.toggle("sr-layout-tight", outerWidth < 560);
+
   // Left: Article list
-  const left = buildArticleList(doc);
+  const left = buildArticleList(doc, initialSizes);
   row.appendChild(left);
 
   // Drag handle between article list and detail
@@ -1282,7 +1665,7 @@ function buildScreeningPanel(doc: Document): HTMLElement {
   row.appendChild(center);
 
   // Right: Filters
-  const right = buildFiltersPanel(doc);
+  const right = buildFiltersPanel(doc, initialSizes);
 
   // Drag handle between detail and filters
   const dragRight = doc.createElement("div");
@@ -1323,7 +1706,21 @@ function buildScreeningPanel(doc: Document): HTMLElement {
   row.appendChild(dragRight);
 
   row.appendChild(right);
-  setTimeout(() => refreshReviewLayout?.(), 0);
+
+  const articleListEl = left as HTMLElement;
+  const effectiveArticleListCollapsed =
+    articleListCollapsed || articleListAutoCollapsed;
+  articleListEl.classList.toggle(
+    "sr-paper-list-compact",
+    !effectiveArticleListCollapsed && initialSizes.articleListWidth < 190,
+  );
+  articleListEl.classList.toggle(
+    "sr-paper-list-collapsed",
+    effectiveArticleListCollapsed,
+  );
+  dragLeft.style.display = effectiveArticleListCollapsed ? "none" : "";
+  dragRight.style.display =
+    filtersCollapsed || filtersAutoCollapsed ? "none" : "";
 
   return panel;
 }
@@ -1395,13 +1792,17 @@ function buildPipeline(doc: Document): HTMLElement {
   return bar;
 }
 
-function buildArticleList(doc: Document): HTMLElement {
+function buildArticleList(
+  doc: Document,
+  initialSizes?: ResponsiveSizes,
+): HTMLElement {
   if (!currentState) return doc.createElement("div");
   const filtered = scrFiltered();
   const left = doc.createElement("div");
   left.className = "sr-paper-list";
-  left.style.cssText =
-    "width:260px;min-width:84px;max-width:450px;flex-shrink:0;border-right:1px solid var(--border-primary);display:flex;flex-direction:column;overflow:hidden;";
+  const initialWidth = initialSizes?.articleListWidth ?? reviewArticleListWidth;
+  const initialMin = initialSizes?.articleListMinWidth ?? 60;
+  left.style.cssText = `width:${initialWidth}px;min-width:${initialMin}px;max-width:450px;flex-shrink:0;border-right:1px solid var(--border-primary);display:flex;flex-direction:column;overflow:hidden;`;
 
   // Header with filter controls
   const hdr = doc.createElement("div");
@@ -1419,6 +1820,8 @@ function buildArticleList(doc: Document): HTMLElement {
     "display:flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border:none;border-radius:3px;background:transparent;color:var(--text-secondary);cursor:pointer;flex-shrink:0;";
   listToggle.addEventListener("click", () => {
     articleListCollapsed = !articleListCollapsed;
+    articleListAutoCollapsed = false;
+    articleListUserTouched = true;
     Zotero.Prefs.set(
       "extensions.zotero.seerai.srArticleListCollapsed",
       articleListCollapsed,
@@ -1648,11 +2051,7 @@ function buildArticleRow(
     )
       return;
     if (target.classList.contains("sr-art-act")) return;
-    scrActive = paper.id;
-    showNote = false;
-    showReason = false;
-    reRenderPanel(doc, "screening", true);
-    focusScreeningDetail(doc);
+    selectScreeningPaper(doc, paper.id, { resetDetailScroll: true });
   });
 
   // Checkbox
@@ -1687,12 +2086,24 @@ function buildArticleRow(
   // Title
   const titleEl = doc.createElement("div");
   titleEl.textContent = title;
+  titleEl.className = "sr-art-title";
+  titleEl.title = "Show in screening detail";
   titleEl.style.cssText =
-    "font-size:10px;font-weight:500;color:var(--text-primary);line-height:1.3;max-height:2.6em;overflow:hidden;";
+    "font-size:10px;font-weight:500;color:var(--text-primary);line-height:1.3;max-height:2.6em;overflow:hidden;cursor:pointer;";
   if (paper.status === "excluded") {
     titleEl.style.textDecoration = "line-through";
     titleEl.style.textDecorationColor = "#dc2626";
   }
+  titleEl.addEventListener("mouseenter", () => {
+    if (paper.status !== "excluded") {
+      titleEl.style.textDecoration = "underline";
+    }
+  });
+  titleEl.addEventListener("mouseleave", () => {
+    if (paper.status !== "excluded") {
+      titleEl.style.textDecoration = "none";
+    }
+  });
   body.appendChild(titleEl);
 
   // Sub info
@@ -1733,6 +2144,16 @@ function buildArticleRow(
     srcTag.style.cssText =
       "padding:0 3px;border-radius:2px;font-size:7px;background:var(--background-tertiary);color:var(--text-tertiary);";
     sub.appendChild(srcTag);
+  }
+  if (paper.sourceLabel) {
+    const lblTag = doc.createElement("span");
+    lblTag.textContent = paper.sourceLabel;
+    lblTag.title = paper.sourceType
+      ? `Source label: ${paper.sourceLabel} (${paper.sourceType})`
+      : `Source label: ${paper.sourceLabel}`;
+    lblTag.style.cssText =
+      "padding:0 3px;border-radius:2px;font-size:7px;background:var(--background-tertiary);color:var(--text-tertiary);";
+    sub.appendChild(lblTag);
   }
   // Extraction indicator
   const exCount = (currentState!.extractions[paper.id] || []).length;
@@ -1789,13 +2210,22 @@ function buildArticleRow(
     "width:14px;height:12px;border:none;background:transparent;color:var(--text-tertiary);cursor:pointer;font-size:8px;border-radius:2px;display:flex;align-items:center;justify-content:center;padding:0;";
   reaBtn.addEventListener("click", (e: Event) => {
     e.stopPropagation();
-    scrActive = paper.id;
     if (paper.status !== "excluded") {
       getSRService().setDecision(currentState!, paper.id, "excluded");
       saveSRState();
     }
     showReason = true;
-    reRenderPanel(doc, "screening");
+    showNote = false;
+    showSourceLabelRow = false;
+    const list = contentArea?.querySelector(".sr-art-list");
+    const row = list?.querySelector(
+      `.sr-art[data-sid="${paper.id}"]`,
+    ) as HTMLElement | null;
+    if (row) applyArticleRowStatusStyles(row, paper);
+    selectScreeningPaper(doc, paper.id, {
+      resetDetailScroll: false,
+      preserveTransientFlags: true,
+    });
   });
   actions.appendChild(reaBtn);
 
@@ -1843,6 +2273,118 @@ function crEl(doc: Document, text: string): HTMLElement {
   el.textContent = text;
   el.style.cssText = "flex-shrink:0;";
   return el;
+}
+
+function abstractSourceLabel(
+  source: ItemMeta["abstractSource"],
+  fallback?: boolean,
+): string {
+  switch (source) {
+    case "field":
+      return "Abstract (Zotero field)";
+    case "same_title_note":
+      return "Abstract (from same-title note)";
+    case "pdf":
+      return fallback
+        ? "Abstract (PDF, first paragraph — no abstract section found)"
+        : "Abstract (from PDF)";
+    case "notes":
+      return "Abstract (from notes)";
+    default:
+      return "Abstract";
+  }
+}
+
+function buildAbstractSection(doc: Document, m: ItemMeta): HTMLElement | null {
+  const wrapper = doc.createElement("div");
+  wrapper.className = "sr-abstract-section";
+  wrapper.setAttribute("data-paper-id", String(m.id));
+  wrapper.style.cssText =
+    "margin-bottom:12px;min-width:0;max-width:100%;overflow:hidden;";
+
+  const renderLabel = (labelText: string, titleText?: string): HTMLElement => {
+    const absLbl = doc.createElement("div");
+    absLbl.textContent = labelText;
+    absLbl.style.cssText =
+      "font-size:10px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;";
+    if (titleText) absLbl.title = titleText;
+    return absLbl;
+  };
+
+  const renderText = (text: string): HTMLElement => {
+    const absTxt = doc.createElement("div");
+    const absFragments = hlText(doc, text);
+    absFragments.forEach((f) => absTxt.appendChild(f));
+    absTxt.style.cssText =
+      "font-size:12px;color:var(--text-primary);line-height:1.6;max-width:100%;min-width:0;overflow-wrap:break-word;word-break:break-word;white-space:pre-wrap;";
+    return absTxt;
+  };
+
+  const renderPlaceholder = (msg: string): HTMLElement => {
+    const ph = doc.createElement("div");
+    ph.style.cssText =
+      "font-size:11px;color:var(--text-tertiary);font-style:italic;line-height:1.5;";
+    ph.textContent = msg;
+    return ph;
+  };
+
+  if (m.abstract) {
+    wrapper.appendChild(
+      renderLabel(
+        abstractSourceLabel(m.abstractSource, m.abstractFallback),
+        `Resolved from ${m.abstractSource}${m.abstractFallback ? " (first paragraph fallback)" : ""}`,
+      ),
+    );
+    wrapper.appendChild(renderText(m.abstract));
+  } else if (m.abstractPending) {
+    wrapper.appendChild(
+      renderLabel(
+        abstractSourceLabel("none"),
+        "Falling back to same-title notes, then PDF",
+      ),
+    );
+    wrapper.appendChild(
+      renderPlaceholder(
+        "No abstract found yet. Looking up same-title notes and PDF…",
+      ),
+    );
+    enrichItemAbstractFromPdf(m.id).catch(() => undefined);
+  } else {
+    wrapper.appendChild(renderLabel(abstractSourceLabel("none")));
+    wrapper.appendChild(
+      renderPlaceholder(
+        "No abstract, same-title note, or PDF text was found for this paper.",
+      ),
+    );
+  }
+
+  if (m.abstractPending || (!m.abstract && m.abstractSource === "none")) {
+    const unsubscribe = onAbstractResolved((resolvedId) => {
+      if (resolvedId !== m.id) return;
+      const cached = itemMetaCache.get(m.id);
+      if (!cached) return;
+      wrapper.replaceChildren();
+      if (cached.abstract) {
+        wrapper.appendChild(
+          renderLabel(
+            abstractSourceLabel(cached.abstractSource, cached.abstractFallback),
+            `Resolved from ${cached.abstractSource}${cached.abstractFallback ? " (first paragraph fallback)" : ""}`,
+          ),
+        );
+        wrapper.appendChild(renderText(cached.abstract));
+      } else {
+        wrapper.appendChild(renderLabel(abstractSourceLabel("none")));
+        wrapper.appendChild(
+          renderPlaceholder(
+            "No abstract, same-title note, or PDF text was found for this paper.",
+          ),
+        );
+      }
+    });
+    wrapper.addEventListener("DOMNodeRemoved", unsubscribe, { once: true });
+  }
+
+  return wrapper;
 }
 
 // ============================================================
@@ -1905,19 +2447,56 @@ function buildDetailView(doc: Document): HTMLElement {
   const authors = m.authors;
   const year = m.year;
   const doi = m.doi;
-  const abstract = m.abstract;
   const journal = m.journal;
 
   // Body
   const body = doc.createElement("div");
   body.className = "sr-article-detail-scroll";
-  body.style.cssText = "flex:1;overflow-y:auto;padding:16px;";
+  body.style.cssText =
+    "flex:1;overflow-y:auto;overflow-x:hidden;padding:16px;min-width:0;max-width:100%;";
 
   // Title
   const titleEl = doc.createElement("div");
   titleEl.textContent = title;
+  titleEl.className = "sr-detail-title";
+  titleEl.title = "Click to select in Zotero library";
   titleEl.style.cssText =
-    "font-size:14px;font-weight:600;color:var(--text-primary);line-height:1.4;margin-bottom:8px;";
+    "font-size:14px;font-weight:600;color:var(--text-primary);line-height:1.4;margin-bottom:8px;cursor:pointer;overflow-wrap:break-word;word-break:break-word;max-width:100%;min-width:0;";
+  titleEl.addEventListener("mouseenter", () => {
+    titleEl.style.textDecoration = "underline";
+  });
+  titleEl.addEventListener("mouseleave", () => {
+    titleEl.style.textDecoration = "none";
+  });
+  titleEl.addEventListener("click", async (e: MouseEvent) => {
+    if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+    if (e.detail === 2) {
+      const item = Zotero.Items.get(paper.id);
+      if (item) {
+        const attachmentIds = item.getAttachments();
+        for (const attachId of attachmentIds) {
+          const attachment = Zotero.Items.get(attachId);
+          if (
+            attachment &&
+            attachment.isPDFAttachment &&
+            attachment.isPDFAttachment()
+          ) {
+            try {
+              const tabs = ztoolkit.getGlobal("Zotero_Tabs");
+              if (tabs && typeof tabs.select === "function") {
+                tabs.select("zotero-pane");
+              }
+              await Zotero.Reader.open(attachment.id);
+              return;
+            } catch {
+              // fall through to selectItem
+            }
+          }
+        }
+      }
+    }
+    selectItemInZotero(paper.id);
+  });
   body.appendChild(titleEl);
 
   // Status + Confidence row
@@ -2090,19 +2669,9 @@ function buildDetailView(doc: Document): HTMLElement {
   body.appendChild(meta);
 
   // Abstract with keyword highlighting
-  if (abstract) {
-    const absLbl = doc.createElement("div");
-    absLbl.textContent = "Abstract";
-    absLbl.style.cssText =
-      "font-size:10px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;";
-    body.appendChild(absLbl);
-
-    const absTxt = doc.createElement("div");
-    const absFragments = hlText(doc, abstract);
-    absFragments.forEach((f) => absTxt.appendChild(f));
-    absTxt.style.cssText =
-      "font-size:12px;color:var(--text-primary);line-height:1.6;margin-bottom:12px;";
-    body.appendChild(absTxt);
+  const abstractSection = buildAbstractSection(doc, m);
+  if (abstractSection) {
+    body.appendChild(abstractSection);
   }
 
   if (paper.analysis) {
@@ -2316,7 +2885,7 @@ function handleScreeningShortcut(doc: Document, event: KeyboardEvent): void {
       "extensions.zotero.seerai.srShowPaperCriteria",
       showPaperCriteria,
     );
-    reRenderPanel(doc, "screening");
+    selectScreeningPaper(doc, scrActive, { resetDetailScroll: false });
   } else if (key === "w" || key === "a" || event.key === "ArrowUp") {
     event.preventDefault();
     navigateToPrev(doc);
@@ -2327,8 +2896,9 @@ function handleScreeningShortcut(doc: Document, event: KeyboardEvent): void {
     event.preventDefault();
     showNote = false;
     showReason = false;
+    showSourceLabelRow = false;
     scrActive = null;
-    reRenderPanel(doc, "screening");
+    selectScreeningPaper(doc, null, { resetDetailScroll: true });
   }
 }
 
@@ -2399,10 +2969,23 @@ function buildDecisionFooter(
     "padding:2px 6px;font-size:10px;border:1px solid var(--border-primary);border-radius:3px;background:transparent;color:var(--text-secondary);cursor:pointer;font-family:inherit;";
   noteBtn.addEventListener("click", () => {
     showReason = false;
+    showSourceLabelRow = false;
     showNote = !showNote;
     reRenderPanel(doc, "screening");
   });
   actRow.appendChild(noteBtn);
+
+  const sourceBtn = doc.createElement("button");
+  sourceBtn.textContent = "Source";
+  sourceBtn.style.cssText =
+    "padding:2px 6px;font-size:10px;border:1px solid var(--border-primary);border-radius:3px;background:transparent;color:var(--text-secondary);cursor:pointer;font-family:inherit;";
+  sourceBtn.addEventListener("click", () => {
+    showNote = false;
+    showReason = false;
+    showSourceLabelRow = !showSourceLabelRow;
+    reRenderPanel(doc, "screening");
+  });
+  actRow.appendChild(sourceBtn);
 
   const lblBtn = doc.createElement("button");
   lblBtn.textContent = "Label";
@@ -2667,6 +3250,44 @@ function buildDecisionFooter(
     foot.appendChild(noteRow);
   }
 
+  if (showSourceLabelRow) {
+    const srcRow = doc.createElement("div");
+    srcRow.style.cssText = "display:flex;align-items:center;gap:4px;";
+    const srcInput = doc.createElement("input") as HTMLInputElement;
+    srcInput.type = "text";
+    srcInput.placeholder = "Set source label (optional)";
+    srcInput.value = paper.sourceLabel || "";
+    srcInput.style.cssText =
+      "flex:1;border:1px solid var(--border-primary);border-radius:4px;padding:2px 6px;font-size:10px;background:var(--background-primary);color:var(--text-primary);outline:none;font-family:inherit;";
+    srcRow.appendChild(srcInput);
+    const saveSrcBtn = doc.createElement("button");
+    saveSrcBtn.textContent = "Save";
+    saveSrcBtn.style.cssText =
+      "padding:2px 6px;font-size:10px;border-radius:3px;background:var(--highlight-primary);color:#fff;border:none;cursor:pointer;font-family:inherit;";
+    saveSrcBtn.addEventListener("click", () => {
+      const trimmed = srcInput.value.trim();
+      if (trimmed) {
+        paper.sourceLabel = trimmed;
+      } else {
+        delete paper.sourceLabel;
+      }
+      showSourceLabelRow = false;
+      saveSRState();
+      reRenderPanel(doc, "screening");
+    });
+    srcRow.appendChild(saveSrcBtn);
+    const cancelSrcBtn = doc.createElement("button");
+    cancelSrcBtn.textContent = "Cancel";
+    cancelSrcBtn.style.cssText =
+      "padding:2px 6px;font-size:10px;border:1px solid var(--border-primary);border-radius:3px;background:transparent;color:var(--text-secondary);cursor:pointer;font-family:inherit;";
+    cancelSrcBtn.addEventListener("click", () => {
+      showSourceLabelRow = false;
+      reRenderPanel(doc, "screening");
+    });
+    srcRow.appendChild(cancelSrcBtn);
+    foot.appendChild(srcRow);
+  }
+
   return foot;
 }
 
@@ -2703,16 +3324,22 @@ function buildDecisionBtn(
 // ============================================================
 // FILTERS PANEL (RIGHT)
 // ============================================================
-function buildFiltersPanel(doc: Document): HTMLElement {
+function buildFiltersPanel(
+  doc: Document,
+  initialSizes?: ResponsiveSizes,
+): HTMLElement {
   if (!currentState) return doc.createElement("div");
   const right = doc.createElement("div");
   right.className = "sr-filters-panel";
-  right.style.cssText =
-    "width:200px;min-width:160px;max-width:350px;flex-shrink:0;border-left:1px solid var(--border-primary);display:flex;flex-direction:column;overflow:hidden;";
+  const initialWidth = initialSizes?.filtersWidth ?? reviewFiltersWidth;
+  const initialMin = initialSizes?.filtersMinWidth ?? 60;
+  right.style.cssText = `width:${initialWidth}px;min-width:${initialMin}px;max-width:350px;flex-shrink:0;border-left:1px solid var(--border-primary);display:flex;flex-direction:column;overflow:hidden;`;
   const hdr = doc.createElement("div");
+  hdr.setAttribute("data-sr-filters-hdr", "true");
   hdr.style.cssText =
     "display:flex;align-items:center;justify-content:space-between;padding:4px 8px;border-bottom:1px solid var(--border-primary);background:var(--background-secondary);font-size:10px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;flex-shrink:0;";
   const hdrLabel = doc.createElement("span");
+  hdrLabel.setAttribute("data-sr-filters-hdr-label", "true");
   hdrLabel.textContent = "Filters";
   hdr.appendChild(hdrLabel);
 
@@ -2727,6 +3354,7 @@ function buildFiltersPanel(doc: Document): HTMLElement {
   toggleSvg.setAttribute("viewBox", "0 0 16 16");
   toggleSvg.setAttribute("fill", "none");
   const togglePath = doc.createElementNS(SVG_NS, "path");
+  togglePath.setAttribute("data-sr-filters-toggle-path", "true");
   togglePath.setAttribute("d", "M6 3l5 5-5 5");
   togglePath.setAttribute("stroke", "currentColor");
   togglePath.setAttribute("stroke-width", "1.8");
@@ -2736,12 +3364,14 @@ function buildFiltersPanel(doc: Document): HTMLElement {
   toggleBtn.appendChild(toggleSvg);
   toggleBtn.addEventListener("click", () => {
     filtersCollapsed = !filtersCollapsed;
+    filtersAutoCollapsed = false;
+    filtersUserTouched = true;
     applyCollapsedState();
     Zotero.Prefs.set(
       "extensions.zotero.seerai.srFiltersCollapsed",
       filtersCollapsed,
     );
-    setTimeout(() => refreshReviewLayout?.(), 0);
+    refreshReviewLayout?.();
   });
   hdr.appendChild(toggleBtn);
   right.appendChild(hdr);
@@ -2749,22 +3379,27 @@ function buildFiltersPanel(doc: Document): HTMLElement {
   body.style.cssText = "flex:1;overflow-y:auto;padding:4px;";
   body.id = "sr-filters-body";
   const applyCollapsedState = (): void => {
-    hdrLabel.style.display = filtersCollapsed ? "none" : "";
-    hdr.style.padding = filtersCollapsed ? "5px" : "4px 8px";
-    hdr.style.justifyContent = filtersCollapsed ? "center" : "space-between";
-    body.style.display = filtersCollapsed ? "none" : "";
-    togglePath.setAttribute(
-      "d",
-      filtersCollapsed ? "M10 3L5 8l5 5" : "M6 3l5 5-5 5",
-    );
-    if (filtersCollapsed) {
-      right.style.setProperty("width", "30px", "important");
-      right.style.setProperty("min-width", "30px", "important");
-      right.style.setProperty("max-width", "30px", "important");
+    const shell =
+      (mainWrapper && mainWrapper.isConnected
+        ? mainWrapper
+        : (doc.querySelector(".sr-shell") as HTMLElement | null)) ||
+      doc.documentElement;
+    const shellWidth = shell?.getBoundingClientRect().width || 900;
+    const sizes = computeResponsiveSizes(shellWidth);
+    const expandedWidth = sizes.filtersWidth;
+    const expandedMin = sizes.filtersMinWidth;
+    const effective = filtersCollapsed || filtersAutoCollapsed;
+    hdrLabel.style.display = effective ? "none" : "";
+    hdr.style.padding = effective ? "5px" : "4px 8px";
+    hdr.style.justifyContent = effective ? "center" : "space-between";
+    body.style.display = effective ? "none" : "";
+    togglePath.setAttribute("d", effective ? "M10 3L5 8l5 5" : "M6 3l5 5-5 5");
+    if (effective) {
+      right.style.setProperty("width", "30px");
+      right.style.setProperty("min-width", "30px");
     } else {
-      right.style.setProperty("width", `${reviewFiltersWidth}px`, "important");
-      right.style.setProperty("min-width", "80px", "important");
-      right.style.setProperty("max-width", "350px", "important");
+      right.style.setProperty("width", `${expandedWidth}px`);
+      right.style.setProperty("min-width", `${expandedMin}px`);
     }
   };
   const sections = buildFilterSections();
@@ -3176,16 +3811,84 @@ function buildBatchBar(_doc: Document): HTMLElement {
   bar.appendChild(
     batchBtn(doc, "Extract", "#0369a1", async () => {
       if (!currentState || scrSelected.size === 0) return;
+      const ids = Array.from(scrSelected);
+      let includedCount = 0;
+      const includeUndo: Array<{
+        id: number;
+        prevStatus: ScreeningDecision;
+        prevStage: string | undefined;
+        prevReason: string | undefined;
+      }> = [];
+      ids.forEach((id) => {
+        const paper = currentState!.papers.find(
+          (candidate) => candidate.id === id,
+        );
+        if (!paper) return;
+        if (paper.status !== "included") {
+          includeUndo.push({
+            id,
+            prevStatus: paper.status,
+            prevStage: paper.screeningStage,
+            prevReason: paper.exclReason,
+          });
+          getSRService().setDecision(
+            currentState!,
+            id,
+            "included",
+            undefined,
+            "final",
+          );
+          includedCount++;
+        } else if (paper.screeningStage !== "final") {
+          includeUndo.push({
+            id,
+            prevStatus: paper.status,
+            prevStage: paper.screeningStage,
+            prevReason: paper.exclReason,
+          });
+          paper.screeningStage = "final";
+        }
+      });
+      const space = getActiveSpace();
+      if (space) {
+        ids.forEach((id) => {
+          if (space.paperStatus[id] !== "included") {
+            space.paperStatus[id] = "included";
+          }
+        });
+      }
       try {
         const job = await getSRService().startReviewJob(
           currentState,
           "extraction",
-          Array.from(scrSelected),
+          ids,
         );
-        toast(doc, `Extraction queued for ${job.paperIds.length} paper(s)`);
+        await getSRService().save(currentState);
+        const includeNote = includedCount
+          ? `Marked ${includedCount} paper(s) as included and `
+          : "";
+        toast(
+          doc,
+          `${includeNote}Extraction queued for ${job.paperIds.length} paper(s)`,
+        );
         scrSelected.clear();
         reRenderPanel(doc, "screening");
+        void includeUndo;
       } catch (error) {
+        includeUndo.forEach((entry) => {
+          const paper = currentState!.papers.find(
+            (candidate) => candidate.id === entry.id,
+          );
+          if (!paper) return;
+          paper.status = entry.prevStatus;
+          paper.screeningStage = entry.prevStage as
+            | "title_abstract"
+            | "full_text"
+            | "final"
+            | undefined;
+          paper.exclReason = entry.prevReason;
+        });
+        await getSRService().save(currentState);
         toast(doc, error instanceof Error ? error.message : String(error));
       }
     }),
@@ -3390,19 +4093,55 @@ function buildEvidencePanel(doc: Document): HTMLElement {
   runBtn.addEventListener("click", async () => {
     if (!currentState) return;
     const readiness = getSRService().getSynthesisReadiness(currentState);
-    if (readiness.verified === 0) {
-      toast(doc, "No verified extraction results are available for synthesis");
+    if (readiness.verified === 0 && readiness.proposed === 0) {
+      toast(doc, "No extraction results are available for synthesis");
       return;
+    }
+    let verifiedDelta = 0;
+    if (readiness.verified === 0) {
+      const auto = getSRService().autoVerifyValidProposals(currentState);
+      verifiedDelta = auto.verifiedRows;
+      if (auto.verifiedRows === 0) {
+        toast(
+          doc,
+          "Extraction proposals are not yet valid. Open a paper to verify or correct its rows.",
+        );
+        return;
+      }
     }
     const run = getSRService().runSynthesis(currentState, true);
     getSRService().generateGaps(currentState, run.id, true);
     await getSRService().save(currentState);
     const syn = getVerifiedSynthesis();
     evTab = "ai";
-    toast(doc, `${syn.kpi.domains} synthesis domain(s) drafted`);
+    const note = verifiedDelta
+      ? `Auto-verified ${verifiedDelta} proposal(s) and drafted ${syn.kpi.domains} synthesis domain(s)`
+      : `${syn.kpi.domains} synthesis domain(s) drafted`;
+    toast(doc, note);
     reRenderPanel(doc, "evidence");
   });
   tabRow.appendChild(runBtn);
+  const verifyAllBtn = doc.createElement("button");
+  verifyAllBtn.textContent = "Verify All Valid";
+  verifyAllBtn.title =
+    "Verify every proposed extraction row that has no blocking issues, a source quote, and passes validation";
+  verifyAllBtn.style.cssText =
+    "padding:2px 8px;font-size:10px;border:1px solid #7c3aed;border-radius:4px;background:transparent;color:#7c3aed;cursor:pointer;font-family:inherit;margin-left:4px;";
+  verifyAllBtn.addEventListener("click", async () => {
+    if (!currentState) return;
+    const result = getSRService().autoVerifyValidProposals(currentState);
+    await getSRService().save(currentState);
+    if (result.verifiedRows === 0) {
+      toast(doc, "No valid proposals available to verify");
+      return;
+    }
+    toast(
+      doc,
+      `Verified ${result.verifiedRows} proposal(s) across ${result.papers} paper(s)`,
+    );
+    reRenderPanel(doc, "evidence");
+  });
+  tabRow.appendChild(verifyAllBtn);
   const setupBtn = doc.createElement("button");
   setupBtn.textContent = "Extraction Template";
   setupBtn.style.cssText =
@@ -3417,14 +4156,21 @@ function buildEvidencePanel(doc: Document): HTMLElement {
     "padding:2px 8px;font-size:10px;border:1px solid #0369a1;border-radius:4px;background:#0369a1;color:#fff;cursor:pointer;font-family:inherit;margin-left:4px;";
   extractAllBtn.addEventListener("click", async () => {
     if (!currentState) return;
+    const paperIds = currentState.papers
+      .filter(
+        (paper) =>
+          paper.status === "included" &&
+          (paper.screeningStage === "final" || !paper.screeningStage),
+      )
+      .map((paper) => paper.id);
+    if (!paperIds.length) {
+      toast(
+        doc,
+        "No included papers. Mark papers as included in Screening & Triage first.",
+      );
+      return;
+    }
     try {
-      const paperIds = currentState.papers
-        .filter(
-          (paper) =>
-            paper.status === "included" &&
-            (paper.screeningStage === "final" || !paper.screeningStage),
-        )
-        .map((paper) => paper.id);
       const job = await getSRService().startReviewJob(
         currentState,
         "extraction",
@@ -3437,6 +4183,83 @@ function buildEvidencePanel(doc: Document): HTMLElement {
     }
   });
   tabRow.appendChild(extractAllBtn);
+  const analyzeAllBtn = doc.createElement("button");
+  analyzeAllBtn.textContent = "Analyze All Included";
+  analyzeAllBtn.title =
+    "Extract included papers missing or with failed extraction, then run synthesis";
+  analyzeAllBtn.style.cssText =
+    "padding:2px 8px;font-size:10px;border:1px solid #7c3aed;border-radius:4px;background:#7c3aed;color:#fff;cursor:pointer;font-family:inherit;margin-left:4px;font-weight:600;";
+  analyzeAllBtn.addEventListener("click", async () => {
+    if (!currentState) return;
+    const template = getSRService().getExtractionTemplate(currentState);
+    if (!template) {
+      toast(doc, "Approve an extraction template first");
+      openExtractionWorkspace(doc);
+      return;
+    }
+    const includedCount = currentState.papers.filter(
+      (paper) =>
+        paper.status === "included" &&
+        (paper.screeningStage === "final" || !paper.screeningStage),
+    ).length;
+    if (!includedCount) {
+      toast(
+        doc,
+        "No included papers. Mark papers as included in Screening & Triage first.",
+      );
+      return;
+    }
+    try {
+      const job = await getSRService().startEvidenceAnalysisJob(currentState);
+      toast(
+        doc,
+        `Evidence analysis queued for ${job.paperIds.length} paper(s) (extraction → synthesis)`,
+      );
+      reRenderPanel(doc, "evidence");
+    } catch (error) {
+      toast(doc, error instanceof Error ? error.message : String(error));
+    }
+  });
+  tabRow.appendChild(analyzeAllBtn);
+  const retryFailedBtn = doc.createElement("button");
+  retryFailedBtn.textContent = "Retry Failed Fields";
+  const failedCount = getPapersWithFailedExtractions(currentState).length;
+  retryFailedBtn.title =
+    "Re-extract papers that have any failed extraction metric";
+  retryFailedBtn.style.cssText =
+    "padding:2px 8px;font-size:10px;border:1px solid #b45309;border-radius:4px;background:transparent;color:#b45309;cursor:pointer;font-family:inherit;margin-left:4px;";
+  if (!failedCount) {
+    retryFailedBtn.disabled = true;
+    retryFailedBtn.style.opacity = "0.5";
+    retryFailedBtn.style.cursor = "not-allowed";
+  }
+  retryFailedBtn.addEventListener("click", async () => {
+    if (!currentState) return;
+    try {
+      const job = await getSRService().startFailedExtractionRetry(currentState);
+      if (!job) {
+        toast(doc, "No papers with failed extractions to retry");
+        return;
+      }
+      toast(
+        doc,
+        `Retry queued for ${job.paperIds.length} paper(s) with failed metrics`,
+      );
+      reRenderPanel(doc, "evidence");
+    } catch (error) {
+      toast(doc, error instanceof Error ? error.message : String(error));
+    }
+  });
+  tabRow.appendChild(retryFailedBtn);
+  const logsBtn = doc.createElement("button");
+  logsBtn.textContent = "View Logs";
+  logsBtn.title = "View why each paper's extraction succeeded or failed";
+  logsBtn.style.cssText =
+    "padding:2px 8px;font-size:10px;border:1px solid var(--border-primary);border-radius:4px;background:transparent;color:var(--text-secondary);cursor:pointer;font-family:inherit;margin-left:4px;";
+  logsBtn.addEventListener("click", () => {
+    openExtractionLogsModal(doc);
+  });
+  tabRow.appendChild(logsBtn);
   const tableBtn = doc.createElement("button");
   tableBtn.textContent = "Open in Table";
   tableBtn.style.cssText =
@@ -4945,16 +5768,27 @@ function buildGapPanel(doc: Document): HTMLElement {
   refreshBtn.addEventListener("click", async () => {
     if (!currentState) return;
     const readiness = getSRService().getSynthesisReadiness(currentState);
-    if (readiness.verified === 0) {
+    if (readiness.verified === 0 && readiness.proposed === 0) {
       toast(
         doc,
-        readiness.proposed
-          ? `${readiness.proposed} extraction proposal(s) require verification before gap analysis`
-          : "Extract and verify evidence before generating gap analysis",
+        "No extraction results are available. Extract evidence in the Evidence tab first.",
       );
-      currentPanel = "evidence";
-      reRenderPanel(doc, "evidence");
       return;
+    }
+    if (readiness.verified === 0) {
+      const auto = getSRService().autoVerifyValidProposals(currentState);
+      if (auto.verifiedRows === 0) {
+        toast(
+          doc,
+          `${readiness.proposed} extraction proposal(s) require verification before gap analysis. Open the Evidence tab to verify or correct them.`,
+        );
+        return;
+      }
+      await getSRService().save(currentState);
+      toast(
+        doc,
+        `Auto-verified ${auto.verifiedRows} valid proposal(s) before regenerating gaps`,
+      );
     }
     const synthesis = getSRService().runSynthesis(currentState, true);
     if (!synthesis.domains.length) {
@@ -4970,6 +5804,44 @@ function buildGapPanel(doc: Document): HTMLElement {
     toast(doc, "Gap analysis draft regenerated");
   });
   gapHdr.appendChild(refreshBtn);
+  const analyzeAllBtn = doc.createElement("button");
+  analyzeAllBtn.textContent = "Analyze All Included";
+  analyzeAllBtn.title =
+    "Extract papers missing or with failed extraction, run synthesis, then generate gap analysis";
+  analyzeAllBtn.style.cssText =
+    "padding:2px 8px;font-size:10px;border:1px solid #7c3aed;border-radius:4px;background:#7c3aed;color:#fff;cursor:pointer;font-family:inherit;font-weight:600;";
+  analyzeAllBtn.addEventListener("click", async () => {
+    if (!currentState) return;
+    const template = getSRService().getExtractionTemplate(currentState);
+    if (!template) {
+      toast(doc, "Approve an extraction template first");
+      openExtractionWorkspace(doc);
+      return;
+    }
+    const includedCount = currentState.papers.filter(
+      (paper) =>
+        paper.status === "included" &&
+        (paper.screeningStage === "final" || !paper.screeningStage),
+    ).length;
+    if (!includedCount) {
+      toast(
+        doc,
+        "No included papers. Mark papers as included in Screening & Triage first.",
+      );
+      return;
+    }
+    try {
+      const job = await getSRService().startGapAnalysisJob(currentState);
+      toast(
+        doc,
+        `Full gap analysis queued for ${job.paperIds.length} paper(s) (extract → synthesis → gaps)`,
+      );
+      reRenderPanel(doc, "gaps");
+    } catch (error) {
+      toast(doc, error instanceof Error ? error.message : String(error));
+    }
+  });
+  gapHdr.appendChild(analyzeAllBtn);
   const exportBtn = doc.createElement("button");
   exportBtn.textContent = "Export";
   exportBtn.style.cssText =
@@ -6079,6 +6951,11 @@ function applyDecision(decision: ScreeningDecision, doc: Document): void {
     showReason = false;
   }
   getSRStore().saveState(currentState);
+  const list = contentArea?.querySelector(".sr-art-list");
+  const changedRow = list?.querySelector(
+    `.sr-art[data-sid="${paper.id}"]`,
+  ) as HTMLElement | null;
+  if (changedRow) applyArticleRowStatusStyles(changedRow, paper);
   toast(doc, "Marked as " + decision);
   advanceToNextPaper(doc, next);
 }
@@ -6164,14 +7041,15 @@ function advanceToNextPaper(
   showNote = false;
   showReason = false;
   showLabelRow = false;
+  showSourceLabelRow = false;
   if (target) {
-    scrActive = target.id;
-    reRenderPanel(doc, "screening", true);
-    scrollActivePaperIntoView(doc);
+    selectScreeningPaper(doc, target.id, {
+      resetDetailScroll: true,
+      scrollIntoView: true,
+    });
     return;
   }
-  scrActive = null;
-  reRenderPanel(doc, "screening", true);
+  selectScreeningPaper(doc, null, { resetDetailScroll: true });
 }
 
 function acceptCurrentSuggestion(doc: Document, paperId?: number): void {
@@ -6187,7 +7065,14 @@ function acceptCurrentSuggestion(doc: Document, paperId?: number): void {
     doc,
     `${source === "model" ? "AI" : "Keyword"} suggestion accepted as a confirmed decision`,
   );
-  scrActive = targetId;
+  const paper = currentState.papers.find((p) => p.id === targetId);
+  if (paper) {
+    const list = contentArea?.querySelector(".sr-art-list");
+    const row = list?.querySelector(
+      `.sr-art[data-sid="${paper.id}"]`,
+    ) as HTMLElement | null;
+    if (row) applyArticleRowStatusStyles(row, paper);
+  }
   advanceToNextPaper(doc, next);
 }
 
@@ -6196,18 +7081,20 @@ function navigateToNext(doc: Document): void {
   const filtered = scrFiltered();
   if (filtered.length === 0) return;
   if (scrActive === null) {
-    scrActive = filtered[0].id;
-    reRenderPanel(doc, "screening", true);
-    scrollActivePaperIntoView(doc);
+    selectScreeningPaper(doc, filtered[0].id, {
+      resetDetailScroll: true,
+      scrollIntoView: true,
+    });
     return;
   }
   const idx = filtered.findIndex(
     (p: SystematicReviewPaper) => p.id === scrActive,
   );
   if (idx >= 0 && idx < filtered.length - 1) {
-    scrActive = filtered[idx + 1].id;
-    reRenderPanel(doc, "screening", true);
-    scrollActivePaperIntoView(doc);
+    selectScreeningPaper(doc, filtered[idx + 1].id, {
+      resetDetailScroll: true,
+      scrollIntoView: true,
+    });
   }
 }
 
@@ -6216,18 +7103,20 @@ function navigateToPrev(doc: Document): void {
   const filtered = scrFiltered();
   if (filtered.length === 0) return;
   if (scrActive === null) {
-    scrActive = filtered[filtered.length - 1].id;
-    reRenderPanel(doc, "screening", true);
-    scrollActivePaperIntoView(doc);
+    selectScreeningPaper(doc, filtered[filtered.length - 1].id, {
+      resetDetailScroll: true,
+      scrollIntoView: true,
+    });
     return;
   }
   const idx = filtered.findIndex(
     (p: SystematicReviewPaper) => p.id === scrActive,
   );
   if (idx > 0) {
-    scrActive = filtered[idx - 1].id;
-    reRenderPanel(doc, "screening", true);
-    scrollActivePaperIntoView(doc);
+    selectScreeningPaper(doc, filtered[idx - 1].id, {
+      resetDetailScroll: true,
+      scrollIntoView: true,
+    });
   }
 }
 
@@ -6908,6 +7797,299 @@ function openExtractionWorkspace(doc: Document, pid?: number): void {
   mountReviewSheet(doc, overlay);
 }
 
+function openExtractionLogsModal(doc: Document, paperId?: number): void {
+  if (!currentState) return;
+  const included = getIncludedPapers(currentState);
+  const targets = paperId
+    ? currentState.papers.filter((paper) => paper.id === paperId)
+    : included;
+  if (!targets.length) {
+    toast(
+      doc,
+      paperId
+        ? `No paper found with ID ${paperId}`
+        : "No included papers to display logs for",
+    );
+    return;
+  }
+  const wrapper = doc.createElement("div");
+  wrapper.style.cssText =
+    "position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px;";
+  const modal = doc.createElement("div");
+  modal.style.cssText =
+    "background:var(--background-primary);border:1px solid var(--border-primary);border-radius:12px;width:840px;max-width:96vw;max-height:94vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3);font-size:13px;";
+  wrapper.appendChild(modal);
+
+  const header = doc.createElement("div");
+  header.style.cssText =
+    "display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border-primary);background:var(--background-secondary);";
+  const title = doc.createElement("div");
+  title.textContent = paperId
+    ? `Extraction log · Paper ${paperId}`
+    : "Extraction logs · included papers";
+  title.style.cssText = "font-size:16px;font-weight:700;";
+  header.appendChild(title);
+  const close = doc.createElement("button");
+  close.textContent = "Close";
+  close.style.cssText =
+    "padding:4px 10px;border:1px solid var(--border-primary);border-radius:5px;background:transparent;color:var(--text-secondary);cursor:pointer;";
+  close.addEventListener("click", () => wrapper.remove());
+  header.appendChild(close);
+  modal.appendChild(header);
+
+  const toolbar = doc.createElement("div");
+  toolbar.style.cssText =
+    "display:flex;align-items:center;gap:6px;padding:8px 14px;border-bottom:1px solid var(--border-secondary);background:var(--background-primary);flex-wrap:wrap;";
+  const filterAll = doc.createElement("button");
+  filterAll.textContent = "All";
+  filterAll.style.cssText =
+    "padding:2px 8px;font-size:10px;border:1px solid var(--border-primary);border-radius:10px;background:var(--highlight-primary);color:#fff;cursor:pointer;";
+  const filterFailed = doc.createElement("button");
+  filterFailed.textContent = "Failed only";
+  filterFailed.style.cssText =
+    "padding:2px 8px;font-size:10px;border:1px solid var(--border-primary);border-radius:10px;background:transparent;color:var(--text-secondary);cursor:pointer;";
+  const filterClean = doc.createElement("button");
+  filterClean.textContent = "Clean only";
+  filterClean.style.cssText =
+    "padding:2px 8px;font-size:10px;border:1px solid var(--border-primary);border-radius:10px;background:transparent;color:var(--text-secondary);cursor:pointer;";
+  let mode: "all" | "failed" | "clean" = "all";
+  const setMode = (next: "all" | "failed" | "clean"): void => {
+    mode = next;
+    const active = (button: HTMLElement): string =>
+      "padding:2px 8px;font-size:10px;border:1px solid var(--border-primary);border-radius:10px;cursor:pointer;";
+    filterAll.style.cssText =
+      active(filterAll) +
+      `background:${mode === "all" ? "var(--highlight-primary)" : "transparent"};color:${mode === "all" ? "#fff" : "var(--text-secondary)"};`;
+    filterFailed.style.cssText =
+      active(filterFailed) +
+      `background:${mode === "failed" ? "var(--highlight-primary)" : "transparent"};color:${mode === "failed" ? "#fff" : "var(--text-secondary)"};`;
+    filterClean.style.cssText =
+      active(filterClean) +
+      `background:${mode === "clean" ? "var(--highlight-primary)" : "transparent"};color:${mode === "clean" ? "#fff" : "var(--text-secondary)"};`;
+    draw();
+  };
+  filterAll.addEventListener("click", () => setMode("all"));
+  filterFailed.addEventListener("click", () => setMode("failed"));
+  filterClean.addEventListener("click", () => setMode("clean"));
+  toolbar.append(filterAll, filterFailed, filterClean);
+  const spacer = doc.createElement("span");
+  spacer.style.flex = "1";
+  toolbar.appendChild(spacer);
+  const retryAllBtn = doc.createElement("button");
+  retryAllBtn.textContent = "Retry all failed";
+  const failedIds = targets
+    .filter((paper) => hasFailedExtractionMetrics(currentState!, paper.id))
+    .map((paper) => paper.id);
+  if (!failedIds.length) {
+    retryAllBtn.disabled = true;
+    retryAllBtn.style.cssText =
+      "padding:4px 10px;font-size:10px;border:1px solid var(--border-primary);border-radius:4px;background:transparent;color:var(--text-secondary);cursor:not-allowed;opacity:0.5;";
+  } else {
+    retryAllBtn.style.cssText =
+      "padding:4px 10px;font-size:10px;border:1px solid #b45309;border-radius:4px;background:transparent;color:#b45309;cursor:pointer;";
+  }
+  retryAllBtn.addEventListener("click", async () => {
+    try {
+      const job = await getSRService().startFailedExtractionRetry(
+        currentState!,
+      );
+      if (!job) {
+        toast(doc, "No failed extractions to retry");
+        return;
+      }
+      await getSRService().save(currentState!);
+      toast(doc, `Retry queued for ${job.paperIds.length} paper(s)`);
+      reRenderPanel(doc, currentPanel);
+      draw();
+    } catch (error) {
+      toast(doc, error instanceof Error ? error.message : String(error));
+    }
+  });
+  toolbar.appendChild(retryAllBtn);
+  modal.appendChild(toolbar);
+
+  const body = doc.createElement("div");
+  body.style.cssText = "flex:1;overflow:auto;padding:12px 16px;";
+  modal.appendChild(body);
+
+  const draw = (): void => {
+    body.replaceChildren();
+    if (!targets.length) {
+      const empty = doc.createElement("div");
+      empty.textContent = "No included papers to inspect.";
+      empty.style.cssText =
+        "padding:24px;text-align:center;color:var(--text-tertiary);";
+      body.appendChild(empty);
+      return;
+    }
+    const enriched = targets.map((paper) => ({
+      paper,
+      log: collectPaperExtractionLog(currentState!, paper.id),
+    }));
+    const filtered = enriched.filter(({ log }) => {
+      if (mode === "all") return true;
+      const hasIssue =
+        !!log.jobError ||
+        log.sourceWarnings.length > 0 ||
+        log.rowIssues.some((issue) => issue.severity === "error") ||
+        log.missingOutcomes.length > 0;
+      return mode === "failed" ? hasIssue : !hasIssue;
+    });
+    if (!filtered.length) {
+      const empty = doc.createElement("div");
+      empty.textContent =
+        mode === "failed"
+          ? "No extraction failures detected for included papers."
+          : "No clean extractions to show.";
+      empty.style.cssText =
+        "padding:24px;text-align:center;color:var(--text-tertiary);";
+      body.appendChild(empty);
+      return;
+    }
+    filtered.forEach(({ paper, log }) => {
+      const card = doc.createElement("div");
+      card.style.cssText =
+        "margin-bottom:10px;border:1px solid var(--border-secondary);border-radius:8px;overflow:hidden;";
+      const cardHeader = doc.createElement("div");
+      cardHeader.style.cssText =
+        "display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--background-secondary);font-size:11px;";
+      const paperTitle = doc.createElement("strong");
+      const item = Zotero.Items.get(paper.id);
+      paperTitle.textContent = item
+        ? (item.getField("title") as string) || `Item ${paper.id}`
+        : `Item ${paper.id}`;
+      paperTitle.style.flex = "1";
+      cardHeader.appendChild(paperTitle);
+      const counts: string[] = [];
+      if (log.jobError) counts.push("job error");
+      if (log.sourceWarnings.length)
+        counts.push(`${log.sourceWarnings.length} source warning(s)`);
+      const errorRows = log.rowIssues.filter(
+        (issue) => issue.severity === "error",
+      ).length;
+      const warningRows = log.rowIssues.filter(
+        (issue) => issue.severity === "warning",
+      ).length;
+      if (errorRows) counts.push(`${errorRows} row error(s)`);
+      if (warningRows) counts.push(`${warningRows} row warning(s)`);
+      if (log.missingOutcomes.length)
+        counts.push(`${log.missingOutcomes.length} missing required`);
+      const statusSpan = doc.createElement("span");
+      statusSpan.textContent = counts.length ? counts.join(" · ") : "clean";
+      statusSpan.style.cssText = `color:${counts.length ? "#b45309" : "#15803d"};font-weight:600;`;
+      cardHeader.appendChild(statusSpan);
+      card.appendChild(cardHeader);
+
+      const detail = doc.createElement("div");
+      detail.style.cssText = "padding:8px 10px;font-size:11px;line-height:1.5;";
+      let hasAny = false;
+      if (log.sourceKind) {
+        const src = doc.createElement("div");
+        src.textContent = `Source: ${log.sourceKind}`;
+        src.style.color = "var(--text-tertiary)";
+        detail.appendChild(src);
+      }
+      if (log.jobError) {
+        const err = doc.createElement("div");
+        err.textContent = `Job error: ${log.jobError}`;
+        err.style.cssText =
+          "color:#b91c1c;background:#fee2e2;padding:5px 7px;border-radius:4px;margin-top:4px;";
+        detail.appendChild(err);
+        hasAny = true;
+      }
+      if (log.sourceWarnings.length) {
+        const src = doc.createElement("div");
+        src.textContent = `Source warnings: ${log.sourceWarnings.join("; ")}`;
+        src.style.cssText =
+          "color:#b45309;background:#fef3c7;padding:5px 7px;border-radius:4px;margin-top:4px;";
+        detail.appendChild(src);
+        hasAny = true;
+      }
+      if (log.missingOutcomes.length) {
+        const miss = doc.createElement("div");
+        miss.textContent = `Missing required outcomes: ${log.missingOutcomes
+          .map((entry) => entry.name)
+          .join(", ")}`;
+        miss.style.cssText =
+          "color:#b45309;background:#fef3c7;padding:5px 7px;border-radius:4px;margin-top:4px;";
+        detail.appendChild(miss);
+        hasAny = true;
+      }
+      if (log.rowIssues.length) {
+        const list = doc.createElement("div");
+        list.style.cssText =
+          "margin-top:6px;border:1px solid var(--border-secondary);border-radius:5px;padding:5px 7px;background:var(--background-primary);";
+        const headingEl = doc.createElement("strong");
+        headingEl.textContent = `Row issues (${log.rowIssues.length})`;
+        headingEl.style.cssText = "font-size:10px;color:var(--text-tertiary);";
+        list.appendChild(headingEl);
+        const ul = doc.createElement("ul");
+        ul.style.cssText =
+          "margin:4px 0 0;padding-left:18px;max-height:160px;overflow:auto;";
+        log.rowIssues.forEach((issue) => {
+          const li = doc.createElement("li");
+          li.textContent = `[${issue.severity}] ${issue.outcome || ""} ${issue.effectType || ""} ${issue.code}: ${issue.message}${issue.rawValue ? ` (raw: ${issue.rawValue})` : ""}`;
+          li.style.cssText = `font-size:10px;color:${issue.severity === "error" ? "#b91c1c" : "#b45309"};margin-bottom:2px;`;
+          ul.appendChild(li);
+        });
+        list.appendChild(ul);
+        detail.appendChild(list);
+        hasAny = true;
+      }
+      if (!hasAny) {
+        const ok = doc.createElement("div");
+        ok.textContent =
+          "All extraction rows are clean. No validation issues detected.";
+        ok.style.cssText = "color:#15803d;margin-top:4px;";
+        detail.appendChild(ok);
+      }
+      const actions = doc.createElement("div");
+      actions.style.cssText =
+        "display:flex;gap:5px;margin-top:8px;justify-content:flex-end;";
+      const openWs = doc.createElement("button");
+      openWs.textContent = "Open workspace";
+      openWs.style.cssText =
+        "padding:3px 9px;font-size:10px;border:1px solid var(--border-primary);border-radius:4px;background:transparent;color:var(--text-secondary);cursor:pointer;";
+      openWs.addEventListener("click", () => {
+        wrapper.remove();
+        openExtractionWorkspace(doc, paper.id);
+      });
+      actions.appendChild(openWs);
+      if (hasAny) {
+        const retryBtn = doc.createElement("button");
+        retryBtn.textContent = "Retry this paper";
+        retryBtn.style.cssText =
+          "padding:3px 9px;font-size:10px;border:1px solid #b45309;border-radius:4px;background:transparent;color:#b45309;cursor:pointer;";
+        retryBtn.addEventListener("click", async () => {
+          try {
+            const job = await getSRService().startReviewJob(
+              currentState!,
+              "extraction",
+              [paper.id],
+            );
+            await getSRService().save(currentState!);
+            toast(doc, `Retry queued for paper ${paper.id}`);
+            reRenderPanel(doc, currentPanel);
+            draw();
+            void job;
+          } catch (error) {
+            toast(doc, error instanceof Error ? error.message : String(error));
+          }
+        });
+        actions.appendChild(retryBtn);
+      }
+      detail.appendChild(actions);
+      card.appendChild(detail);
+      body.appendChild(card);
+    });
+  };
+  draw();
+  wrapper.addEventListener("click", (event) => {
+    if (event.target === wrapper) wrapper.remove();
+  });
+  mountReviewSheet(doc, wrapper);
+}
+
 function openExtractionModal(_doc: Document, pid: number): void {
   const doc = _doc;
   if (!currentState) return;
@@ -7272,15 +8454,322 @@ function openExtractionModal(_doc: Document, pid: number): void {
 // ============================================================
 // CRITERIA / KEYWORDS MODAL
 // ============================================================
+
+function buildProtocolTemplateTab(
+  doc: Document,
+  container: HTMLElement,
+  draft: ProtocolRevision,
+  rerender: () => void,
+): void {
+  if (!currentState) return;
+  const section = doc.createElement("section");
+  section.style.cssText =
+    "border:1px solid var(--border-secondary);border-radius:8px;padding:12px;background:var(--background-primary);";
+  const heading = doc.createElement("div");
+  heading.textContent = "Extraction template";
+  heading.style.cssText = "font-size:15px;font-weight:700;margin-bottom:4px;";
+  section.appendChild(heading);
+  const subtext = doc.createElement("div");
+  subtext.textContent =
+    "Define the outcomes, measures, and timepoints the LLM should extract from each included paper. Generate a draft from this protocol, then edit and approve.";
+  subtext.style.cssText =
+    "font-size:11px;color:var(--text-tertiary);margin-bottom:10px;line-height:1.5;";
+  section.appendChild(subtext);
+
+  const active = getSRService().getExtractionTemplate(currentState);
+  const inProgressDraft = [...currentState.extractionTemplates]
+    .reverse()
+    .find((template) => template.status === "draft");
+  const template = inProgressDraft || active;
+
+  const statusBar = doc.createElement("div");
+  statusBar.style.cssText =
+    "display:flex;gap:8px;align-items:center;margin-bottom:10px;font-size:11px;flex-wrap:wrap;";
+  const statusBadge = doc.createElement("span");
+  statusBadge.textContent = template
+    ? `Status: ${template.status}`
+    : "Status: no template";
+  statusBadge.style.cssText =
+    "padding:2px 8px;border-radius:8px;background:var(--background-secondary);color:var(--text-secondary);font-weight:700;";
+  statusBar.appendChild(statusBadge);
+  if (template) {
+    const link = doc.createElement("span");
+    link.textContent = `${template.outcomes.length} outcome(s) · ${template.revisionId}`;
+    link.style.color = "var(--text-tertiary)";
+    statusBar.appendChild(link);
+  }
+  section.appendChild(statusBar);
+
+  if (!template) {
+    const empty = doc.createElement("div");
+    empty.style.cssText =
+      "padding:16px;border:1px dashed var(--border-primary);border-radius:8px;text-align:center;color:var(--text-secondary);margin-bottom:10px;";
+    empty.textContent =
+      "No extraction template is defined yet. Generate one from this protocol's criteria to begin.";
+    section.appendChild(empty);
+    const generate = doc.createElement("button");
+    generate.textContent = "Generate from criteria";
+    generate.style.cssText =
+      "padding:6px 12px;border:none;border-radius:6px;background:#7c3aed;color:#fff;font-weight:600;cursor:pointer;";
+    generate.addEventListener("click", async () => {
+      generate.disabled = true;
+      generate.textContent = "Generating...";
+      try {
+        await getSRService().proposeTemplate(currentState!);
+        await getSRService().save(currentState!);
+        toast(doc, "Template draft generated from criteria");
+        rerender();
+        reRenderPanel(doc, currentPanel);
+      } catch (error) {
+        generate.disabled = false;
+        generate.textContent = "Generate from criteria";
+        toast(doc, error instanceof Error ? error.message : String(error));
+      }
+    });
+    section.appendChild(generate);
+    container.appendChild(section);
+    return;
+  }
+
+  const nameInput = doc.createElement("input");
+  nameInput.value = template.name;
+  nameInput.placeholder = "Template name";
+  nameInput.style.cssText =
+    "width:100%;padding:6px 8px;margin-bottom:6px;border:1px solid var(--border-primary);border-radius:6px;background:var(--background-primary);color:var(--text-primary);font:inherit;font-size:12px;";
+  section.appendChild(nameInput);
+
+  const instructionsInput = doc.createElement("textarea");
+  instructionsInput.value = template.instructions;
+  instructionsInput.placeholder =
+    "Instructions for AI extraction and reviewer conventions";
+  instructionsInput.style.cssText =
+    "width:100%;min-height:52px;padding:6px 8px;margin-bottom:10px;border:1px solid var(--border-primary);border-radius:6px;background:var(--background-primary);color:var(--text-primary);font:inherit;font-size:12px;resize:vertical;";
+  section.appendChild(instructionsInput);
+
+  const outcomesHeading = doc.createElement("div");
+  outcomesHeading.textContent = "Outcomes";
+  outcomesHeading.style.cssText =
+    "font-size:12px;font-weight:700;margin-bottom:5px;";
+  section.appendChild(outcomesHeading);
+
+  const outcomesContainer = doc.createElement("div");
+  const editableOutcomes = template.outcomes.map((outcome) => ({
+    ...outcome,
+    aliases: [...outcome.aliases],
+    measures: [...outcome.measures],
+    timepoints: [...outcome.timepoints],
+  }));
+  const drawOutcomes = (): void => {
+    outcomesContainer.replaceChildren();
+    editableOutcomes.forEach((outcome, index) => {
+      const card = doc.createElement("div");
+      card.style.cssText =
+        "padding:8px 10px;margin-bottom:6px;border:1px solid var(--border-secondary);border-radius:6px;background:var(--background-secondary);";
+      const grid = doc.createElement("div");
+      grid.style.cssText =
+        "display:grid;grid-template-columns:minmax(160px,1.4fr) minmax(110px,.8fr) minmax(120px,1fr) auto auto;gap:5px;align-items:center;";
+      const nameField = doc.createElement("input");
+      nameField.value = outcome.name;
+      nameField.placeholder = "Outcome name";
+      nameField.style.cssText =
+        "padding:4px;border:1px solid var(--border-primary);border-radius:4px;background:var(--background-primary);color:var(--text-primary);font-size:11px;";
+      nameField.addEventListener("input", () => {
+        outcome.name = nameField.value;
+      });
+      const measuresField = doc.createElement("input");
+      measuresField.value = outcome.measures.join(", ");
+      measuresField.placeholder = "OR, RR, MD";
+      measuresField.title = "Allowed measures (OR, RR, HR, MD, SMD)";
+      measuresField.style.cssText =
+        "padding:4px;border:1px solid var(--border-primary);border-radius:4px;background:var(--background-primary);color:var(--text-primary);font-size:11px;";
+      measuresField.addEventListener("input", () => {
+        outcome.measures = measuresField.value
+          .split(",")
+          .map((value) => value.trim().toUpperCase())
+          .filter((value) =>
+            ["OR", "RR", "HR", "MD", "SMD"].includes(value),
+          ) as typeof outcome.measures;
+      });
+      const timepointsField = doc.createElement("input");
+      timepointsField.value = outcome.timepoints.join(", ");
+      timepointsField.placeholder = "Timepoints";
+      timepointsField.style.cssText =
+        "padding:4px;border:1px solid var(--border-primary);border-radius:4px;background:var(--background-primary);color:var(--text-primary);font-size:11px;";
+      timepointsField.addEventListener("input", () => {
+        outcome.timepoints = timepointsField.value
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean);
+      });
+      const requiredLabel = doc.createElement("label");
+      requiredLabel.style.cssText =
+        "display:flex;align-items:center;gap:3px;font-size:10px;white-space:nowrap;";
+      const requiredInput = doc.createElement("input");
+      requiredInput.type = "checkbox";
+      requiredInput.checked = outcome.required;
+      requiredInput.addEventListener("change", () => {
+        outcome.required = requiredInput.checked;
+      });
+      requiredLabel.append(requiredInput, doc.createTextNode("Required"));
+      const removeBtn = doc.createElement("button");
+      removeBtn.textContent = "Remove";
+      removeBtn.style.cssText =
+        "padding:3px 8px;border:1px solid #dc2626;border-radius:4px;background:transparent;color:#dc2626;cursor:pointer;font-size:10px;";
+      removeBtn.addEventListener("click", () => {
+        editableOutcomes.splice(index, 1);
+        drawOutcomes();
+      });
+      grid.append(
+        nameField,
+        measuresField,
+        timepointsField,
+        requiredLabel,
+        removeBtn,
+      );
+      card.appendChild(grid);
+      const aliasesField = doc.createElement("input");
+      aliasesField.value = outcome.aliases.join(", ");
+      aliasesField.placeholder = "Aliases (comma-separated)";
+      aliasesField.style.cssText =
+        "width:100%;padding:4px 6px;margin-top:5px;border:1px solid var(--border-primary);border-radius:4px;background:var(--background-primary);color:var(--text-primary);font-size:10px;";
+      aliasesField.addEventListener("input", () => {
+        outcome.aliases = aliasesField.value
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean);
+      });
+      card.appendChild(aliasesField);
+      const descField = doc.createElement("textarea");
+      descField.value = outcome.description;
+      descField.placeholder = "Description (optional)";
+      descField.style.cssText =
+        "width:100%;min-height:32px;padding:4px 6px;margin-top:4px;border:1px solid var(--border-primary);border-radius:4px;background:var(--background-primary);color:var(--text-primary);font-size:10px;resize:vertical;";
+      descField.addEventListener("input", () => {
+        outcome.description = descField.value;
+      });
+      card.appendChild(descField);
+      outcomesContainer.appendChild(card);
+    });
+  };
+  drawOutcomes();
+  section.appendChild(outcomesContainer);
+
+  const addOutcome = doc.createElement("button");
+  addOutcome.textContent = "Add outcome";
+  addOutcome.style.cssText =
+    "padding:4px 10px;margin-top:4px;border:1px solid var(--border-primary);border-radius:5px;background:transparent;color:var(--text-secondary);cursor:pointer;font-size:11px;";
+  addOutcome.addEventListener("click", () => {
+    editableOutcomes.push({
+      id: `outcome_custom_${Date.now()}_${editableOutcomes.length}`,
+      name: "",
+      aliases: [],
+      description: "",
+      measures: ["OR"],
+      timepoints: [],
+      required: true,
+    });
+    drawOutcomes();
+  });
+  section.appendChild(addOutcome);
+
+  const actionsRow = doc.createElement("div");
+  actionsRow.style.cssText =
+    "display:flex;gap:6px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap;";
+  const regenerate = doc.createElement("button");
+  regenerate.textContent = "Regenerate draft";
+  regenerate.style.cssText =
+    "padding:5px 10px;border:1px solid var(--border-primary);border-radius:5px;background:transparent;color:var(--text-secondary);cursor:pointer;font-size:11px;";
+  regenerate.addEventListener("click", async () => {
+    regenerate.disabled = true;
+    regenerate.textContent = "Regenerating...";
+    try {
+      await getSRService().proposeTemplate(
+        currentState!,
+        instructionsInput.value,
+      );
+      await getSRService().save(currentState!);
+      toast(doc, "Template draft regenerated");
+      rerender();
+      reRenderPanel(doc, currentPanel);
+    } catch (error) {
+      regenerate.disabled = false;
+      regenerate.textContent = "Regenerate draft";
+      toast(doc, error instanceof Error ? error.message : String(error));
+    }
+  });
+  actionsRow.appendChild(regenerate);
+
+  const openWorkspace = doc.createElement("button");
+  openWorkspace.textContent = "Open full workspace";
+  openWorkspace.style.cssText =
+    "padding:5px 10px;border:1px solid var(--border-primary);border-radius:5px;background:transparent;color:var(--text-secondary);cursor:pointer;font-size:11px;";
+  openWorkspace.addEventListener("click", () => {
+    openExtractionWorkspace(doc);
+  });
+  actionsRow.appendChild(openWorkspace);
+
+  const saveDraft = doc.createElement("button");
+  saveDraft.textContent =
+    template.status === "active" ? "Save new revision" : "Save & approve";
+  saveDraft.style.cssText =
+    "padding:5px 12px;border:none;border-radius:5px;background:#7c3aed;color:#fff;font-weight:700;cursor:pointer;font-size:11px;";
+  saveDraft.addEventListener("click", async () => {
+    const validOutcomes = editableOutcomes.filter(
+      (outcome) => outcome.name.trim() && outcome.measures.length,
+    );
+    if (!validOutcomes.length) {
+      toast(doc, "Add at least one named outcome with a measure");
+      return;
+    }
+    const edited: ExtractionTemplate = {
+      ...template,
+      name: nameInput.value.trim() || "Extraction Template",
+      instructions: instructionsInput.value.trim(),
+      outcomes: validOutcomes,
+    };
+    const updated = getSRService().updateTemplate(currentState!, edited);
+    getSRService().activateTemplate(currentState!, updated.id);
+    await getSRService().save(currentState!);
+    toast(doc, "Extraction template approved");
+    rerender();
+    reRenderPanel(doc, currentPanel);
+  });
+  actionsRow.appendChild(saveDraft);
+  section.appendChild(actionsRow);
+
+  container.appendChild(section);
+}
+
 function openCriteriaModal(doc: Document): void {
   if (!currentState) return;
   const service = getSRService();
   const active = getActiveProtocolRevision(currentState.protocol);
   let draft: ProtocolRevision = JSON.parse(JSON.stringify(active));
   const uploadedDocs: ExtractedDocument[] = [];
-  let activeProtocolTab: "scope" | "eligibility" | "mapping" = "scope";
+  let activeProtocolTab: "scope" | "eligibility" | "mapping" | "template" =
+    "scope";
   let protocolPresets: ProtocolPreset[] = [];
   let selectedPresetId = "";
+  type GenerationStatus = "idle" | "running" | "complete" | "error";
+  let generationStatus: Record<
+    "scope" | "eligibility" | "mapping" | "template",
+    GenerationStatus
+  > = {
+    scope: "idle",
+    eligibility: "idle",
+    mapping: "idle",
+    template: "idle",
+  };
+  let generationResult: ProtocolGenerationResult | null = null;
+  const prefillSteps: Record<
+    "scope" | "eligibility" | "mapping" | "template",
+    boolean
+  > = {
+    scope: true,
+    eligibility: true,
+    mapping: true,
+    template: true,
+  };
 
   const wrapper = doc.createElement("div");
   wrapper.style.cssText =
@@ -7347,7 +8836,7 @@ function openCriteriaModal(doc: Document): void {
   const buildProtocolGeneration = (): HTMLElement => {
     const generation = section(
       "Protocol generation",
-      "Generate the question, framework, criteria, eligibility rules, keyword aids, and evidence mappings from the current draft and optional source documents.",
+      "Generate the question, framework, criteria, eligibility rules, keyword aids, evidence mappings, and an extraction template from the current draft and optional source documents. Reassess re-runs all four steps using the whole current protocol and active template as context.",
     );
     const sourceRow = doc.createElement("div");
     sourceRow.style.cssText =
@@ -7374,7 +8863,7 @@ function openCriteriaModal(doc: Document): void {
     const sourceCount = doc.createElement("span");
     sourceCount.textContent =
       uploadedDocs.length === 0
-        ? "No uploaded sources; the current draft will be used"
+        ? "No uploaded sources; the current draft and active template will be used as context"
         : uploadedDocs
             .map((item) =>
               item.error ? `${item.fileName} (error)` : item.fileName,
@@ -7383,37 +8872,311 @@ function openCriteriaModal(doc: Document): void {
     sourceCount.style.cssText =
       "font-size:12px;color:var(--text-tertiary);flex:1;";
     sourceRow.appendChild(sourceCount);
+    generation.appendChild(sourceRow);
+
+    const buttonRow = doc.createElement("div");
+    buttonRow.style.cssText =
+      "display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;";
     const generate = doc.createElement("button");
     generate.textContent = "Generate protocol";
     generate.style.cssText = `${buttonStyle}background:#0f766e;border-color:#0f766e;color:white;font-weight:700;`;
-    generate.addEventListener("click", async () => {
-      generate.disabled = true;
-      generate.textContent = "Generating...";
-      try {
-        const revision = await generateProtocolRevision(
-          uploadedDocs.filter((item) => !item.error),
-          {
-            activeRevisionId: draft.id,
-            revisions: [draft],
-          },
-          currentState!.labelDefs,
-        );
-        service.applyProtocolRevision(currentState!, revision);
+    const reassess = doc.createElement("button");
+    reassess.textContent = "Reassess protocol";
+    reassess.style.cssText = `${buttonStyle}background:#7c3aed;border-color:#7c3aed;color:white;font-weight:700;`;
+    buttonRow.appendChild(generate);
+    buttonRow.appendChild(reassess);
+    generation.appendChild(buttonRow);
+
+    const progressContainer = doc.createElement("div");
+    progressContainer.style.cssText =
+      "margin-top:10px;display:flex;flex-direction:column;gap:6px;";
+    generation.appendChild(progressContainer);
+
+    const resultBanner = doc.createElement("div");
+    resultBanner.style.cssText =
+      "margin-top:8px;display:none;flex-direction:column;gap:6px;padding:8px 10px;border:1px solid var(--border-secondary);border-radius:6px;background:var(--background-secondary);font-size:11px;";
+    generation.appendChild(resultBanner);
+
+    const stepMeta: Array<{
+      key: ProtocolGenerationStep;
+      label: string;
+      summary: string;
+    }> = [
+      { key: "scope", label: "1. Scope", summary: "" },
+      { key: "eligibility", label: "2. Eligibility", summary: "" },
+      { key: "mapping", label: "3. Evidence mapping", summary: "" },
+      {
+        key: "template",
+        label: "4. Extraction template",
+        summary: "",
+      },
+    ];
+
+    const stepRows = new Map<ProtocolGenerationStep, HTMLElement>();
+    const stepCheckboxes = new Map<ProtocolGenerationStep, HTMLInputElement>();
+    const stepSummaries = new Map<ProtocolGenerationStep, HTMLElement>();
+    stepMeta.forEach((meta) => {
+      const row = doc.createElement("div");
+      row.style.cssText =
+        "display:flex;align-items:center;gap:8px;padding:6px 8px;border:1px solid var(--border-secondary);border-radius:6px;background:var(--background-secondary);";
+      const status = doc.createElement("span");
+      status.textContent = "○";
+      status.style.cssText = "font-size:14px;width:18px;text-align:center;";
+      const label = doc.createElement("strong");
+      label.textContent = meta.label;
+      label.style.cssText = "min-width:140px;";
+      const summary = doc.createElement("span");
+      summary.style.cssText =
+        "flex:1;font-size:11px;color:var(--text-tertiary);";
+      summary.textContent = "idle";
+      const checkbox = doc.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = prefillSteps[meta.key];
+      checkbox.title = "Uncheck to skip prefilling this step into the draft";
+      checkbox.addEventListener("change", () => {
+        prefillSteps[meta.key] = checkbox.checked;
+      });
+      row.append(status, label, summary, checkbox);
+      progressContainer.appendChild(row);
+      stepRows.set(meta.key, status);
+      stepSummaries.set(meta.key, summary);
+      stepCheckboxes.set(meta.key, checkbox);
+    });
+
+    const applyProposalsToDraft = async (
+      result: ProtocolGenerationResult,
+    ): Promise<{
+      applied: number;
+      templateDrafted: boolean;
+      failed: ProtocolGenerationStep[];
+    }> => {
+      let applied = 0;
+      let templateDrafted = false;
+      const failed: ProtocolGenerationStep[] = [];
+      if (prefillSteps.scope && !result.errors.scope) {
+        draft.researchQuestion = result.scope.researchQuestion;
+        draft.framework = result.scope.framework;
+        draft.frameworkReason = result.scope.frameworkReason;
+        draft.dimensions = JSON.parse(
+          JSON.stringify(result.scope.dimensions),
+        ) as ProtocolRevision["dimensions"];
+        applied++;
+      } else if (prefillSteps.scope && result.errors.scope) {
+        failed.push("scope");
+      }
+      if (prefillSteps.eligibility && !result.errors.eligibility) {
+        const rules: ProtocolRevision["eligibilityRules"] = [
+          ...result.eligibility.inclusionRules
+            .filter((text) => text.trim())
+            .map((text) => newEligibilityRule("include", text.trim())),
+          ...result.eligibility.exclusionRules
+            .filter((text) => text.trim())
+            .map((text) => newEligibilityRule("exclude", text.trim())),
+        ];
+        draft.eligibilityRules = rules;
+        draft.includeKeywordAids = [...result.eligibility.includeKeywordAids];
+        draft.excludeKeywordAids = [...result.eligibility.excludeKeywordAids];
+        if (result.eligibility.dimensionKeywordAids) {
+          draft.dimensions.forEach((dimension) => {
+            const aids = result.eligibility.dimensionKeywordAids[dimension.key];
+            if (aids) dimension.keywordAids = [...aids];
+          });
+        }
+        applied++;
+      } else if (prefillSteps.eligibility && result.errors.eligibility) {
+        failed.push("eligibility");
+      }
+      if (prefillSteps.mapping && !result.errors.mapping) {
+        draft.dimensions.forEach((dimension) => {
+          const labels = result.mapping.evidenceLabels[dimension.key];
+          dimension.evidenceLabels = labels ? [...labels] : [];
+        });
+        applied++;
+      } else if (prefillSteps.mapping && result.errors.mapping) {
+        failed.push("mapping");
+      }
+      if (prefillSteps.template && !result.errors.template) {
+        service.addExtractionTemplateProposal(currentState!, result.template);
         await service.save(currentState!);
-        draft = JSON.parse(JSON.stringify(revision));
-        syncModuleVarsFromState();
-        toast(doc, "Generated protocol revision applied");
+        applied++;
+        templateDrafted = true;
+      } else if (prefillSteps.template && result.errors.template) {
+        failed.push("template");
+      }
+      if (applied > 0) {
+        toast(
+          doc,
+          `Applied ${applied} selected step${applied === 1 ? "" : "s"} to the draft`,
+        );
         render();
         reRenderPanel(doc, currentPanel);
-      } catch (error) {
-        Zotero.debug(`[seerai] Protocol generation failed: ${error}`);
-        toast(doc, `Protocol generation failed: ${(error as Error).message}`);
-        generate.disabled = false;
-        generate.textContent = "Generate protocol";
+      } else {
+        toast(doc, "No steps were selected to prefill");
       }
+      return { applied, templateDrafted, failed };
+    };
+
+    const renderResultBanner = (params: {
+      applied: number;
+      templateDrafted: boolean;
+      failed: ProtocolGenerationStep[];
+    }): void => {
+      const { applied, templateDrafted, failed } = params;
+      resultBanner.replaceChildren();
+      if (applied === 0 && failed.length === 0 && !templateDrafted) {
+        resultBanner.style.display = "none";
+        return;
+      }
+      resultBanner.style.display = "flex";
+      const heading = doc.createElement("div");
+      heading.style.cssText = "font-weight:700;font-size:12px;";
+      heading.textContent =
+        applied > 0
+          ? `${applied} step${applied === 1 ? "" : "s"} prefilled into the draft.`
+          : "Generation complete.";
+      resultBanner.appendChild(heading);
+      if (templateDrafted) {
+        const templateLine = doc.createElement("div");
+        templateLine.style.cssText =
+          "display:flex;align-items:center;gap:8px;flex-wrap:wrap;";
+        const templateNote = doc.createElement("span");
+        templateNote.style.color = "#0f766e";
+        templateNote.textContent =
+          "Extraction template draft saved. Approve it to enable extraction.";
+        templateLine.appendChild(templateNote);
+        const openBtn = doc.createElement("button");
+        openBtn.textContent = "Open Extraction Workspace";
+        openBtn.style.cssText =
+          "padding:3px 9px;font-size:11px;font-weight:600;border:1px solid #7c3aed;border-radius:4px;background:#7c3aed;color:#fff;cursor:pointer;font-family:inherit;";
+        openBtn.addEventListener("click", () => {
+          openExtractionWorkspace(doc);
+        });
+        templateLine.appendChild(openBtn);
+        resultBanner.appendChild(templateLine);
+      }
+      if (failed.length > 0) {
+        const failedLine = doc.createElement("div");
+        failedLine.style.color = "#b91c1c";
+        failedLine.textContent = `Failed: ${failed.join(", ")}. Errors are listed under each step.`;
+        resultBanner.appendChild(failedLine);
+      }
+    };
+
+    const runGeneration = async (
+      mode: "generate" | "reassess",
+    ): Promise<void> => {
+      generate.disabled = true;
+      reassess.disabled = true;
+      generationStatus = {
+        scope: "running",
+        eligibility: "running",
+        mapping: "running",
+        template: "running",
+      };
+      generationResult = null;
+      resultBanner.replaceChildren();
+      resultBanner.style.display = "none";
+      stepRows.forEach((status) => {
+        status.textContent = "…";
+        status.style.color = "#0f766e";
+      });
+      stepSummaries.forEach((summary) => {
+        summary.textContent = "running";
+      });
+      const onStep = (
+        step: ProtocolGenerationStep,
+        partial: ProtocolGenerationResult,
+      ): void => {
+        generationStatus[step] = partial.errors[step] ? "error" : "complete";
+        const row = stepRows.get(step);
+        const summary = stepSummaries.get(step);
+        const checkbox = stepCheckboxes.get(step);
+        if (row) {
+          if (partial.errors[step]) {
+            row.textContent = "✕";
+            row.style.color = "#dc2626";
+          } else {
+            row.textContent = "✓";
+            row.style.color = "#15803d";
+          }
+        }
+        if (summary) {
+          const err = partial.errors[step];
+          summary.textContent = err
+            ? `error: ${err}`
+            : partial.summary[step] || "complete";
+          summary.style.color = err ? "#b91c1c" : "var(--text-tertiary)";
+          summary.title = err || "";
+        }
+      };
+      try {
+        const baselineRevision =
+          mode === "reassess"
+            ? getActiveProtocolRevision(currentState!.protocol)
+            : draft;
+        const baselineTemplate =
+          mode === "reassess"
+            ? service.getExtractionTemplate(currentState!)
+            : undefined;
+        const result = await service.generateProtocolProposals(
+          currentState!,
+          uploadedDocs.filter((doc) => !doc.error),
+          { baselineRevision, baselineTemplate },
+          onStep,
+        );
+        generationResult = result;
+        Object.entries(generationStatus).forEach(([step, status]) => {
+          if (status === "running") {
+            const err = result.errors[step as ProtocolGenerationStep];
+            generationStatus[step as ProtocolGenerationStep] = err
+              ? "error"
+              : "complete";
+            const row = stepRows.get(step as ProtocolGenerationStep);
+            const summary = stepSummaries.get(step as ProtocolGenerationStep);
+            const checkbox = stepCheckboxes.get(step as ProtocolGenerationStep);
+            if (row) {
+              row.textContent = err ? "✕" : "✓";
+              row.style.color = err ? "#dc2626" : "#15803d";
+            }
+            if (summary) {
+              summary.textContent = err
+                ? `error: ${err}`
+                : result.summary[step as ProtocolGenerationStep] || "complete";
+              summary.style.color = err ? "#b91c1c" : "var(--text-tertiary)";
+              summary.title = err || "";
+            }
+          }
+        });
+        toast(
+          doc,
+          mode === "reassess"
+            ? "Protocol reassessment complete"
+            : "Protocol generation complete",
+        );
+        const applySummary = await applyProposalsToDraft(result);
+        renderResultBanner(applySummary);
+      } catch (error) {
+        Zotero.debug(`[seerai] Protocol ${mode} failed: ${error}`);
+        toast(doc, `Protocol ${mode} failed: ${(error as Error).message}`);
+        stepRows.forEach((row) => {
+          if (row.textContent === "…") {
+            row.textContent = "✕";
+            row.style.color = "#dc2626";
+          }
+        });
+      } finally {
+        generate.disabled = false;
+        reassess.disabled = false;
+      }
+    };
+
+    generate.addEventListener("click", () => {
+      void runGeneration("generate");
     });
-    sourceRow.appendChild(generate);
-    generation.appendChild(sourceRow);
+    reassess.addEventListener("click", () => {
+      void runGeneration("reassess");
+    });
+
     return generation;
   };
 
@@ -7445,17 +9208,18 @@ function openCriteriaModal(doc: Document): void {
 
     const tabs = doc.createElement("div");
     tabs.style.cssText =
-      "display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:5px;border-radius:10px;background:var(--background-secondary);";
+      "display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:5px;border-radius:10px;background:var(--background-secondary);";
     (
       [
         ["scope", "1. Scope"],
         ["eligibility", "2. Eligibility"],
         ["mapping", "3. Evidence Mapping"],
+        ["template", "4. Extraction Template"],
       ] as const
     ).forEach(([id, label]) => {
       const tab = doc.createElement("button");
       tab.textContent = label;
-      tab.style.cssText = `${buttonStyle}border-color:${activeProtocolTab === id ? "var(--highlight-primary)" : "transparent"};background:${activeProtocolTab === id ? "var(--background-primary)" : "transparent"};color:${activeProtocolTab === id ? "var(--highlight-primary)" : "var(--text-secondary)"};font-weight:700;`;
+      tab.style.cssText = `${buttonStyle}border-color:${activeProtocolTab === id ? "var(--highlight-primary)" : "transparent"};background:${activeProtocolTab === id ? "var(--background-primary)" : "transparent"};color:${activeProtocolTab === id ? "var(--highlight-primary)" : "var(--text-secondary)"};font-weight:700;font-size:11px;`;
       tab.addEventListener("click", () => {
         activeProtocolTab = id;
         render();
@@ -7536,6 +9300,62 @@ function openCriteriaModal(doc: Document): void {
       }
     });
     presetBar.appendChild(savePresetButton);
+    const exportButton = doc.createElement("button");
+    exportButton.textContent = "Export";
+    exportButton.style.cssText = buttonStyle;
+    exportButton.addEventListener("click", () => {
+      const selected = protocolPresets.find(
+        (candidate) => candidate.id === selectedPresetId,
+      );
+      let preset: ProtocolPreset;
+      let exportName: string;
+      if (selected) {
+        preset = selected;
+        exportName = selected.name;
+      } else {
+        exportName = presetNameInput.value.trim() || "protocol";
+        preset = revisionToProtocolPreset(draft, exportName);
+      }
+      const json = protocolPresetToJson(preset);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = doc.defaultView?.URL.createObjectURL(blob);
+      if (!url) return;
+      const a = doc.createElement("a");
+      a.href = url;
+      a.download = `${exportName.replace(/[^a-z0-9_-]+/gi, "_") || "protocol"}.json`;
+      a.style.display = "none";
+      appendToBody(doc, a);
+      a.click();
+      a.remove();
+      doc.defaultView?.URL.revokeObjectURL(url);
+      toast(doc, "Protocol exported");
+    });
+    presetBar.appendChild(exportButton);
+    const importButton = doc.createElement("button");
+    importButton.textContent = "Import";
+    importButton.style.cssText = buttonStyle;
+    importButton.addEventListener("click", async () => {
+      try {
+        const win = Zotero.getMainWindow() as any;
+        const fp = new win.FilePicker();
+        fp.init(win, "Import Protocol Preset", fp.modeOpen);
+        fp.appendFilter("JSON", "*.json");
+        fp.appendFilters(fp.filterAll);
+        const result = await fp.show();
+        if (result !== fp.returnOK || !fp.file) return;
+        const raw = (await Zotero.File.getContentsAsync(fp.file)) as string;
+        const preset = parseProtocolPresetJson(raw);
+        const imported = await importProtocolPreset(preset);
+        protocolPresets = await loadProtocolPresets();
+        selectedPresetId = imported.id;
+        presetNameInput.value = imported.name;
+        toast(doc, `Imported preset "${imported.name}"`);
+        render();
+      } catch (error) {
+        toast(doc, `Could not import preset: ${(error as Error).message}`);
+      }
+    });
+    presetBar.appendChild(importButton);
     if (selectedPresetId) {
       const deletePresetButton = doc.createElement("button");
       deletePresetButton.textContent = "Delete";
@@ -7873,6 +9693,10 @@ function openCriteriaModal(doc: Document): void {
         mappingSection.appendChild(row);
       });
       body.appendChild(mappingSection);
+    }
+
+    if (activeProtocolTab === "template") {
+      buildProtocolTemplateTab(doc, body, draft, () => render());
     }
 
     const history = doc.createElement("details");
@@ -8832,6 +10656,56 @@ function openLegacyCriteriaModal(_doc: Document): void {
 // ============================================================
 // SOURCES / IMPORT FOLDERS MODAL
 // ============================================================
+
+interface ManualSourceLabelEntry {
+  label: string;
+  paperIds: number[];
+  sourceType?: "Database" | "Register" | "Other source";
+}
+
+function collectManualSourceLabels(
+  state: SystematicReviewState,
+): ManualSourceLabelEntry[] {
+  const grouped = new Map<
+    string,
+    {
+      paperIds: number[];
+      sourceType?: "Database" | "Register" | "Other source";
+    }
+  >();
+  for (const paper of state.papers) {
+    if (!paper.sourceLabel) continue;
+    if (paper.folderId) continue;
+    const entry = grouped.get(paper.sourceLabel) || {
+      paperIds: [],
+      sourceType: paper.sourceType,
+    };
+    entry.paperIds.push(paper.id);
+    if (!entry.sourceType && paper.sourceType) {
+      entry.sourceType = paper.sourceType;
+    }
+    grouped.set(paper.sourceLabel, entry);
+  }
+  return Array.from(grouped.entries())
+    .map(([label, { paperIds, sourceType }]) => ({
+      label,
+      paperIds,
+      sourceType,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function renameManualSourceLabel(
+  state: SystematicReviewState,
+  oldLabel: string,
+  newLabel: string,
+): void {
+  for (const paper of state.papers) {
+    if (paper.sourceLabel === oldLabel) {
+      paper.sourceLabel = newLabel;
+    }
+  }
+}
 async function openSourcesModal(doc: Document): Promise<void> {
   if (!currentState) return;
   const persisted = new Map(
@@ -8955,11 +10829,93 @@ async function openSourcesModal(doc: Document): Promise<void> {
 
   const renderConfiguration = () => {
     configuration.replaceChildren();
+    const manualLabels = collectManualSourceLabels(currentState!);
+    if (manualLabels.length > 0) {
+      const manualSection = doc.createElement("div");
+      manualSection.style.cssText =
+        "margin-bottom:14px;padding:10px 12px;border:1px solid var(--border-secondary);border-radius:8px;background:var(--background-secondary);";
+      const manualHeading = doc.createElement("div");
+      manualHeading.textContent = "Manual source labels";
+      manualHeading.style.cssText =
+        "font-size:13px;font-weight:700;margin-bottom:4px;";
+      manualSection.appendChild(manualHeading);
+      const manualHelp = doc.createElement("div");
+      manualHelp.textContent =
+        "These labels were created when you added papers without linking a Zotero folder. Rename a label to update every paper that uses it.";
+      manualHelp.style.cssText =
+        "font-size:11px;color:var(--text-tertiary);margin-bottom:8px;line-height:1.4;";
+      manualSection.appendChild(manualHelp);
+      manualLabels.forEach((entry) => {
+        const card = doc.createElement("div");
+        card.style.cssText =
+          "padding:11px 12px;margin-bottom:9px;border:1px solid var(--border-secondary);border-radius:8px;background:var(--background-primary);";
+        const cardTitle = doc.createElement("div");
+        cardTitle.textContent = entry.label;
+        cardTitle.style.cssText =
+          "font-size:13px;font-weight:700;margin-bottom:8px;";
+        card.appendChild(cardTitle);
+        const fields = doc.createElement("div");
+        fields.style.cssText =
+          "display:grid;grid-template-columns:150px 1fr;gap:8px;";
+        const typeSelect = doc.createElement("select");
+        typeSelect.style.cssText =
+          "padding:6px;border:1px solid var(--border-primary);border-radius:5px;font:inherit;font-size:12px;background:var(--background-primary);color:var(--text-primary);";
+        const optionPlaceholder = doc.createElement("option");
+        optionPlaceholder.value = "";
+        optionPlaceholder.textContent = "Source type…";
+        typeSelect.appendChild(optionPlaceholder);
+        (["Database", "Register", "Other source"] as const).forEach((value) => {
+          const option = doc.createElement("option");
+          option.value = value;
+          option.textContent = value;
+          if (entry.sourceType === value) option.selected = true;
+          typeSelect.appendChild(option);
+        });
+        typeSelect.addEventListener("change", async () => {
+          const value = typeSelect.value as
+            | ""
+            | "Database"
+            | "Register"
+            | "Other source";
+          getSRService().setManualSourceType(
+            currentState!,
+            entry.label,
+            value || undefined,
+          );
+          await getSRService().save(currentState!);
+        });
+        fields.appendChild(typeSelect);
+        const labelInput = doc.createElement("input");
+        labelInput.value = entry.label;
+        labelInput.placeholder = "Source label";
+        labelInput.style.cssText =
+          "padding:6px 8px;border:1px solid var(--border-primary);border-radius:5px;font:inherit;font-size:12px;background:var(--background-primary);color:var(--text-primary);";
+        labelInput.addEventListener("change", async () => {
+          const trimmed = labelInput.value.trim();
+          if (!trimmed || trimmed === entry.label) {
+            labelInput.value = entry.label;
+            return;
+          }
+          renameManualSourceLabel(currentState!, entry.label, trimmed);
+          await getSRService().save(currentState!);
+          renderConfiguration();
+        });
+        fields.appendChild(labelInput);
+        card.appendChild(fields);
+        const count = doc.createElement("div");
+        count.textContent = `${entry.paperIds.length} paper${entry.paperIds.length === 1 ? "" : "s"}`;
+        count.style.cssText =
+          "margin-top:8px;font-size:11px;color:var(--text-tertiary);";
+        card.appendChild(count);
+        manualSection.appendChild(card);
+      });
+      configuration.appendChild(manualSection);
+    }
     const configs = Array.from(selected.values());
-    if (configs.length === 0) {
+    if (configs.length === 0 && manualLabels.length === 0) {
       const empty = doc.createElement("div");
       empty.textContent =
-        "Select one or more folders to configure their source attribution.";
+        "Select one or more folders to configure their source attribution, or add papers with manual source labels.";
       empty.style.cssText =
         "padding:40px 20px;text-align:center;color:var(--text-tertiary);font-size:12px;";
       configuration.appendChild(empty);
@@ -9592,6 +11548,93 @@ function openLegacySourcesModal(_doc: Document): void {
   mountReviewSheet(doc, wrapper);
 }
 
+function applyArticleRowStatusStyles(
+  row: HTMLElement,
+  paper: SystematicReviewPaper,
+): void {
+  const isExc = paper.status === "excluded";
+  row.style.opacity = isExc ? "0.45" : "";
+  const title = row.querySelector(".sr-art-title") as HTMLElement | null;
+  if (title) {
+    if (isExc) {
+      title.style.textDecoration = "line-through";
+      title.style.textDecorationColor = "#dc2626";
+    } else {
+      title.style.textDecoration = "";
+      title.style.textDecorationColor = "";
+    }
+  }
+}
+
+function refreshScreeningActiveRow(doc: Document): void {
+  if (!contentArea) return;
+  const list = contentArea.querySelector(".sr-art-list");
+  if (!list) return;
+  const rows = Array.from(list.querySelectorAll(".sr-art"));
+  rows.forEach((rEl) => {
+    const rHtml = rEl as HTMLElement;
+    rHtml.classList.remove("sr-art-active");
+    rHtml.style.background = "";
+    rHtml.style.borderLeft = "";
+    rHtml.style.paddingLeft = "";
+  });
+  if (scrActive === null) return;
+  const activeRow = list.querySelector(
+    `.sr-art[data-sid="${scrActive}"]`,
+  ) as HTMLElement | null;
+  if (activeRow) {
+    activeRow.classList.add("sr-art-active");
+    activeRow.style.background = "var(--background-primary)";
+    activeRow.style.borderLeft = "3px solid var(--highlight-primary)";
+    activeRow.style.paddingLeft = "1px";
+  }
+}
+
+function selectScreeningPaper(
+  doc: Document,
+  paperId: number | null,
+  options: {
+    resetDetailScroll?: boolean;
+    scrollIntoView?: boolean;
+    preserveTransientFlags?: boolean;
+  } = {},
+): void {
+  if (!contentArea) return;
+  const {
+    resetDetailScroll = true,
+    scrollIntoView = false,
+    preserveTransientFlags = false,
+  } = options;
+
+  scrActive = paperId;
+  if (!preserveTransientFlags) {
+    showNote = false;
+    showReason = false;
+    showLabelRow = false;
+    showSourceLabelRow = false;
+  }
+
+  refreshScreeningActiveRow(doc);
+
+  const oldDetail = contentArea.querySelector(".sr-screening-detail");
+  if (oldDetail?.parentElement) {
+    const newDetail = buildDetailView(doc);
+    oldDetail.parentElement.replaceChild(newDetail, oldDetail);
+    if (resetDetailScroll) {
+      const scrollBody = newDetail.querySelector(
+        ".sr-article-detail-scroll",
+      ) as HTMLElement | null;
+      if (scrollBody) scrollBody.scrollTop = 0;
+    }
+  }
+
+  if (scrollIntoView) {
+    scrollActivePaperIntoView(doc);
+  }
+
+  focusScreeningDetail(doc);
+}
+
 function reRenderPanel(
   doc: Document,
   panel: SRSubTab,
@@ -9638,15 +11681,6 @@ function reRenderPanel(
     };
     doc.defaultView?.requestAnimationFrame(restoreScroll);
   }
-  if (sideNav) {
-    const parent = sideNav.parentElement;
-    if (parent) {
-      const newNav = buildSidebar(doc);
-      sideNav.replaceWith(newNav);
-      sideNav = newNav;
-    }
-  }
-  doc.defaultView?.requestAnimationFrame(() => refreshReviewLayout?.());
 }
 
 function escHtml(s: string): string {
@@ -10069,13 +12103,17 @@ function renderLabelPicker(doc: Document, pid: number): HTMLElement {
 function toggleLabelRow(doc: Document): void {
   showLabelRow = !showLabelRow;
   showReason = false;
-  reRenderPanel(doc, "screening");
+  showSourceLabelRow = false;
+  selectScreeningPaper(doc, scrActive, { resetDetailScroll: false });
 }
 
-export function addPapersToSystematicReview(paperIds: number[]): Promise<void> {
+export function addPapersToSystematicReview(
+  paperIds: number[],
+  sourceLabel?: string,
+): Promise<void> {
   const service = getSRService();
   return service.load().then(async (state) => {
-    const newPapers = service.addPapers(state, paperIds);
+    const newPapers = service.addPapers(state, paperIds, sourceLabel);
     currentState = state;
     newPapers.forEach((p) => _srPaperIdSet.add(p.id));
     warmItemCache(paperIds);

@@ -163,42 +163,47 @@ export type ModelType =
 // API endpoint paths per model type
 export const MODEL_TYPE_ENDPOINTS: Record<
   ModelType,
-  { path: string; label: string; icon: string; description: string }
+  {
+    path: string;
+    label: string;
+    icon: import("./ui/icons").IconName;
+    description: string;
+  }
 > = {
   chat: {
     path: "/chat/completions",
     label: "Chat",
-    icon: "\u{1F4AC}", // 💬
+    icon: "chat",
     description: "Text generation with streaming support",
   },
   embedding: {
     path: "/embeddings",
     label: "Embeddings",
-    icon: "\u{1F9E0}", // 🧠
+    icon: "brain",
     description: "Vector embeddings for semantic search",
   },
   image: {
     path: "/images/generations",
     label: "Image",
-    icon: "\u{1F3A8}", // 🎨
+    icon: "image",
     description: "DALL-E, Midjourney, Flux, and more",
   },
   video: {
     path: "/generate-video",
     label: "Video",
-    icon: "\u{1F3AC}", // 🎬
+    icon: "video",
     description: "Kling, Veo, Hunyuan (async with polling)",
   },
   tts: {
     path: "/audio/speech",
     label: "TTS",
-    icon: "\u{1F50A}", // 🔊
+    icon: "tts",
     description: "Convert text to natural-sounding audio",
   },
   stt: {
     path: "/audio/transcriptions",
     label: "STT",
-    icon: "\u{1F3A4}", // 🎤
+    icon: "tts",
     description: "Transcribe audio to text (Whisper, etc.)",
   },
 };
@@ -321,49 +326,49 @@ export const defaultChatOptions: ChatOptions = {
 
 // Selection chip display config
 export interface SelectionConfig {
-  icon: string;
+  icon: import("./ui/icons").IconName;
   label: string;
   className: string;
 }
 
 export const selectionConfigs: Record<StateName, SelectionConfig> = {
   items: {
-    icon: "📄",
+    icon: "paper",
     label: "Items",
     className: "chip-items",
   },
   creators: {
-    icon: "👤",
+    icon: "user",
     label: "Creators",
     className: "chip-creators",
   },
   tags: {
-    icon: "🏷️",
+    icon: "tag",
     label: "Tags",
     className: "chip-tags",
   },
   collections: {
-    icon: "📁",
+    icon: "folder",
     label: "Collections",
     className: "chip-collections",
   },
   notes: {
-    icon: "📝",
+    icon: "edit",
     label: "Notes",
     className: "chip-notes",
   },
   attachments: {
-    icon: "📎",
+    icon: "attachment",
     label: "Attachments",
     className: "chip-attachments",
   },
   images: {
-    icon: "🖼️",
+    icon: "image-multiple",
     label: "Images",
     className: "chip-images",
   },
   tables: {
-    icon: "📊",
+    icon: "table",
     label: "Tables",
     className: "chip-tables",
   },

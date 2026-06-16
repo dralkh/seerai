@@ -394,6 +394,25 @@ const systematicReviewParams = z.discriminatedUnion("action", [
     paper_ids: z.array(z.number().int().positive()).min(1),
   }),
   z.object({
+    action: z.literal("run_evidence_analysis"),
+    project_id: z.string().optional(),
+    paper_ids: z.array(z.number().int().positive()).min(1).optional(),
+  }),
+  z.object({
+    action: z.literal("run_gap_analysis"),
+    project_id: z.string().optional(),
+    paper_ids: z.array(z.number().int().positive()).min(1).optional(),
+  }),
+  z.object({
+    action: z.literal("retry_failed_extractions"),
+    project_id: z.string().optional(),
+  }),
+  z.object({
+    action: z.literal("get_extraction_logs"),
+    project_id: z.string().optional(),
+    paper_id: z.number().int().positive().optional(),
+  }),
+  z.object({
     action: z.enum([
       "get_review_job",
       "pause_review_job",

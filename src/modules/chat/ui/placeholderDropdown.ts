@@ -16,6 +16,7 @@ import {
   saveRecentTopic,
 } from "../placeholders";
 import { PLACEHOLDER_TRIGGERS } from "../promptLibrary";
+import { createSvgIcon, setButtonIcon, type IconName } from "./icons";
 
 // ==================== Types ====================
 
@@ -436,7 +437,17 @@ function renderDropdownResults(
             gap: 8px;
             background: var(--background-secondary);
         `;
-    header.innerHTML = `<span style="font-size: 16px;">${info.icon}</span> <span>Select ${info.label}</span>`;
+    header.replaceChildren();
+    const headerIcon = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+    headerIcon.style.cssText =
+      "display: inline-flex; align-items: center; color: var(--text-secondary);";
+    headerIcon.appendChild(
+      createSvgIcon(doc, info.icon, { size: 16, strokeWidth: 1.7 }),
+    );
+    const headerLabel = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+    headerLabel.textContent = `Select ${info.label}`;
+    header.appendChild(headerIcon);
+    header.appendChild(headerLabel);
 
     // Show trigger character badge
     const triggerBadge = doc.createElement("span");
@@ -472,11 +483,21 @@ function renderDropdownResults(
             color: var(--text-tertiary);
             font-size: 12px;
         `;
-    emptyState.innerHTML = `
-            <div style="font-size: 24px; margin-bottom: 8px;">🔍</div>
-            <div>No ${state.trigger ? PLACEHOLDER_INFO[state.trigger.type].label.toLowerCase() + "s" : "items"} found</div>
-            <div style="font-size: 11px; margin-top: 4px;">Keep typing to search...</div>
-        `;
+    emptyState.replaceChildren();
+    const emptyIcon = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    emptyIcon.style.cssText =
+      "display: flex; align-items: center; justify-content: center; margin-bottom: 8px;";
+    emptyIcon.appendChild(
+      createSvgIcon(doc, "search", { size: 22, strokeWidth: 1.5 }),
+    );
+    emptyState.appendChild(emptyIcon);
+    const emptyLabel = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    emptyLabel.textContent = `No ${state.trigger ? PLACEHOLDER_INFO[state.trigger.type].label.toLowerCase() + "s" : "items"} found`;
+    emptyState.appendChild(emptyLabel);
+    const emptyHint = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    emptyHint.style.cssText = "font-size: 11px; margin-top: 4px;";
+    emptyHint.textContent = "Keep typing to search...";
+    emptyState.appendChild(emptyHint);
     list.appendChild(emptyState);
   } else {
     state.results.forEach((result, index) => {
@@ -520,8 +541,12 @@ function createDropdownItem(
 
   // Icon
   const icon = doc.createElement("span");
-  icon.style.cssText = "font-size: 14px; width: 20px; text-align: center;";
-  icon.textContent = result.icon || PLACEHOLDER_INFO[result.type].icon;
+  icon.style.cssText =
+    "width: 20px; display: inline-flex; align-items: center; justify-content: center; color: var(--text-secondary);";
+  const iconName: IconName = result.icon || PLACEHOLDER_INFO[result.type].icon;
+  icon.appendChild(
+    createSvgIcon(doc, iconName, { size: 14, strokeWidth: 1.7 }),
+  );
 
   // Text content
   const textContent = doc.createElement("div");
@@ -677,10 +702,17 @@ export function createPlaceholderMenuButton(
       triggerBadge.textContent = trigger;
       triggerBadge.style.cssText =
         "display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:1px solid var(--border-primary);border-radius:5px;font:600 11px monospace;color:var(--text-secondary);background:var(--background-secondary);";
+      const iconWrap = doc.createElement("span");
+      iconWrap.style.cssText =
+        "display:inline-flex;align-items:center;justify-content:center;color:var(--text-secondary);";
+      iconWrap.appendChild(
+        createSvgIcon(doc, info.icon, { size: 14, strokeWidth: 1.7 }),
+      );
       const label = doc.createElement("span");
       label.textContent = info.label;
       label.style.flex = "1";
       item.appendChild(triggerBadge);
+      item.appendChild(iconWrap);
       item.appendChild(label);
 
       item.addEventListener("mouseenter", () => {

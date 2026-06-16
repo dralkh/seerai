@@ -142,11 +142,11 @@ import {
   createWorkspaceSidebar,
   refreshWorkspaceSidebar,
   WorkspaceEditorManager,
-  createIconButton,
 } from "./chat/workspace";
 import { getWorkspaceStore } from "./chat/workspace/store";
 import { WORKSPACE_SYSTEM_PROMPT } from "./chat/workspace/tools";
 import { createCloudTabContent } from "./cloud/cloudTab";
+import { createSvgIcon, setButtonIcon, type IconName } from "./chat/ui/icons";
 import { createSystematicReviewTabContent } from "./systematicReview/systematicReviewTab";
 import { getSRService } from "./systematicReview/service";
 import { getActiveProtocolRevision } from "./systematicReview/protocol";
@@ -741,11 +741,11 @@ export async function findAndAttachPdfForItem(
         ? `ARXIV:${arxivId}`
         : null;
   if (ssId) {
-    onProgress?.("📖 Checking SS OA...");
+    onProgress?.("Checking SS OA...");
     try {
       const paper = await semanticScholarService.getPaper(ssId);
       if (paper?.openAccessPdf?.url) {
-        onProgress?.("📥 Attaching SS PDF...");
+        onProgress?.("Attaching SS PDF...");
         if (await downloadAndAttachPdf(item, paper.openAccessPdf.url)) {
           return true;
         }
@@ -757,7 +757,7 @@ export async function findAndAttachPdfForItem(
 
   // Step 1b: SS Title Fallback (if title exists and no ID-based success)
   if (title) {
-    onProgress?.("🔍 SS Title search...");
+    onProgress?.("SS Title search...");
     try {
       const results = await semanticScholarService.searchPapers({
         query: title,
@@ -817,7 +817,7 @@ export async function findAndAttachPdfForItem(
             }
 
             if (paper.openAccessPdf?.url) {
-              onProgress?.("📥 Attaching SS PDF (Title)...");
+              onProgress?.("Attaching SS PDF (Title)...");
               if (await downloadAndAttachPdf(item, paper.openAccessPdf.url)) {
                 return true;
               }
@@ -835,7 +835,7 @@ export async function findAndAttachPdfForItem(
   }
 
   // Step 2: Zotero resolver
-  onProgress?.("📚 Zotero...");
+  onProgress?.("Zotero...");
   const zoteroResult = await findPdfViaZotero(doi, arxivId, pmid, title, url);
   if (zoteroResult) {
     // Zotero already attached the PDF via temp item, need to re-run with real item
@@ -851,7 +851,7 @@ export async function findAndAttachPdfForItem(
 
   // Step 3: arXiv
   if (arxivId) {
-    onProgress?.("📄 arXiv...");
+    onProgress?.("arXiv...");
     const arxivResult = await findPdfViaArxiv(arxivId);
     if (arxivResult && (await downloadAndAttachPdf(item, arxivResult))) {
       return true;
@@ -860,7 +860,7 @@ export async function findAndAttachPdfForItem(
 
   // Step 4: PubMed Central
   if (pmid) {
-    onProgress?.("🏥 PMC...");
+    onProgress?.("PMC...");
     const pmcResult = await findPdfViaPmc(pmid);
     if (pmcResult && (await downloadAndAttachPdf(item, pmcResult))) {
       return true;
@@ -869,7 +869,7 @@ export async function findAndAttachPdfForItem(
 
   // Step 5: bioRxiv/medRxiv
   if (doi?.startsWith("10.1101/")) {
-    onProgress?.("🧬 bioRxiv...");
+    onProgress?.("bioRxiv...");
     const biorxivResult = await findPdfViaBiorxiv(doi);
     if (biorxivResult && (await downloadAndAttachPdf(item, biorxivResult))) {
       return true;
@@ -878,7 +878,7 @@ export async function findAndAttachPdfForItem(
 
   // Step 6: Unpaywall
   if (doi) {
-    onProgress?.("🔍 Unpaywall...");
+    onProgress?.("Unpaywall...");
     const unpaywallResult = await unpaywallService.getPdfUrl(doi);
     if (
       unpaywallResult &&
@@ -889,7 +889,7 @@ export async function findAndAttachPdfForItem(
   }
 
   // Step 7: Europe PMC
-  onProgress?.("🇪🇺 EuropePMC...");
+  onProgress?.("EuropePMC...");
   const epmcResult = await findPdfViaEuropePmc(doi, pmid);
   if (epmcResult && (await downloadAndAttachPdf(item, epmcResult))) {
     return true;
@@ -904,7 +904,7 @@ export async function findAndAttachPdfForItem(
     for (const path in extraResolvers) {
       const mod = extraResolvers[path] as any;
       if (mod && typeof mod.findPdf === "function" && doi) {
-        onProgress?.("🕵️ Checking local resolver...");
+        onProgress?.("Checking local resolver...");
         try {
           const pdfUrl = await mod.findPdf(doi);
           if (pdfUrl && (await downloadAndAttachPdf(item, pdfUrl))) {
@@ -922,7 +922,7 @@ export async function findAndAttachPdfForItem(
   // Step 8: Source Link
   const sourceLink = getSourceLinkForPaper(doi, arxivId, pmid, undefined, url);
   if (sourceLink) {
-    onProgress?.("🔗 Source Link...");
+    onProgress?.("Source Link...");
     if (await downloadAndAttachPdf(item, sourceLink)) {
       return true;
     }
@@ -930,7 +930,7 @@ export async function findAndAttachPdfForItem(
 
   // Step 9: Firecrawl (if configured)
   if (firecrawlService.isConfigured() && title) {
-    onProgress?.("🔥 Firecrawl...");
+    onProgress?.("Firecrawl...");
     try {
       const creators = item.getCreators();
       const authors = creators.map((c) =>
@@ -3063,12 +3063,12 @@ export class Assistant {
       },
     });
 
-    const tabs: { id: AssistantTab; label: string; icon: string }[] = [
-      { id: "chat", label: "Chat", icon: "💬" },
-      { id: "table", label: "Table", icon: "📊" },
-      { id: "systematic", label: "Review", icon: "📋" },
-      { id: "search", label: "Search", icon: "🔍" },
-      { id: "cloud", label: "Cloud", icon: "☁️" },
+    const tabs: { id: AssistantTab; label: string; icon: IconName }[] = [
+      { id: "chat", label: "Chat", icon: "chat" },
+      { id: "table", label: "Table", icon: "table" },
+      { id: "systematic", label: "Review", icon: "review" },
+      { id: "search", label: "Search", icon: "search" },
+      { id: "cloud", label: "Cloud", icon: "cloud" },
     ];
 
     tabs.forEach((tab) => {
@@ -3076,7 +3076,6 @@ export class Assistant {
         namespace: "html",
         properties: {
           className: `tab-item ${activeTab === tab.id ? "active" : ""}`,
-          innerText: `${tab.icon} ${tab.label}`,
         },
         styles: {
           padding: "4px 12px",
@@ -3097,6 +3096,10 @@ export class Assistant {
           flex: "1",
           textAlign: "center",
           transition: "all 0.2s ease",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "5px",
         },
         listeners: [
           {
@@ -3110,6 +3113,14 @@ export class Assistant {
           },
         ],
       });
+      const tabIcon = createSvgIcon(doc, tab.icon, { size: 13 });
+      tabItem.appendChild(tabIcon);
+      const tabLabel = doc.createElementNS(
+        "http://www.w3.org/1999/xhtml",
+        "span",
+      );
+      tabLabel.textContent = tab.label;
+      tabItem.appendChild(tabLabel);
       tabBar.appendChild(tabItem);
     });
 
@@ -3211,66 +3222,89 @@ export class Assistant {
     `;
     header.appendChild(headerTitle);
 
-    // Collapse with ◀ to hide sidebar (it's on left side, collapses leftward)
-    const collapseHistoryBtn = createIconButton(
-      doc,
-      "\u25C0",
-      "Hide sidebar",
-      () => {
-        isHistorySidebarVisible = false;
-        setHistorySidebarPref(false);
-        sidebar.style.width = "20px";
-        sidebar.style.minWidth = "20px";
-        sidebar.style.borderRight = "1px solid var(--border-primary)";
-        collapseHistoryBtn.textContent = "\u25B6";
-        collapseHistoryBtn.title = "Show sidebar";
-        header.style.display = "none";
-        newChatBar.style.display = "none";
-        if (list) list.style.display = "none";
-        const historyHandle = sidebar.nextElementSibling as HTMLElement | null;
-        if (historyHandle?.classList.contains("seerai-resize-handle")) {
-          historyHandle.style.display = "none";
-        }
-        const narrowToggle = sidebar.querySelector(
-          ".narrow-toggle",
-        ) as HTMLElement | null;
-        if (!narrowToggle) {
-          const strip = doc.createElement("div");
-          strip.className = "narrow-toggle";
-          strip.style.cssText =
-            "display: flex; flex-direction: column; align-items: center; padding: 8px 0; gap: 8px;";
-          const expandBtn = createIconButton(
-            doc,
-            "\u25B6",
-            "Show sidebar",
-            () => {
-              isHistorySidebarVisible = true;
-              setHistorySidebarPref(true);
-              sidebar.style.width = "clamp(120px, 40%, 250px)";
-              sidebar.style.minWidth = "120px";
-              sidebar.style.borderRight = "1px solid var(--border-primary)";
-              collapseHistoryBtn.textContent = "\u25C0";
-              collapseHistoryBtn.title = "Hide sidebar";
-              header.style.display = "flex";
-              newChatBar.style.display = "flex";
-              if (list) list.style.display = "";
-              const hHandle = sidebar.nextElementSibling as HTMLElement | null;
-              if (hHandle?.classList.contains("seerai-resize-handle")) {
-                hHandle.style.display = "";
-              }
-              strip.remove();
-            },
-          );
-          strip.appendChild(expandBtn);
-          const label = doc.createElement("span");
-          label.textContent = "C";
-          label.style.cssText =
-            "writing-mode: vertical-lr; font-size: 9px; font-weight: 700; color: var(--text-tertiary); letter-spacing: 2px;";
-          strip.appendChild(label);
-          sidebar.appendChild(strip);
-        }
-      },
-    );
+    const styleHistoryToggleBtn = (btn: HTMLButtonElement) => {
+      btn.classList.add("seerai-icon-button");
+      btn.style.cssText = `
+        width: 22px;
+        height: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: none;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0;
+        transition: all 0.15s ease;
+      `;
+      btn.addEventListener("mouseenter", () => {
+        btn.style.backgroundColor = "var(--background-primary)";
+        btn.style.color = "var(--text-primary)";
+      });
+      btn.addEventListener("mouseleave", () => {
+        btn.style.backgroundColor = "transparent";
+        btn.style.color = "var(--text-secondary)";
+      });
+    };
+
+    const historyToggleBtn = (initial: IconName, title: string) => {
+      const btn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+      styleHistoryToggleBtn(btn);
+      setButtonIcon(btn, initial, title, 14);
+      return btn;
+    };
+
+    // Collapse with chevron-left to hide sidebar (it's on left side, collapses leftward)
+    const collapseHistoryBtn = historyToggleBtn("chevron-left", "Hide sidebar");
+    collapseHistoryBtn.addEventListener("click", () => {
+      isHistorySidebarVisible = false;
+      setHistorySidebarPref(false);
+      sidebar.style.width = "20px";
+      sidebar.style.minWidth = "20px";
+      sidebar.style.borderRight = "1px solid var(--border-primary)";
+      setButtonIcon(collapseHistoryBtn, "chevron-right", "Show sidebar", 14);
+      header.style.display = "none";
+      newChatBar.style.display = "none";
+      if (list) list.style.display = "none";
+      const historyHandle = sidebar.nextElementSibling as HTMLElement | null;
+      if (historyHandle?.classList.contains("seerai-resize-handle")) {
+        historyHandle.style.display = "none";
+      }
+      const narrowToggle = sidebar.querySelector(
+        ".narrow-toggle",
+      ) as HTMLElement | null;
+      if (!narrowToggle) {
+        const strip = doc.createElement("div");
+        strip.className = "narrow-toggle";
+        strip.style.cssText =
+          "display: flex; flex-direction: column; align-items: center; padding: 8px 0; gap: 8px;";
+        const expandBtn = historyToggleBtn("chevron-right", "Show sidebar");
+        expandBtn.addEventListener("click", () => {
+          isHistorySidebarVisible = true;
+          setHistorySidebarPref(true);
+          sidebar.style.width = "clamp(120px, 40%, 250px)";
+          sidebar.style.minWidth = "120px";
+          sidebar.style.borderRight = "1px solid var(--border-primary)";
+          setButtonIcon(collapseHistoryBtn, "chevron-left", "Hide sidebar", 14);
+          header.style.display = "flex";
+          newChatBar.style.display = "flex";
+          if (list) list.style.display = "";
+          const hHandle = sidebar.nextElementSibling as HTMLElement | null;
+          if (hHandle?.classList.contains("seerai-resize-handle")) {
+            hHandle.style.display = "";
+          }
+          strip.remove();
+        });
+        strip.appendChild(expandBtn);
+        const label = doc.createElement("span");
+        label.textContent = "C";
+        label.style.cssText =
+          "writing-mode: vertical-lr; font-size: 9px; font-weight: 700; color: var(--text-tertiary); letter-spacing: 2px;";
+        strip.appendChild(label);
+        sidebar.appendChild(strip);
+      }
+    });
     header.appendChild(collapseHistoryBtn);
 
     sidebar.appendChild(header);
@@ -3903,13 +3937,13 @@ export class Assistant {
       strip.className = "narrow-toggle";
       strip.style.cssText =
         "display: flex; flex-direction: column; align-items: center; padding: 8px 0; gap: 8px;";
-      const expandBtn = createIconButton(doc, "\u25B6", "Show sidebar", () => {
+      const expandBtn = historyToggleBtn("chevron-right", "Show sidebar");
+      expandBtn.addEventListener("click", () => {
         isHistorySidebarVisible = true;
         sidebar.style.width = "clamp(120px, 40%, 250px)";
         sidebar.style.minWidth = "120px";
         sidebar.style.borderRight = "1px solid var(--border-primary)";
-        collapseHistoryBtn.textContent = "\u25C0";
-        collapseHistoryBtn.title = "Hide sidebar";
+        setButtonIcon(collapseHistoryBtn, "chevron-left", "Hide sidebar", 14);
         header.style.display = "flex";
         newChatBar.style.display = "flex";
         list.style.display = "";
@@ -4880,11 +4914,39 @@ export class Assistant {
             ".tool-list-container",
           ) as HTMLElement;
 
+          const setProcessIcon = (
+            name: IconName,
+            options: {
+              color?: string;
+              animate?: boolean | string;
+              filter?: string;
+            } = {},
+          ) => {
+            if (!icon) return;
+            icon.replaceChildren(
+              createSvgIcon(doc, name, {
+                size: 14,
+                strokeWidth: 1.7,
+              }),
+            );
+            icon.style.animation = options.animate
+              ? `pulse ${options.animate === true ? "1.5s" : options.animate} infinite`
+              : "none";
+            icon.style.color = options.color ?? "var(--text-secondary)";
+            if (options.filter !== undefined) {
+              icon.style.filter = options.filter;
+            } else {
+              icon.style.filter = "none";
+            }
+          };
+
           const setThinking = () => {
             if (label) label.textContent = "Processing task...";
             if (icon) {
-              icon.textContent = "⚡";
-              icon.style.animation = "pulse 1.5s infinite";
+              setProcessIcon("lightning", {
+                color: "var(--text-secondary)",
+                animate: "1.5s",
+              });
             }
             (toolProcessContainer as any).open = false;
           };
@@ -4892,8 +4954,10 @@ export class Assistant {
             const displayName = toolName.replace(/_/g, " ");
             if (label) label.textContent = `Calling ${displayName}...`;
             if (icon) {
-              icon.textContent = "🔧";
-              icon.style.animation = "pulse 1s infinite";
+              setProcessIcon("wrench", {
+                color: "var(--text-secondary)",
+                animate: "1s",
+              });
             }
           };
           const setCompleted = (count: number, toolCount?: number) => {
@@ -4905,9 +4969,9 @@ export class Assistant {
                 label.textContent = `Completed ${count} analysis turn${count !== 1 ? "s" : ""}`;
             }
             if (icon) {
-              icon.textContent = "✓";
-              icon.style.animation = "none";
-              icon.style.color = "var(--accent-green, #34C759)";
+              setProcessIcon("check-circle", {
+                color: "var(--accent-green, #34C759)",
+              });
             }
           };
           const setFailed = (error: string) => {
@@ -4916,9 +4980,9 @@ export class Assistant {
               label.style.color = "var(--accent-red, #FF3B30)";
             }
             if (icon) {
-              icon.textContent = "✗";
-              icon.style.animation = "none";
-              icon.style.color = "var(--accent-red, #FF3B30)";
+              setProcessIcon("x-circle", {
+                color: "var(--accent-red, #FF3B30)",
+              });
             }
             (toolProcessContainer as any).open = true;
           };
@@ -4931,10 +4995,10 @@ export class Assistant {
               }
             }
             if (icon) {
-              icon.textContent = "⚡";
-              icon.style.filter = "none";
-              icon.style.color = "var(--text-secondary)";
-              icon.style.animation = "pulse 2s infinite";
+              setProcessIcon("lightning", {
+                color: "var(--text-secondary)",
+                animate: "2s",
+              });
             }
           };
 
@@ -5310,13 +5374,22 @@ export class Assistant {
     }
 
     let lastAvailableWidth = 0;
+    let assistantLayoutRafPending = false;
 
-    const applyResponsiveLayout = () => {
+    const runAssistantResponsiveLayout = () => {
+      assistantLayoutRafPending = false;
       if (!mainWrapper.isConnected && mainWrapper.parentElement === null) {
         return;
       }
       const availableWidth = mainWrapper.getBoundingClientRect().width;
-      if (!availableWidth || availableWidth === lastAvailableWidth) return;
+      if (
+        !availableWidth ||
+        !Number.isFinite(availableWidth) ||
+        availableWidth <= 0
+      ) {
+        return;
+      }
+      if (availableWidth === lastAvailableWidth) return;
       lastAvailableWidth = availableWidth;
 
       historySidebar.style.position = "relative";
@@ -5341,7 +5414,7 @@ export class Assistant {
         availableWidth - centerMinimum - handleSpace,
       );
       const requestedTotal = renderedHistoryWidth + renderedWorkspaceWidth;
-      if (requestedTotal > sidebarBudget) {
+      if (requestedTotal > sidebarBudget && requestedTotal > 0) {
         const reducibleHistory = Math.max(
           0,
           renderedHistoryWidth - historyMinimum,
@@ -5359,12 +5432,17 @@ export class Assistant {
             reduction * (reducibleWorkspace / reducibleTotal);
         }
       }
+      renderedHistoryWidth = Math.max(historyMinimum, renderedHistoryWidth);
+      renderedWorkspaceWidth = Math.max(
+        workspaceMinimum,
+        renderedWorkspaceWidth,
+      );
 
       if (isHistorySidebarVisible) {
-        historySidebar.style.width = `${Math.max(historyMinimum, renderedHistoryWidth)}px`;
+        historySidebar.style.width = `${renderedHistoryWidth}px`;
       }
       if (!(workspaceSidebar as any)._isCollapsed) {
-        workspaceSidebar.style.width = `${Math.max(workspaceMinimum, renderedWorkspaceWidth)}px`;
+        workspaceSidebar.style.width = `${renderedWorkspaceWidth}px`;
       }
 
       workspaceHandle.style.display = (workspaceSidebar as any)._isCollapsed
@@ -5373,16 +5451,22 @@ export class Assistant {
       historyHandle.style.display = !isHistorySidebarVisible ? "none" : "";
     };
 
+    const applyResponsiveLayout = () => {
+      if (assistantLayoutRafPending) return;
+      assistantLayoutRafPending = true;
+      const raf =
+        doc.defaultView?.requestAnimationFrame ||
+        ((cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 16));
+      raf(runAssistantResponsiveLayout);
+    };
+
     const ResizeObserverCtor = doc.defaultView?.ResizeObserver;
     if (ResizeObserverCtor) {
       const layoutObserver = new ResizeObserverCtor(applyResponsiveLayout);
       layoutObserver.observe(mainWrapper);
       (mainWrapper as any)._layoutObserver = layoutObserver;
     }
-    mainWrapper.addEventListener("click", () => {
-      setTimeout(applyResponsiveLayout, 0);
-    });
-    setTimeout(applyResponsiveLayout, 0);
+    applyResponsiveLayout();
 
     // Insert editor height handle before editor container
     chatContainer.insertBefore(editorHeightHandle, workspaceEditorContainer);
@@ -13118,9 +13202,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       closeBtn.style.background = "rgba(0,0,0,0.1)";
     });
     header.appendChild(closeBtn);
+    setButtonIcon(closeBtn, "close", "Close", 12);
     dropdown.appendChild(header);
 
-    // Content area
+    // Content
     const content = ztoolkit.UI.createElement(doc, "div", {
       styles: {
         padding: "12px 16px",
@@ -16961,19 +17046,26 @@ You MUST call the generate_tags function.`;
     });
 
     const headerTitle = ztoolkit.UI.createElement(doc, "div", {
-      properties: { innerText: "📊 Add From Table" },
       styles: {
         fontSize: "13px",
         fontWeight: "600",
         color: "var(--highlight-text)",
         textShadow: "0 1px 2px rgba(0,0,0,0.1)",
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
       },
     });
+    headerTitle.appendChild(
+      createSvgIcon(doc, "table", { size: 14, strokeWidth: 1.8 }),
+    );
+    const headerTitleText = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+    headerTitleText.textContent = "Add From Table";
+    headerTitle.appendChild(headerTitleText);
     header.appendChild(headerTitle);
 
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "✕" },
       styles: {
         background: "rgba(0,0,0,0.1)",
         border: "none",
@@ -16986,6 +17078,7 @@ You MUST call the generate_tags function.`;
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        padding: "0",
       },
       listeners: [
         {
@@ -16999,6 +17092,7 @@ You MUST call the generate_tags function.`;
       ],
     });
     header.appendChild(closeBtn);
+    setButtonIcon(closeBtn, "close", "Close", 12);
     dropdown.appendChild(header);
 
     // Content
@@ -19915,19 +20009,19 @@ You MUST call the generate_tags function.`;
 
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "✕" },
       styles: {
         background: "rgba(0,0,0,0.1)",
         border: "none",
         borderRadius: "50%",
-        width: "18px",
-        height: "18px",
+        width: "22px",
+        height: "22px",
         cursor: "pointer",
         color: "var(--highlight-text)",
-        fontSize: "10px",
+        fontSize: "11px",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        padding: "0",
       },
       listeners: [
         {
@@ -23532,19 +23626,26 @@ ${tableRows}  </tbody>
     });
 
     const headerTitle = ztoolkit.UI.createElement(doc, "div", {
-      properties: { innerText: "🏷️ Add Tags to Chat" },
       styles: {
         fontSize: "13px",
         fontWeight: "600",
         color: "var(--highlight-text)",
         textShadow: "0 1px 2px rgba(0,0,0,0.1)",
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
       },
     });
+    headerTitle.appendChild(
+      createSvgIcon(doc, "tag", { size: 14, strokeWidth: 1.8 }),
+    );
+    const headerTitleText = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+    headerTitleText.textContent = "Add Tags to Chat";
+    headerTitle.appendChild(headerTitleText);
     header.appendChild(headerTitle);
 
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "✕" },
       styles: {
         background: "rgba(0,0,0,0.1)",
         border: "none",
@@ -23609,7 +23710,7 @@ ${tableRows}  </tbody>
 
     // Search
     const searchInput = ztoolkit.UI.createElement(doc, "input", {
-      attributes: { type: "text", placeholder: "🔍 Search tags..." },
+      attributes: { type: "text", placeholder: "Search tags..." },
       styles: {
         flex: "1",
         padding: "6px 10px",
@@ -23888,19 +23989,26 @@ ${tableRows}  </tbody>
     });
 
     const headerTitle = ztoolkit.UI.createElement(doc, "div", {
-      properties: { innerText: "📚 Add Papers to Chat" },
       styles: {
         fontSize: "13px",
         fontWeight: "600",
         color: "var(--highlight-text)",
         textShadow: "0 1px 2px rgba(0,0,0,0.1)",
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
       },
     });
+    headerTitle.appendChild(
+      createSvgIcon(doc, "paper", { size: 14, strokeWidth: 1.8 }),
+    );
+    const headerTitleText = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+    headerTitleText.textContent = "Add Papers to Chat";
+    headerTitle.appendChild(headerTitleText);
     header.appendChild(headerTitle);
 
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "✕" },
       styles: {
         background: "rgba(0,0,0,0.1)",
         border: "none",
@@ -23913,6 +24021,7 @@ ${tableRows}  </tbody>
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        padding: "0",
       },
       listeners: [
         {
@@ -23926,6 +24035,7 @@ ${tableRows}  </tbody>
       ],
     });
     header.appendChild(closeBtn);
+    setButtonIcon(closeBtn, "close", "Close", 12);
     dropdown.appendChild(header);
 
     // Content
@@ -23963,7 +24073,7 @@ ${tableRows}  </tbody>
 
     // Search Input
     const searchInput = ztoolkit.UI.createElement(doc, "input", {
-      attributes: { type: "text", placeholder: "🔍 Search papers..." },
+      attributes: { type: "text", placeholder: "Search papers..." },
       styles: {
         flex: "1",
         padding: "6px 10px",
@@ -24463,9 +24573,15 @@ ${tableRows}  </tbody>
     });
 
     const icon = ztoolkit.UI.createElement(doc, "span", {
-      properties: { innerText: config.icon },
-      styles: { fontSize: "10px" },
+      styles: {
+        fontSize: "10px",
+        display: "inline-flex",
+        alignItems: "center",
+      },
     });
+    icon.appendChild(
+      createSvgIcon(doc, config.icon, { size: 11, strokeWidth: 1.8 }),
+    );
 
     const displayLabel = label.length > 20 ? label.slice(0, 20) + "..." : label;
     const text = ztoolkit.UI.createElement(doc, "span", {
@@ -24478,7 +24594,6 @@ ${tableRows}  </tbody>
     });
 
     const removeBtn = ztoolkit.UI.createElement(doc, "span", {
-      properties: { innerText: "✕" },
       styles: {
         cursor: "pointer",
         fontSize: "10px",
@@ -24486,6 +24601,8 @@ ${tableRows}  </tbody>
         marginLeft: "2px",
         padding: "2px",
         borderRadius: "50%",
+        display: "inline-flex",
+        alignItems: "center",
       },
       listeners: [
         {
@@ -24497,6 +24614,9 @@ ${tableRows}  </tbody>
         },
       ],
     });
+    removeBtn.appendChild(
+      createSvgIcon(doc, "close", { size: 10, strokeWidth: 1.8 }),
+    );
 
     chip.appendChild(icon);
     chip.appendChild(text);
@@ -24625,13 +24745,21 @@ ${tableRows}  </tbody>
 
     // Title
     const title = ztoolkit.UI.createElement(doc, "div", {
-      properties: { innerText: "🔥 Firecrawl Settings" },
       styles: {
         fontWeight: "bold",
         marginBottom: "12px",
         fontSize: "12px",
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
       },
     });
+    title.appendChild(
+      createSvgIcon(doc, "firecrawl", { size: 14, strokeWidth: 1.8 }),
+    );
+    const titleLabel = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+    titleLabel.textContent = "Firecrawl Settings";
+    title.appendChild(titleLabel);
     popover.appendChild(title);
 
     // Search Result Count
@@ -25055,7 +25183,7 @@ ${tableRows}  </tbody>
     const addOption = (
       label: string,
       value: string,
-      icon: string = "📁",
+      icon: IconName = "folder",
       level: number = 0,
     ) => {
       const opt = doc.createElement("div");
@@ -25074,7 +25202,13 @@ ${tableRows}  </tbody>
         font-weight: ${isSelected ? "600" : "normal"};
       `;
 
-      opt.innerHTML = `<span>${icon}</span><span style="flex-grow: 1">${label}</span>`;
+      opt.replaceChildren(
+        createSvgIcon(doc, icon, { size: 14, strokeWidth: 1.7 }),
+      );
+      const labelSpan = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+      labelSpan.style.flexGrow = "1";
+      labelSpan.textContent = label;
+      opt.appendChild(labelSpan);
 
       opt.addEventListener("mouseenter", () => {
         if (!isSelected)
@@ -25108,7 +25242,7 @@ ${tableRows}  </tbody>
           addOption(
             col.name,
             `collection:${col.libraryID}:${col.id}`,
-            "📂",
+            "folder-open",
             level,
           );
           addCollectionTree(libraryID, col.id, level + 1);
@@ -25119,7 +25253,7 @@ ${tableRows}  </tbody>
     };
 
     // 1. All Libraries (Global Override)
-    addOption("All Libraries (Global)", "all", "🌐");
+    addOption("All Libraries (Global)", "all", "web");
 
     // Separator
     const sep1 = doc.createElement("div");
@@ -25128,7 +25262,7 @@ ${tableRows}  </tbody>
     dropdown.appendChild(sep1);
 
     // 2. Personal Library
-    addOption("My Library", "user", "📚");
+    addOption("My Library", "user", "library");
     addCollectionTree(Zotero.Libraries.userLibraryID, null, 1);
 
     // 3. Group Libraries
@@ -25141,7 +25275,7 @@ ${tableRows}  </tbody>
           "height: 1px; background: var(--border-primary, #ccc); margin: 4px 12px; opacity: 0.5;";
         dropdown.appendChild(groupSep);
 
-        addOption(group.name, `group:${group.groupID}`, "👥");
+        addOption(group.name, `group:${group.groupID}`, "users");
         addCollectionTree(group.libraryID, null, 1);
       }
     } catch (e) {
@@ -25345,60 +25479,16 @@ ${tableRows}  </tbody>
       },
     });
 
-    const toolbarIconPaths = {
-      agent:
-        "M12 3a4 4 0 0 0-4 4v1H6.5A2.5 2.5 0 0 0 4 10.5v5A2.5 2.5 0 0 0 6.5 18H8v2h8v-2h1.5a2.5 2.5 0 0 0 2.5-2.5v-5A2.5 2.5 0 0 0 17.5 8H16V7a4 4 0 0 0-4-4Zm-2 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm6 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm-6 4h4",
-      chat: "M5 5h14v10H9l-4 4V5Z",
-      settings:
-        "M12 8.5A3.5 3.5 0 1 0 12 15.5 3.5 3.5 0 0 0 12 8.5Zm0-5 1 2.1 2.3.5 1.7-1.4 1.8 1.8-1.4 1.7.5 2.3 2.1 1-2.1 1-.5 2.3 1.4 1.7-1.8 1.8-1.7-1.4-2.3.5-1 2.1-1-2.1-2.3-.5-1.7 1.4-1.8-1.8 1.4-1.7-.5-2.3-2.1-1 2.1-1 .5-2.3-1.4-1.7 1.8-1.8 1.7 1.4 2.3-.5 1-2.1Z",
-      prompts: "M5 4h14v16H5V4Zm3 0v16M11 8h5M11 12h5M11 16h4",
-      add: "M12 5v14M5 12h14",
-      attachment:
-        "M8.5 12.5 14 7a3 3 0 1 1 4.2 4.2l-7.1 7.1a5 5 0 0 1-7.1-7.1l7.8-7.8",
-      cloud: "M7 18h10a4 4 0 0 0 .4-8 6 6 0 0 0-11.5 1.7A3.2 3.2 0 0 0 7 18Z",
-      upload: "M12 16V5m0 0L8 9m4-4 4 4M5 19h14",
-      image:
-        "M4 5h16v14H4V5Zm3 10 3-3 2.5 2.5L15 12l3 3M8.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z",
-      video: "M4 6h11v12H4V6Zm11 4 5-3v10l-5-3",
-      web: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 0c2.2 2.4 3.3 5.4 3.3 9S14.2 18.6 12 21m0-18C9.8 5.4 8.7 8.4 8.7 12s1.1 6.6 3.3 9M3.5 9h17M3.5 15h17",
-      stop: "M7 7h10v10H7V7Z",
-      more: "M6 12h.01M12 12h.01M18 12h.01",
-      newChat: "M5 5h14v11H9l-4 4V5Zm7 2v6m-3-3h6",
-      save: "M5 4h12l2 2v14H5V4Zm3 0v6h8V4M8 20v-6h8v6",
-      clear: "M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5",
-      send: "M4 4l17 8-17 8 3-8-3-8Zm3 8h14",
-      chevron: "m8 10 4 4 4-4",
-    };
-
-    const createToolbarSvg = (pathData: string, size = 16): SVGElement => {
-      const svg = doc.createElementNS(
-        "http://www.w3.org/2000/svg",
-        "svg",
-      ) as unknown as SVGElement;
-      svg.setAttribute("width", String(size));
-      svg.setAttribute("height", String(size));
-      svg.setAttribute("viewBox", "0 0 24 24");
-      svg.setAttribute("fill", "none");
-      svg.setAttribute("aria-hidden", "true");
-      const path = doc.createElementNS("http://www.w3.org/2000/svg", "path");
-      path.setAttribute("d", pathData);
-      path.setAttribute("stroke", "currentColor");
-      path.setAttribute("stroke-width", "1.7");
-      path.setAttribute("stroke-linecap", "round");
-      path.setAttribute("stroke-linejoin", "round");
-      svg.appendChild(path);
-      return svg;
-    };
+    const createToolbarSvg = (name: IconName, size = 16): SVGElement =>
+      createSvgIcon(doc, name, { size });
 
     const setToolbarIcon = (
       button: HTMLElement,
-      pathData: string,
+      name: IconName,
       label: string,
       size = 16,
     ) => {
-      button.replaceChildren(createToolbarSvg(pathData, size));
-      button.setAttribute("aria-label", label);
-      button.title = label;
+      setButtonIcon(button, name, label, size);
     };
 
     const applyToolbarButtonStyle = (button: HTMLElement, active = false) => {
@@ -25422,7 +25512,7 @@ ${tableRows}  </tbody>
       anchor: HTMLElement,
       items: Array<{
         label: string;
-        path: string;
+        icon: IconName;
         action: () => void | Promise<void>;
         danger?: boolean;
       }>,
@@ -25442,7 +25532,7 @@ ${tableRows}  </tbody>
         const row = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
         row.type = "button";
         row.style.cssText = `display:flex;align-items:center;gap:9px;width:100%;padding:7px 9px;border:none;border-radius:6px;background:transparent;color:${item.danger ? "var(--button-stop-text, #c62828)" : "var(--text-primary)"};font:inherit;font-size:11px;text-align:left;cursor:pointer;`;
-        row.appendChild(createToolbarSvg(item.path, 15));
+        row.appendChild(createToolbarSvg(item.icon, 15));
         const label = doc.createElement("span");
         label.textContent = item.label;
         row.appendChild(label);
@@ -25703,11 +25793,7 @@ ${tableRows}  </tbody>
         },
       ],
     });
-    setToolbarIcon(
-      sendBtn as HTMLElement,
-      toolbarIconPaths.send,
-      "Send message",
-    );
+    setToolbarIcon(sendBtn as HTMLElement, "send", "Send message");
 
     // Initial UI sync for restored drafts
     if (currentPastedImages.length > 0) {
@@ -25775,11 +25861,7 @@ ${tableRows}  </tbody>
       ],
     });
     applyToolbarButtonStyle(stopBtn as HTMLElement);
-    setToolbarIcon(
-      stopBtn as HTMLElement,
-      toolbarIconPaths.stop,
-      "Stop generation",
-    );
+    setToolbarIcon(stopBtn as HTMLElement, "stop", "Stop generation");
     (stopBtn as HTMLElement).style.display = this.isStreaming
       ? "inline-flex"
       : "none";
@@ -25821,11 +25903,7 @@ ${tableRows}  </tbody>
               // Reset after 3 seconds if not clicked
               clearConfirmTimeout = setTimeout(() => {
                 clearConfirmState = false;
-                setToolbarIcon(
-                  clearBtn as HTMLElement,
-                  toolbarIconPaths.clear,
-                  "Clear chat",
-                );
+                setToolbarIcon(clearBtn as HTMLElement, "clear", "Clear chat");
                 (clearBtn as HTMLElement).style.backgroundColor =
                   "var(--background-secondary)";
                 (clearBtn as HTMLElement).style.borderColor =
@@ -25847,11 +25925,7 @@ ${tableRows}  </tbody>
               }
 
               // Reset button appearance
-              setToolbarIcon(
-                clearBtn as HTMLElement,
-                toolbarIconPaths.clear,
-                "Clear chat",
-              );
+              setToolbarIcon(clearBtn as HTMLElement, "clear", "Clear chat");
               (clearBtn as HTMLElement).style.backgroundColor =
                 "var(--background-secondary)";
               (clearBtn as HTMLElement).style.borderColor =
@@ -25864,11 +25938,7 @@ ${tableRows}  </tbody>
       ],
     });
     applyToolbarButtonStyle(clearBtn as HTMLElement);
-    setToolbarIcon(
-      clearBtn as HTMLElement,
-      toolbarIconPaths.clear,
-      "Clear chat",
-    );
+    setToolbarIcon(clearBtn as HTMLElement, "clear", "Clear chat");
 
     // Save button
     const saveBtn = ztoolkit.UI.createElement(doc, "button", {
@@ -25897,11 +25967,7 @@ ${tableRows}  </tbody>
       ],
     });
     applyToolbarButtonStyle(saveBtn as HTMLElement);
-    setToolbarIcon(
-      saveBtn as HTMLElement,
-      toolbarIconPaths.save,
-      "Save chat as note",
-    );
+    setToolbarIcon(saveBtn as HTMLElement, "save", "Save chat as note");
 
     // Settings / Config button
     const settingsBtn = ztoolkit.UI.createElement(doc, "button", {
@@ -25963,11 +26029,7 @@ ${tableRows}  </tbody>
       ],
     });
     applyToolbarButtonStyle(settingsBtn as HTMLElement);
-    setToolbarIcon(
-      settingsBtn as HTMLElement,
-      toolbarIconPaths.settings,
-      "Chat settings",
-    );
+    setToolbarIcon(settingsBtn as HTMLElement, "settings", "Chat settings");
 
     const settingsContainer = doc.createElement("div");
     settingsContainer.style.cssText = "position:relative;display:flex;";
@@ -25979,7 +26041,7 @@ ${tableRows}  </tbody>
     const updateAgenticBtnStyle = (btn: HTMLElement, enabled: boolean) => {
       setToolbarIcon(
         btn,
-        enabled ? toolbarIconPaths.agent : toolbarIconPaths.chat,
+        enabled ? "agent" : "chat",
         enabled ? "Agentic mode on" : "Agentic mode off",
       );
       btn.title = enabled
@@ -26039,7 +26101,7 @@ ${tableRows}  </tbody>
     (agenticBtn as HTMLElement).style.borderRadius = "7px 0 0 7px";
     setToolbarIcon(
       agenticBtn as HTMLElement,
-      agenticEnabled ? toolbarIconPaths.agent : toolbarIconPaths.chat,
+      agenticEnabled ? "agent" : "chat",
       agenticEnabled ? "Agentic mode on" : "Agentic mode off",
     );
 
@@ -26104,7 +26166,7 @@ ${tableRows}  </tbody>
       ],
     });
     (scopeBtn as HTMLElement).replaceChildren(
-      createToolbarSvg(toolbarIconPaths.chevron, 12),
+      createToolbarSvg("chevron-down", 12),
     );
 
     const agenticContainer = doc.createElement("div");
@@ -26177,11 +26239,7 @@ ${tableRows}  </tbody>
       ],
     });
     applyToolbarButtonStyle(promptsBtn as HTMLElement);
-    setToolbarIcon(
-      promptsBtn as HTMLElement,
-      toolbarIconPaths.prompts,
-      "Prompt library",
-    );
+    setToolbarIcon(promptsBtn as HTMLElement, "prompts", "Prompt library");
 
     const promptsContainer = doc.createElement("div");
     promptsContainer.style.cssText = "position: relative;";
@@ -26194,11 +26252,7 @@ ${tableRows}  </tbody>
     ) as HTMLElement | null;
     if (placeholderButton) {
       applyToolbarButtonStyle(placeholderButton);
-      setToolbarIcon(
-        placeholderButton,
-        toolbarIconPaths.add,
-        "Insert context or placeholder",
-      );
+      setToolbarIcon(placeholderButton, "add", "Insert context or placeholder");
     }
 
     // Initialize placeholder autocomplete on input with chip insertion
@@ -26358,7 +26412,7 @@ ${tableRows}  </tbody>
       },
     }) as HTMLButtonElement;
     applyToolbarButtonStyle(driveBtn);
-    setToolbarIcon(driveBtn, toolbarIconPaths.cloud, "Browse cloud files");
+    setToolbarIcon(driveBtn, "cloud", "Browse cloud files");
 
     driveBtn.addEventListener("click", (e: Event) => {
       e.stopPropagation();
@@ -26395,7 +26449,7 @@ ${tableRows}  </tbody>
       },
     }) as HTMLButtonElement;
     applyToolbarButtonStyle(uploadBtn);
-    setToolbarIcon(uploadBtn, toolbarIconPaths.upload, "Attach local file");
+    setToolbarIcon(uploadBtn, "upload", "Attach local file");
 
     uploadBtn.addEventListener("click", async () => {
       try {
@@ -26841,22 +26895,18 @@ ${tableRows}  </tbody>
     ) as HTMLButtonElement;
     attachmentBtn.type = "button";
     applyToolbarButtonStyle(attachmentBtn);
-    setToolbarIcon(
-      attachmentBtn,
-      toolbarIconPaths.attachment,
-      "Add attachment",
-    );
+    setToolbarIcon(attachmentBtn, "attachment", "Add attachment");
     attachmentBtn.addEventListener("click", (event) => {
       event.stopPropagation();
       createToolbarMenu(attachmentBtn, [
         {
           label: "Attach local file",
-          path: toolbarIconPaths.upload,
+          icon: "upload",
           action: () => uploadBtn.click(),
         },
         {
           label: "Browse cloud files",
-          path: toolbarIconPaths.cloud,
+          icon: "cloud",
           action: () => {
             const chatId = getMessageStore().getConversationId();
             if (!chatId) return;
@@ -26887,7 +26937,6 @@ ${tableRows}  </tbody>
     const imageGenBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
       properties: {
-        innerText: "\u{1F3A8}",
         title: "Generate Image from prompt",
       },
       styles: {
@@ -26904,10 +26953,11 @@ ${tableRows}  </tbody>
         justifyContent: "center",
       },
     }) as HTMLButtonElement;
+    setButtonIcon(imageGenBtn, "image", "Generate Image from prompt", 16);
 
     const imageGenDropupBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "\u25B2", title: "Image generation settings" },
+      properties: { title: "Image generation settings" },
       styles: {
         width: "18px",
         padding: "0",
@@ -26924,6 +26974,12 @@ ${tableRows}  </tbody>
         justifyContent: "center",
       },
     }) as HTMLButtonElement;
+    setButtonIcon(
+      imageGenDropupBtn,
+      "chevron-up",
+      "Image generation settings",
+      10,
+    );
 
     // Image settings dropup panel
     imageGenDropupBtn.addEventListener("click", (e) => {
@@ -27066,7 +27122,7 @@ ${tableRows}  </tbody>
       const userMsg: ChatMessage = {
         id: Date.now().toString(),
         role: "user",
-        content: `\u{1F3A8} [Image Generation] ${promptText}`,
+        content: `[Image Generation] ${promptText}`,
         timestamp: new Date(),
       };
       conversationMessages.push(userMsg);
@@ -27078,7 +27134,7 @@ ${tableRows}  </tbody>
       this.appendMessage(
         messagesArea,
         "You",
-        `\u{1F3A8} [Image Generation] ${promptText}`,
+        `[Image Generation] ${promptText}`,
         userMsg.id,
         true,
       );
@@ -27121,7 +27177,17 @@ ${tableRows}  </tbody>
       imgStatusRow.style.cssText =
         "display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-style: italic;";
       const imgStatusIcon = doc.createElement("span");
-      imgStatusIcon.textContent = "\u{1F3A8} Refining prompt with AI";
+      imgStatusIcon.style.cssText =
+        "display: inline-flex; align-items: center; gap: 4px;";
+      const setImgStatus = (label: string) => {
+        imgStatusIcon.replaceChildren(
+          createSvgIcon(doc, "image", { size: 14, strokeWidth: 1.7 }),
+        );
+        const statusText = doc.createElementNS(HTML_NS, "span");
+        statusText.textContent = label;
+        imgStatusIcon.appendChild(statusText);
+      };
+      setImgStatus("Refining prompt with AI");
       imgStatusRow.appendChild(imgStatusIcon);
       const imgDots = doc.createElement("span");
       const dot1 = doc.createElement("span");
@@ -27185,7 +27251,7 @@ Rules:
         }
 
         // Update status to "Generating image..."
-        imgStatusIcon.textContent = "\u{1F3A8} Generating image";
+        setImgStatus("Generating image");
 
         // Step 2: Call the image generation API with the refined prompt
         const result = await openAIService.generateImage(imagePrompt, {
@@ -27293,7 +27359,7 @@ Rules:
         const assistantMsg: ChatMessage = {
           id: genMsgId,
           role: "assistant",
-          content: `🎨 Generated image for: "${promptText.substring(0, 100)}"`,
+          content: `Generated image for: "${promptText.substring(0, 100)}"`,
           timestamp: new Date(),
         };
         conversationMessages.push(assistantMsg);
@@ -27341,7 +27407,6 @@ Rules:
     const videoGenBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
       properties: {
-        innerText: "\u{1F3AC}",
         title: "Generate Video from prompt",
       },
       styles: {
@@ -27358,6 +27423,7 @@ Rules:
         justifyContent: "center",
       },
     }) as HTMLButtonElement;
+    setButtonIcon(videoGenBtn, "video", "Generate Video from prompt", 16);
 
     const videoGenDropupBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
@@ -27565,7 +27631,7 @@ Rules:
       const userMsg: ChatMessage = {
         id: Date.now().toString(),
         role: "user",
-        content: `\u{1F3AC} [Video Generation] ${promptText}`,
+        content: `[Video Generation] ${promptText}`,
         timestamp: new Date(),
       };
       conversationMessages.push(userMsg);
@@ -27577,7 +27643,7 @@ Rules:
       this.appendMessage(
         messagesArea,
         "You",
-        `\u{1F3AC} [Video Generation] ${promptText}`,
+        `[Video Generation] ${promptText}`,
         userMsg.id,
         true,
       );
@@ -27622,7 +27688,11 @@ Rules:
         "display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-style: italic;";
       // Build via DOM (not innerHTML — Gecko XHTML parser chokes on emojis)
       const vidStatusIcon = doc.createElement("span");
-      vidStatusIcon.textContent = "\u{1F3AC}";
+      vidStatusIcon.style.cssText =
+        "display: inline-flex; align-items: center;";
+      vidStatusIcon.appendChild(
+        createSvgIcon(doc, "video", { size: 14, strokeWidth: 1.7 }),
+      );
       statusRow.appendChild(vidStatusIcon);
       statusRow.appendChild(statusTextEl);
       const dotsSpan = doc.createElement("span");
@@ -27740,17 +27810,23 @@ Rules:
             HTML_NS,
             "button",
           ) as HTMLButtonElement;
-          openBtn.innerText = "\u{1F517} Open";
           openBtn.title = "Open video in browser";
           openBtn.style.cssText = `
             padding: 4px 10px; border: 1px solid var(--border-primary); border-radius: 4px;
             background: var(--background-secondary); color: var(--text-secondary);
             cursor: pointer; font-size: 11px;
+            display: inline-flex; align-items: center; gap: 4px;
           `;
           openBtn.addEventListener("click", () => {
             const win = Zotero.getMainWindow();
             if (win) (win as any).open(result.videoUrl, "_blank");
           });
+          openBtn.appendChild(
+            createSvgIcon(doc, "open-link", { size: 12, strokeWidth: 1.7 }),
+          );
+          const openBtnLabel = doc.createElementNS(HTML_NS, "span");
+          openBtnLabel.textContent = "Open";
+          openBtn.appendChild(openBtnLabel);
           actionsRow.appendChild(openBtn);
 
           // Save video
@@ -27811,7 +27887,7 @@ Rules:
         const assistantMsg: ChatMessage = {
           id: genMsgId,
           role: "assistant",
-          content: `🎬 Generated video for: "${promptText.substring(0, 100)}"${result.videoUrl ? ` — ${result.videoUrl}` : ""}`,
+          content: `Generated video for: "${promptText.substring(0, 100)}"${result.videoUrl ? ` — ${result.videoUrl}` : ""}`,
           timestamp: new Date(),
         };
         conversationMessages.push(assistantMsg);
@@ -27875,11 +27951,7 @@ Rules:
     }) as HTMLButtonElement;
     applyToolbarButtonStyle(mediaGenMainBtn);
     (mediaGenMainBtn as HTMLElement).style.borderRadius = "7px 0 0 7px";
-    setToolbarIcon(
-      mediaGenMainBtn,
-      toolbarIconPaths.image,
-      "Generate image from prompt",
-    );
+    setToolbarIcon(mediaGenMainBtn, "image", "Generate image from prompt");
     mediaSettingsAnchor = mediaGenMainBtn;
 
     // Main button click → trigger the appropriate gen handler
@@ -27910,9 +27982,7 @@ Rules:
         justifyContent: "center",
       },
     }) as HTMLButtonElement;
-    mediaGenDropBtn.replaceChildren(
-      createToolbarSvg(toolbarIconPaths.chevron, 11),
-    );
+    mediaGenDropBtn.replaceChildren(createToolbarSvg("chevron-down", 11));
 
     // Dropdown menu for mode selection + settings access
     mediaGenDropBtn.addEventListener("click", (e) => {
@@ -27936,7 +28006,7 @@ Rules:
       // Helper to build a menu row
       const makeRow = (
         label: string,
-        path: string,
+        icon: IconName,
         isActive: boolean,
         onClick: () => void,
       ) => {
@@ -27947,7 +28017,7 @@ Rules:
           background: ${isActive ? "var(--accent-color, #007AFF)" : "transparent"};
           color: ${isActive ? "#fff" : "var(--text-primary)"};
         `;
-        row.appendChild(createToolbarSvg(path, 15));
+        row.appendChild(createToolbarSvg(icon, 15));
         const rowLabel = doc.createElement("span");
         rowLabel.textContent = label;
         row.appendChild(rowLabel);
@@ -27967,34 +28037,24 @@ Rules:
 
       // Mode selection rows
       dropdown.appendChild(
-        makeRow(
-          "Image generation",
-          toolbarIconPaths.image,
-          mediaGenMode === "image",
-          () => {
-            mediaGenMode = "image";
-            setToolbarIcon(
-              mediaGenMainBtn,
-              toolbarIconPaths.image,
-              "Generate image from prompt",
-            );
-          },
-        ),
+        makeRow("Image generation", "image", mediaGenMode === "image", () => {
+          mediaGenMode = "image";
+          setToolbarIcon(
+            mediaGenMainBtn,
+            "image",
+            "Generate image from prompt",
+          );
+        }),
       );
       dropdown.appendChild(
-        makeRow(
-          "Video generation",
-          toolbarIconPaths.video,
-          mediaGenMode === "video",
-          () => {
-            mediaGenMode = "video";
-            setToolbarIcon(
-              mediaGenMainBtn,
-              toolbarIconPaths.video,
-              "Generate video from prompt",
-            );
-          },
-        ),
+        makeRow("Video generation", "video", mediaGenMode === "video", () => {
+          mediaGenMode = "video";
+          setToolbarIcon(
+            mediaGenMainBtn,
+            "video",
+            "Generate video from prompt",
+          );
+        }),
       );
 
       // Divider
@@ -28005,12 +28065,12 @@ Rules:
 
       // Settings access rows
       dropdown.appendChild(
-        makeRow("Image settings", toolbarIconPaths.settings, false, () => {
+        makeRow("Image settings", "settings", false, () => {
           imageGenDropupBtn.click();
         }),
       );
       dropdown.appendChild(
-        makeRow("Video settings", toolbarIconPaths.settings, false, () => {
+        makeRow("Video settings", "settings", false, () => {
           videoGenDropupBtn.click();
         }),
       );
@@ -28064,11 +28124,7 @@ Rules:
       ],
     });
     applyToolbarButtonStyle(newChatBtn as HTMLElement);
-    setToolbarIcon(
-      newChatBtn as HTMLElement,
-      toolbarIconPaths.newChat,
-      "New chat",
-    );
+    setToolbarIcon(newChatBtn as HTMLElement, "newChat", "New chat");
 
     toolbarRight.appendChild(stopBtn);
     toolbarRight.appendChild(settingsContainer);
@@ -28081,11 +28137,7 @@ Rules:
     ) as HTMLButtonElement;
     conversationMenuBtn.type = "button";
     applyToolbarButtonStyle(conversationMenuBtn);
-    setToolbarIcon(
-      conversationMenuBtn,
-      toolbarIconPaths.more,
-      "Conversation actions",
-    );
+    setToolbarIcon(conversationMenuBtn, "more", "Conversation actions");
     conversationMenuBtn.addEventListener("click", (event) => {
       event.stopPropagation();
       createToolbarMenu(
@@ -28093,17 +28145,17 @@ Rules:
         [
           {
             label: "New chat",
-            path: toolbarIconPaths.newChat,
+            icon: "newChat",
             action: () => newChatBtn.click(),
           },
           {
             label: "Save chat as note",
-            path: toolbarIconPaths.save,
+            icon: "save",
             action: () => saveBtn.click(),
           },
           {
             label: "Clear chat",
-            path: toolbarIconPaths.clear,
+            icon: "clear",
             danger: true,
             action: async () => {
               if (
@@ -28188,7 +28240,7 @@ Rules:
       webSearchBtn,
       stateManager.getOptions().webSearchEnabled,
     );
-    setToolbarIcon(webSearchBtn, toolbarIconPaths.web, "Toggle web search");
+    setToolbarIcon(webSearchBtn, "web", "Toggle web search");
 
     // Set initial border color for active state
     if (stateManager.getOptions().webSearchEnabled) {
@@ -28301,8 +28353,13 @@ Rules:
 
     const promptText = doc.createElement("div");
     promptText.style.cssText =
-      "margin-bottom: 8px; font-weight: 500; font-size: 0.9em;";
-    promptText.textContent = "⚠️ Permission Required";
+      "margin-bottom: 8px; font-weight: 500; font-size: 0.9em; display: inline-flex; align-items: center; gap: 5px;";
+    promptText.appendChild(
+      createSvgIcon(doc, "warning", { size: 14, strokeWidth: 1.8 }),
+    );
+    const promptLabel = doc.createElement("span");
+    promptLabel.textContent = "Permission Required";
+    promptText.appendChild(promptLabel);
 
     const subText = doc.createElement("div");
     subText.style.cssText =
@@ -28431,7 +28488,7 @@ Rules:
 
       const displayText =
         pastedImages.length > 0
-          ? `${text || "(no text)"} 🖼️ ${pastedImages.length} image(s)`
+          ? `${text || "(no text)"} [${pastedImages.length} image(s) attached]`
           : text;
       this.appendMessage(messagesArea, "You", displayText, userMsg.id, true);
     }
@@ -30585,21 +30642,38 @@ Note: Context was automatically reduced using stricter semantic search due to si
       "cursor: pointer; display: flex; align-items: center; flex-wrap: wrap; gap: 5px; padding: 6px 10px; font-size: 12px; color: var(--text-secondary); min-width: 0;";
     const summaryText = doc.createElement("span");
     summaryText.style.cssText =
-      "flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; word-wrap: break-word;";
-    summaryText.innerHTML = `<span style="font-size:12px">&#128269;</span> Semantically searched ${ragStats.chunksRetrieved} passages in ${ragStats.queryTimeMs}ms`;
+      "flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; word-wrap: break-word; display: inline-flex; align-items: center; gap: 5px;";
+    summaryText.appendChild(
+      createSvgIcon(doc, "search", { size: 12, strokeWidth: 1.8 }),
+    );
+    const summaryLabel = doc.createElementNS(HTML_NS, "span");
+    summaryLabel.textContent = `Semantically searched ${ragStats.chunksRetrieved} passages in ${ragStats.queryTimeMs}ms`;
+    summaryText.appendChild(summaryLabel);
 
     if (ragStats.totalContextItems != null && ragStats.totalContextItems > 0) {
       const indexed = ragStats.indexedCount ?? 0;
-      summaryText.innerHTML += ` — <span style="font-weight:500;font-size:11px">${indexed}/${ragStats.totalContextItems} indexed</span>`;
+      const indexedSpan = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+      indexedSpan.style.cssText = "font-weight:500; font-size: 11px;";
+      indexedSpan.textContent = `— ${indexed}/${ragStats.totalContextItems} indexed`;
+      summaryText.appendChild(indexedSpan);
     }
 
     summary.appendChild(summaryText);
 
     const copyAllBtn = doc.createElement("span");
-    copyAllBtn.textContent = "📋 Copy all";
     copyAllBtn.title = "Copy all RAG results as text";
     copyAllBtn.style.cssText =
-      "margin-left: auto; font-size: 10px; cursor: pointer; color: var(--text-tertiary); padding: 1px 6px; border: 1px solid var(--border-secondary); border-radius: 3px; opacity: 0.7;";
+      "margin-left: auto; font-size: 10px; cursor: pointer; color: var(--text-tertiary); padding: 1px 6px; border: 1px solid var(--border-secondary); border-radius: 3px; opacity: 0.7; display: inline-flex; align-items: center; gap: 4px;";
+    const setCopyAllLabel = (icon: IconName, label: string, color?: string) => {
+      copyAllBtn.replaceChildren(
+        createSvgIcon(doc, icon, { size: 11, strokeWidth: 1.8 }),
+      );
+      const lbl = doc.createElementNS(HTML_NS, "span");
+      lbl.textContent = label;
+      copyAllBtn.appendChild(lbl);
+      if (color) copyAllBtn.style.color = color;
+    };
+    setCopyAllLabel("copy", "Copy all");
     copyAllBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -30617,29 +30691,27 @@ Note: Context was automatically reduced using stricter semantic search due to si
               "@mozilla.org/widget/clipboardhelper;1"
             ].getService(Components.interfaces.nsIClipboardHelper);
             clipboard.copyString(text);
-            copyAllBtn.textContent = "✓ Copied";
+            setCopyAllLabel("check", "Copied");
           } else if (
             typeof navigator !== "undefined" &&
             navigator.clipboard?.writeText
           ) {
             navigator.clipboard.writeText(text).then(
               () => {
-                copyAllBtn.textContent = "✓ Copied";
+                setCopyAllLabel("check", "Copied");
               },
               () => {
-                copyAllBtn.textContent = "✗ Failed";
+                setCopyAllLabel("x-circle", "Failed");
               },
             );
           } else {
-            copyAllBtn.textContent = "✗ Failed";
+            setCopyAllLabel("x-circle", "Failed");
           }
         } catch (err) {
-          copyAllBtn.textContent = "✗ Failed";
+          setCopyAllLabel("x-circle", "Failed");
         }
         setTimeout(() => {
-          if (copyAllBtn.textContent !== "📋 Copy all") {
-            copyAllBtn.textContent = "📋 Copy all";
-          }
+          setCopyAllLabel("copy", "Copy all");
         }, 2000);
       }
     });
@@ -30766,7 +30838,7 @@ Note: Context was automatically reduced using stricter semantic search due to si
 
     const copyBtn = this.createActionButton(
       doc,
-      "📋",
+      "copy",
       "Click: Copy Text\nDouble-Click: Copy + Logs",
       () => {
         // Get the current text from data-raw attribute (for streaming messages)
@@ -30809,27 +30881,22 @@ Note: Context was automatically reduced using stricter semantic search due to si
 
     // TTS play button (when TTS is configured)
     if (isTtsConfigured()) {
-      const ttsBtn = this.createActionButton(
-        doc,
-        "\u{1F50A}",
-        "Play TTS",
-        () => {
-          const msgBubble = (ttsBtn as HTMLElement).closest(".message-bubble");
-          const contentEl = msgBubble?.querySelector("[data-content]");
-          const mdContainer = contentEl?.querySelector(".markdown-content");
-          const currentText =
-            mdContainer?.getAttribute("data-raw") ||
-            contentEl?.getAttribute("data-raw") ||
-            text;
-          playTts(currentText, ttsBtn as HTMLElement);
-        },
-      );
+      const ttsBtn = this.createActionButton(doc, "tts", "Play TTS", () => {
+        const msgBubble = (ttsBtn as HTMLElement).closest(".message-bubble");
+        const contentEl = msgBubble?.querySelector("[data-content]");
+        const mdContainer = contentEl?.querySelector(".markdown-content");
+        const currentText =
+          mdContainer?.getAttribute("data-raw") ||
+          contentEl?.getAttribute("data-raw") ||
+          text;
+        playTts(currentText, ttsBtn as HTMLElement);
+      });
       actionsDiv.appendChild(ttsBtn);
     }
 
     // Edit button (only for last user message)
     if (isUser && isLastUserMsg) {
-      const editBtn = this.createActionButton(doc, "✏️", "Edit", () => {
+      const editBtn = this.createActionButton(doc, "edit", "Edit", () => {
         const outerPanel = (msgDiv as HTMLElement).closest(
           "#assistant-messages-area",
         )?.parentElement as HTMLElement | undefined;
@@ -30841,7 +30908,7 @@ Note: Context was automatically reduced using stricter semantic search due to si
 
     // Retry button (only for assistant messages)
     if (isAssistant) {
-      const retryBtn = this.createActionButton(doc, "🔄", "Retry", () => {
+      const retryBtn = this.createActionButton(doc, "refresh", "Retry", () => {
         const outerPanel = (msgDiv as HTMLElement).closest(
           "#assistant-messages-area",
         )?.parentElement as HTMLElement | undefined;
@@ -30993,18 +31060,21 @@ Note: Context was automatically reduced using stricter semantic search due to si
    */
   private static createActionButton(
     doc: Document,
-    icon: string,
+    icon: IconName | string,
     tooltip: string,
     onClick: () => void,
   ): HTMLElement {
     const btn = ztoolkit.UI.createElement(doc, "span", {
-      properties: { innerText: icon, title: tooltip },
+      properties: { title: tooltip },
       styles: {
         cursor: "pointer",
         fontSize: "12px",
         padding: "2px 4px",
         borderRadius: "4px",
         transition: "background-color 0.1s",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
       },
       listeners: [
         {
@@ -31030,6 +31100,86 @@ Note: Context was automatically reduced using stricter semantic search due to si
         },
       ],
     });
+    if (
+      typeof icon === "string" &&
+      [
+        "agent",
+        "chat",
+        "settings",
+        "prompts",
+        "add",
+        "attachment",
+        "cloud",
+        "upload",
+        "image",
+        "video",
+        "web",
+        "stop",
+        "more",
+        "newChat",
+        "save",
+        "clear",
+        "send",
+        "chevron-left",
+        "chevron-right",
+        "chevron-down",
+        "chevron-up",
+        "play",
+        "pause",
+        "stop-circle",
+        "copy",
+        "edit",
+        "refresh",
+        "tts",
+        "loading",
+        "close",
+        "tag",
+        "search",
+        "library",
+        "review",
+        "explore",
+        "focus",
+        "lock",
+        "prompt",
+        "trash",
+        "paper",
+        "table",
+        "folder",
+        "folder-open",
+        "user",
+        "users",
+        "calendar",
+        "calendar-star",
+        "target",
+        "lightning",
+        "tool",
+        "wrench",
+        "brain",
+        "image-stack",
+        "image-multiple",
+        "download",
+        "open-link",
+        "warning",
+        "check",
+        "check-circle",
+        "x",
+        "x-circle",
+        "question",
+        "help",
+        "block",
+        "sparkle",
+        "idea",
+        "bookmark",
+        "flag",
+        "fire",
+        "firecrawl",
+        "thumbs-up",
+      ].includes(icon)
+    ) {
+      setButtonIcon(btn as HTMLElement, icon as IconName, tooltip, 13);
+    } else {
+      (btn as HTMLElement).textContent = icon as string;
+    }
     return btn;
   }
 
@@ -31038,25 +31188,39 @@ Note: Context was automatically reduced using stricter semantic search due to si
    * Uses ztoolkit.Clipboard for Zotero compatibility
    */
   private static copyToClipboard(text: string, buttonElement: HTMLElement) {
-    const originalText = buttonElement.innerText;
+    const doc = buttonElement.ownerDocument!;
+    const hadIcon = buttonElement.querySelector("svg") !== null;
+    const restore = (icon: IconName, title?: string) => {
+      if (hadIcon) {
+        setButtonIcon(buttonElement, icon, title, 13);
+      } else {
+        buttonElement.innerText = icon;
+      }
+    };
 
     try {
       // Use ztoolkit.Clipboard which works in Zotero's environment
       new ztoolkit.Clipboard().addText(text, "text/unicode").copy();
 
       // Visual feedback - success
-      buttonElement.innerText = "✓";
+      restore("check", "Copied");
       setTimeout(() => {
-        buttonElement.innerText = originalText;
+        restore("copy", "Copy");
       }, 1500);
 
       Zotero.debug("[seerai] Copied message to clipboard");
     } catch (e) {
       Zotero.debug(`[seerai] ztoolkit.Clipboard failed: ${e}`);
       // Visual feedback - failure
-      buttonElement.innerText = "❌";
+      if (hadIcon) {
+        buttonElement.replaceChildren(
+          createSvgIcon(doc, "x-circle", { size: 13, strokeWidth: 1.7 }),
+        );
+      } else {
+        buttonElement.innerText = "X";
+      }
       setTimeout(() => {
-        buttonElement.innerText = originalText;
+        restore("copy", "Copy");
       }, 1500);
     }
   }
@@ -31350,7 +31514,7 @@ Note: Context was automatically reduced using stricter semantic search due to si
     noteContent += `<p><strong>Context:</strong> ${stateManager.getSummary()}</p><hr/>`;
 
     for (const msg of conversationMessages) {
-      const role = msg.role === "user" ? "🧑 You" : "🤖 Assistant";
+      const role = msg.role === "user" ? "You" : "Assistant";
       noteContent += `<p><strong>${role}:</strong></p>`;
       noteContent += `<p>${msg.content.replace(/\n/g, "<br/>")}</p>`;
       noteContent += `<hr/>`;
@@ -31503,21 +31667,23 @@ Note: Context was automatically reduced using stricter semantic search due to si
   static async addItemsToSystematicReview(items: Zotero.Item[]): Promise<void> {
     const { addPapersToSystematicReview } =
       await import("./systematicReview/systematicReviewTab");
+    const { generateSourceLabel } = await import("./systematicReview/utils");
     const paperIds = items
       .filter((item) => item.isRegularItem())
       .map((item) => item.id);
 
-    if (paperIds.length !== 1) {
+    if (paperIds.length === 0) {
       new ztoolkit.ProgressWindow("SeerAI")
         .createLine({
-          text: "Select exactly one regular Zotero item",
+          text: "Select at least one regular Zotero item",
           progress: 100,
         })
         .show();
       return;
     }
 
-    await addPapersToSystematicReview(paperIds);
+    const sourceLabel = generateSourceLabel();
+    await addPapersToSystematicReview(paperIds, sourceLabel);
 
     // Update local cache
     const added = paperIds.filter((id) => !currentSRPaperIds.includes(id));
@@ -31527,12 +31693,19 @@ Note: Context was automatically reduced using stricter semantic search due to si
       this.renderInterface(currentContainer, currentItem);
     }
 
+    const addedCount = added.length;
+    const existingCount = paperIds.length - addedCount;
+    let text: string;
+    if (addedCount > 0 && existingCount > 0) {
+      text = `Added ${addedCount} paper${addedCount === 1 ? "" : "s"} · ${existingCount} already in review · label "${sourceLabel}"`;
+    } else if (addedCount > 0) {
+      text = `Added ${addedCount} paper${addedCount === 1 ? "" : "s"} · label "${sourceLabel}"`;
+    } else {
+      text = `${existingCount} paper${existingCount === 1 ? "" : "s"} already in review`;
+    }
     new ztoolkit.ProgressWindow("SeerAI")
       .createLine({
-        text:
-          added.length === 1
-            ? "Paper added to systematic review"
-            : "Paper is already in the systematic review",
+        text,
         progress: 100,
       })
       .show();

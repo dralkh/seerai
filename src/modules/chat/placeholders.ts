@@ -16,6 +16,7 @@ import { getTableStore } from "./tableStore";
 import { getMessageStore } from "./messageStore";
 import { config } from "../../../package.json";
 import { getSRService } from "../systematicReview/service";
+import type { IconName } from "./ui/icons";
 
 // ==================== Types ====================
 
@@ -23,7 +24,7 @@ export interface AutocompleteResult {
   id: string | number;
   title: string;
   subtitle?: string;
-  icon?: string;
+  icon?: IconName;
   type: PlaceholderType;
   data?: Record<string, unknown>; // Additional data for resolution
 }
@@ -53,18 +54,18 @@ export interface PlaceholderSelections {
 // Placeholder display info
 export const PLACEHOLDER_INFO: Record<
   PlaceholderType,
-  { icon: string; label: string; color: string }
+  { icon: IconName; label: string; color: string }
 > = {
-  topic: { icon: "🎯", label: "Topic", color: "#9c27b0" },
-  paper: { icon: "📄", label: "Paper", color: "#2196f3" },
-  author: { icon: "👤", label: "Author", color: "#4caf50" },
-  collection: { icon: "📁", label: "Collection", color: "#ff9800" },
-  tag: { icon: "🏷️", label: "Tag", color: "#e91e63" },
-  year: { icon: "📅", label: "Year", color: "#607d8b" },
-  table: { icon: "📊", label: "Table", color: "#009688" },
-  prompt: { icon: "⚡", label: "Prompt", color: "#ffc107" },
-  workspace: { icon: "📂", label: "Workspace", color: "#AF52DE" },
-  review: { icon: "R", label: "Review", color: "#7C3AED" },
+  topic: { icon: "target", label: "Topic", color: "#9c27b0" },
+  paper: { icon: "paper", label: "Paper", color: "#2196f3" },
+  author: { icon: "user", label: "Author", color: "#4caf50" },
+  collection: { icon: "folder", label: "Collection", color: "#ff9800" },
+  tag: { icon: "tag", label: "Tag", color: "#e91e63" },
+  year: { icon: "calendar", label: "Year", color: "#607d8b" },
+  table: { icon: "table", label: "Table", color: "#009688" },
+  prompt: { icon: "lightning", label: "Prompt", color: "#ffc107" },
+  workspace: { icon: "folder-open", label: "Workspace", color: "#AF52DE" },
+  review: { icon: "review", label: "Review", color: "#7C3AED" },
 };
 
 // ==================== Trigger Detection ====================
@@ -286,7 +287,7 @@ export async function queryPapers(
           id: item.id,
           title: (title || "Untitled") + libSuffix,
           subtitle: `${firstAuthor} (${year || "n.d."})`,
-          icon: "📄",
+          icon: "paper",
           type: "paper",
           data: {
             key: item.key,
@@ -402,7 +403,7 @@ export async function queryAuthors(
         id: key,
         title: fullName || "Unknown Author",
         subtitle: `${author.count} paper${author.count > 1 ? "s" : ""}`,
-        icon: "👤",
+        icon: "user",
         type: "author",
         data: {
           firstName: author.firstName,
@@ -483,7 +484,7 @@ export async function queryCollections(
           title: displayTitle,
           subtitle:
             path !== collection.name ? path : `${childItems.length} items`,
-          icon: "📁",
+          icon: "folder",
           type: "collection",
           data: {
             key: collection.key,
@@ -624,7 +625,7 @@ export async function queryTags(
         id: tagName,
         title: tagName,
         subtitle: `${info.count} item${info.count !== 1 ? "s" : ""}`,
-        icon: info.color ? "🔖" : "🏷️",
+        icon: info.color ? "bookmark" : "tag",
         type: "tag",
         data: {
           color: info.color,
@@ -682,7 +683,7 @@ export async function queryTopics(
         id: topic,
         title: topic,
         subtitle: "Recent topic",
-        icon: "🎯",
+        icon: "target",
         type: "topic",
       });
 
@@ -695,7 +696,7 @@ export async function queryTopics(
         id: query,
         title: query,
         subtitle: "Use this topic",
-        icon: "✨",
+        icon: "sparkle",
         type: "topic",
       });
     }
@@ -706,7 +707,7 @@ export async function queryTopics(
         id: "_hint",
         title: "Type a topic to focus on...",
         subtitle: "e.g., methodology, results, limitations",
-        icon: "💡",
+        icon: "idea",
         type: "topic",
       });
     }
@@ -718,7 +719,7 @@ export async function queryTopics(
         id: query,
         title: query,
         subtitle: "New topic",
-        icon: "🎯",
+        icon: "target",
         type: "topic",
       });
     } else {
@@ -727,7 +728,7 @@ export async function queryTopics(
         id: "_hint",
         title: "Type a topic to focus on...",
         subtitle: "e.g., methodology, results, limitations",
-        icon: "💡",
+        icon: "idea",
         type: "topic",
       });
     }
@@ -809,7 +810,7 @@ export async function queryReviews(
       id: project.id,
       title: project.name,
       subtitle: `${project.data?.papers.filter((paper) => paper.status === "included").length || 0} included papers`,
-      icon: "R",
+      icon: "review",
       type: "review" as const,
       data: { projectId: project.id },
     }));
@@ -832,7 +833,7 @@ export async function queryPrompts(
         id: prompt.id,
         title: prompt.name,
         subtitle: prompt.description || "Prompt Template",
-        icon: "⚡",
+        icon: "lightning",
         type: "prompt",
         data: {
           template: prompt.template,
@@ -875,7 +876,7 @@ export async function queryTables(
         id: table.id,
         title: table.name,
         subtitle: `${rowCount} papers, ${colCount} columns`,
-        icon: "📊",
+        icon: "table",
         type: "table",
         data: {
           rowCount: rowCount,
@@ -949,7 +950,7 @@ export async function queryWorkspaces(
             id: `folder:${slug}`,
             title: displayName,
             subtitle: `Folder workspace${fileCount > 0 ? ` - ${fileCount} files` : ""}`,
-            icon: "📁",
+            icon: "folder",
             type: "workspace",
             data: {
               workspaceDir: workspacePath,
@@ -1014,7 +1015,7 @@ export async function queryWorkspaces(
           id: `chat:${conv.id}`,
           title,
           subtitle,
-          icon: "💬",
+          icon: "chat",
           type: "workspace",
           data: {
             workspaceDir: convWorkspaceDir,
@@ -1089,7 +1090,7 @@ export async function queryYears(
         id: year,
         title: year,
         subtitle: `${count} paper${count !== 1 ? "s" : ""}`,
-        icon: "📅",
+        icon: "calendar",
         type: "year",
       });
 

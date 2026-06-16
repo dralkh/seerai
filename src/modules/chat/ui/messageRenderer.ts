@@ -9,6 +9,7 @@ import { openAIService } from "../../openai";
 import { getActiveModelConfig } from "../modelConfig";
 import type { RAGProgressEvent } from "../rag/types";
 import { ChatContextManager } from "../context/contextManager";
+import { createSvgIcon, setButtonIcon, type IconName } from "./icons";
 
 // Global TTS audio state — only one message plays at a time
 let currentTtsAudio: HTMLAudioElement | null = null;
@@ -61,8 +62,7 @@ export function stopTtsPlayback(): void {
     currentTtsAudio = null;
   }
   if (currentTtsButton) {
-    currentTtsButton.innerText = "\u{1F50A}"; // 🔊
-    currentTtsButton.title = "Play TTS";
+    setButtonIcon(currentTtsButton, "tts", "Play TTS", 14);
     currentTtsButton = null;
   }
 }
@@ -84,8 +84,8 @@ export async function playTts(
   // Stop any other playing TTS
   stopTtsPlayback();
 
-  const originalText = button.innerText;
-  button.innerText = "\u23F3"; // ⏳
+  const originalWasIcon = button.querySelector("svg") !== null;
+  setButtonIcon(button, "loading", "Loading...", 14);
   button.title = "Loading...";
   currentTtsButton = button;
 
@@ -101,14 +101,14 @@ export async function playTts(
     audio.src = url;
     currentTtsAudio = audio;
 
-    button.innerText = "\u23F9"; // ⏹
+    setButtonIcon(button, "stop-circle", "Stop", 14);
     button.title = "Stop";
 
     audio.addEventListener("ended", () => {
       URL.revokeObjectURL(url);
       currentTtsBlobUrl = null;
       if (currentTtsButton === button) {
-        button.innerText = "\u{1F50A}"; // 🔊
+        setButtonIcon(button, "tts", "Play TTS", 14);
         button.title = "Play TTS";
         currentTtsAudio = null;
         currentTtsButton = null;
@@ -117,10 +117,10 @@ export async function playTts(
 
     audio.addEventListener("error", () => {
       URL.revokeObjectURL(url);
-      button.innerText = "\u274C"; // ❌
+      setButtonIcon(button, "x-circle", "TTS playback failed", 14);
       button.title = "TTS playback failed";
       setTimeout(() => {
-        button.innerText = "\u{1F50A}"; // 🔊
+        setButtonIcon(button, "tts", "Play TTS", 14);
         button.title = "Play TTS";
       }, 2000);
       if (currentTtsButton === button) {
@@ -132,10 +132,14 @@ export async function playTts(
     await audio.play();
   } catch (e) {
     Zotero.debug(`[seerai] TTS error: ${e}`);
-    button.innerText = "\u274C"; // ❌
+    setButtonIcon(button, "x-circle", `TTS failed: ${e}`, 14);
     button.title = `TTS failed: ${e}`;
     setTimeout(() => {
-      button.innerText = originalText;
+      if (originalWasIcon) {
+        setButtonIcon(button, "tts", "Play TTS", 14);
+      } else {
+        button.innerText = "Play TTS";
+      }
       button.title = "Play TTS";
     }, 2000);
     currentTtsButton = null;
@@ -216,7 +220,7 @@ export const messageColors = {
  */
 export function createActionButton(
   doc: Document,
-  icon: string,
+  icon: IconName | string,
   tooltip: string,
   onClick: () => void,
 ): HTMLElement {
@@ -224,8 +228,8 @@ export function createActionButton(
     "http://www.w3.org/1999/xhtml",
     "button",
   ) as HTMLButtonElement;
-  btn.innerText = icon;
   btn.title = tooltip;
+  btn.setAttribute("aria-label", tooltip);
   Object.assign(btn.style, {
     background: "none",
     border: "none",
@@ -233,6 +237,10 @@ export function createActionButton(
     padding: "2px",
     fontSize: "11px",
     opacity: "0.7",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    lineHeight: "0",
   });
   btn.addEventListener("mouseover", () => {
     btn.style.opacity = "1";
@@ -241,36 +249,140 @@ export function createActionButton(
     btn.style.opacity = "0.7";
   });
   btn.addEventListener("click", onClick);
+  setActionButtonIcon(btn, icon, tooltip, 13);
   return btn;
 }
+
+function setActionButtonIcon(
+  btn: HTMLElement,
+  icon: IconName | string,
+  title?: string,
+  size: number = 13,
+): void {
+  if (
+    typeof icon === "string" &&
+    (ICON_NAMES_SET as ReadonlySet<string>).has(icon)
+  ) {
+    setButtonIcon(btn, icon as IconName, title, size);
+  } else {
+    btn.textContent = String(icon);
+  }
+}
+
+const ICON_NAMES_SET: ReadonlySet<string> = new Set<IconName>([
+  "agent",
+  "chat",
+  "settings",
+  "prompts",
+  "add",
+  "attachment",
+  "cloud",
+  "upload",
+  "image",
+  "video",
+  "web",
+  "stop",
+  "more",
+  "newChat",
+  "save",
+  "clear",
+  "send",
+  "chevron-left",
+  "chevron-right",
+  "chevron-down",
+  "chevron-up",
+  "play",
+  "pause",
+  "stop-circle",
+  "copy",
+  "edit",
+  "refresh",
+  "tts",
+  "loading",
+  "close",
+  "tag",
+  "search",
+  "library",
+  "review",
+  "explore",
+  "focus",
+  "lock",
+  "prompt",
+  "trash",
+  "paper",
+  "table",
+  "folder",
+  "folder-open",
+  "user",
+  "users",
+  "calendar",
+  "calendar-star",
+  "target",
+  "lightning",
+  "tool",
+  "wrench",
+  "brain",
+  "image-stack",
+  "image-multiple",
+  "download",
+  "open-link",
+  "warning",
+  "check",
+  "check-circle",
+  "x",
+  "x-circle",
+  "question",
+  "help",
+  "block",
+  "sparkle",
+  "idea",
+  "bookmark",
+  "flag",
+  "fire",
+  "firecrawl",
+  "thumbs-up",
+]);
 
 /**
  * Copy text to clipboard and show feedback
  */
 export function copyToClipboard(text: string, button: HTMLElement): void {
-  const originalText = button.innerText;
+  const hadIcon = button.querySelector("svg") !== null;
+  const restore = () => {
+    if (hadIcon) {
+      setButtonIcon(button, "copy", "Copy", 13);
+    } else {
+      button.textContent = "Copy";
+    }
+  };
 
   if (navigator.clipboard) {
     navigator.clipboard
       .writeText(text)
       .then(() => {
-        button.innerText = "✓";
-        setTimeout(() => {
-          button.innerText = originalText;
-        }, 2000);
+        if (hadIcon) {
+          setButtonIcon(button, "check", "Copied", 13);
+        } else {
+          button.textContent = "Copied";
+        }
+        setTimeout(restore, 2000);
       })
       .catch(() => {
-        button.innerText = "❌";
-        setTimeout(() => {
-          button.innerText = originalText;
-        }, 2000);
+        if (hadIcon) {
+          setButtonIcon(button, "x-circle", "Copy failed", 13);
+        } else {
+          button.textContent = "X";
+        }
+        setTimeout(restore, 2000);
       });
   } else {
     // Fallback for environments without clipboard API
-    button.innerText = "❌";
-    setTimeout(() => {
-      button.innerText = originalText;
-    }, 2000);
+    if (hadIcon) {
+      setButtonIcon(button, "x-circle", "Copy failed", 13);
+    } else {
+      button.textContent = "X";
+    }
+    setTimeout(restore, 2000);
   }
 }
 
@@ -337,7 +449,7 @@ export function createMessageBubble(
   });
 
   // Copy button (for all messages)
-  const copyBtn = createActionButton(doc, "📋", "Copy", () => {
+  const copyBtn = createActionButton(doc, "copy", "Copy", () => {
     copyToClipboard(text, copyBtn);
   });
   actionsDiv.appendChild(copyBtn);
@@ -345,7 +457,7 @@ export function createMessageBubble(
   // TTS play button (when TTS is configured)
   if (isTtsConfigured()) {
     Zotero.debug("[seerai] TTS configured, adding play button to message");
-    const ttsBtn = createActionButton(doc, "\u{1F50A}", "Play TTS", () => {
+    const ttsBtn = createActionButton(doc, "tts", "Play TTS", () => {
       // Read the latest text from the content div's data-raw attribute
       const currentText =
         msgDiv.querySelector("[data-content]")?.getAttribute("data-raw") ||
@@ -357,7 +469,7 @@ export function createMessageBubble(
 
   // Edit button (only for last user message)
   if (isUser && options?.isLastUserMsg && options?.onEdit) {
-    const editBtn = createActionButton(doc, "✏️", "Edit", () => {
+    const editBtn = createActionButton(doc, "edit", "Edit", () => {
       options.onEdit!(msgDiv, msgId || "");
     });
     actionsDiv.appendChild(editBtn);
@@ -365,7 +477,12 @@ export function createMessageBubble(
 
   // Retry button (for assistant messages)
   if (isAssistant && !options?.isStreaming && options?.onRetry) {
-    const retryBtn = createActionButton(doc, "🔄", "Retry", options.onRetry);
+    const retryBtn = createActionButton(
+      doc,
+      "refresh",
+      "Retry",
+      options.onRetry,
+    );
     actionsDiv.appendChild(retryBtn);
   }
 
@@ -533,6 +650,9 @@ export function wireCodePreviewButtons(contentDiv: HTMLElement): void {
         fontSize: "10px",
         lineHeight: "1.3",
         transition: "background 0.1s",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
       });
       b.addEventListener("mouseenter", () => {
         b.style.background = "var(--background-secondary)";
@@ -547,24 +667,59 @@ export function wireCodePreviewButtons(contentDiv: HTMLElement): void {
       return b;
     }
 
+    function makeIconBtn(
+      icon: IconName,
+      label: string,
+      title: string,
+      onClick: () => void,
+    ): HTMLButtonElement {
+      const b = makeBtn("", title, onClick);
+      b.appendChild(createSvgIcon(doc, icon, { size: 11, strokeWidth: 1.7 }));
+      const lbl = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
+      lbl.textContent = label;
+      b.appendChild(lbl);
+      b.setAttribute("data-icon-label", label);
+      b.setAttribute("data-icon-name", icon);
+      return b;
+    }
+
+    function flashBtn(b: HTMLButtonElement, ok: boolean, okText: string) {
+      const icon = (b.getAttribute("data-icon-name") || "copy") as IconName;
+      const label = b.getAttribute("data-icon-label") || "";
+      if (ok) {
+        setButtonIcon(b, "check", okText, 11);
+        const lbl = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
+        lbl.textContent = okText;
+        b.appendChild(lbl);
+        b.setAttribute("data-icon-label", okText);
+      } else {
+        setButtonIcon(b, "x-circle", "Failed", 11);
+        const lbl = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
+        lbl.textContent = "Failed";
+        b.appendChild(lbl);
+        b.setAttribute("data-icon-label", "Failed");
+      }
+      setTimeout(() => {
+        setButtonIcon(b, icon, label, 11);
+        const lbl = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
+        lbl.textContent = label;
+        b.appendChild(lbl);
+        b.setAttribute("data-icon-label", label);
+      }, 1500);
+    }
+
     // Copy
-    const copyBtn = makeBtn("\uD83D\uDCCC Copy", "Copy code content", () => {
+    const copyBtn = makeIconBtn("copy", "Copy", "Copy code content", () => {
       try {
         new ztoolkit.Clipboard().addText(sourceContent, "text/unicode").copy();
-        copyBtn.textContent = "\u2713 Copied";
-        setTimeout(() => {
-          copyBtn.textContent = "\uD83D\uDCCC Copy";
-        }, 1500);
+        flashBtn(copyBtn, true, "Copied");
       } catch {
-        copyBtn.textContent = "\u274C Failed";
-        setTimeout(() => {
-          copyBtn.textContent = "\uD83D\uDCCC Copy";
-        }, 1500);
+        flashBtn(copyBtn, false, "Failed");
       }
     });
 
     // Add to Context
-    const ctxBtn = makeBtn("\uD83D\uDCCB Ctx", "Add to chat context", () => {
+    const ctxBtn = makeIconBtn("add", "Ctx", "Add to chat context", () => {
       try {
         ChatContextManager.getInstance().addItem(
           `code-preview-${Date.now()}`,
@@ -573,22 +728,17 @@ export function wireCodePreviewButtons(contentDiv: HTMLElement): void {
           "toolbar",
           { text: sourceContent, mimeType: `text/${lang}` },
         );
-        ctxBtn.textContent = "\u2713 Added";
-        setTimeout(() => {
-          ctxBtn.textContent = "\uD83D\uDCCB Ctx";
-        }, 1500);
+        flashBtn(ctxBtn, true, "Added");
       } catch (e) {
         Zotero.debug(`[seerai] Error adding code to context: ${e}`);
-        ctxBtn.textContent = "\u274C";
-        setTimeout(() => {
-          ctxBtn.textContent = "\uD83D\uDCCB Ctx";
-        }, 1500);
+        flashBtn(ctxBtn, false, "Failed");
       }
     });
 
     // Enlarge
-    const enlargeBtn = makeBtn(
-      "\u26F6 Enlarge",
+    const enlargeBtn = makeIconBtn(
+      "open-link",
+      "Enlarge",
       "Open in full preview window",
       () => {
         showCodePreviewModal(doc, lang, sourceContent);
@@ -760,17 +910,20 @@ function showCodePreviewModal(
     RAG_HTML_NS,
     "button",
   ) as HTMLButtonElement;
-  closeBtn.textContent = "\u2715";
   closeBtn.title = "Close preview";
+  closeBtn.setAttribute("aria-label", "Close preview");
   Object.assign(closeBtn.style, {
     background: "none",
     border: "none",
-    fontSize: "16px",
     cursor: "pointer",
     color: "var(--text-secondary)",
     padding: "2px 6px",
     borderRadius: "4px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
   });
+  setButtonIcon(closeBtn, "close", "Close preview", 14);
 
   header.appendChild(title);
   header.appendChild(closeBtn);
@@ -804,6 +957,9 @@ function showCodePreviewModal(
       fontSize: "11px",
       lineHeight: "1.3",
       transition: "background 0.1s",
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "4px",
     });
     b.addEventListener("mouseenter", () => {
       b.style.background = "var(--background-secondary)";
@@ -818,25 +974,53 @@ function showCodePreviewModal(
     return b;
   }
 
+  function toolIconBtn(
+    icon: IconName,
+    label: string,
+    title: string,
+    handler: () => void,
+  ): HTMLButtonElement {
+    const b = toolBtn("", title, handler);
+    b.appendChild(createSvgIcon(doc, icon, { size: 11, strokeWidth: 1.7 }));
+    const lbl = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
+    lbl.textContent = label;
+    b.appendChild(lbl);
+    b.setAttribute("data-icon-label", label);
+    b.setAttribute("data-icon-name", icon);
+    return b;
+  }
+
+  function toolFlashBtn(b: HTMLButtonElement, ok: boolean, okText: string) {
+    const icon = (b.getAttribute("data-icon-name") || "copy") as IconName;
+    const label = b.getAttribute("data-icon-label") || "";
+    setButtonIcon(b, ok ? "check" : "x-circle", okText, 11);
+    const lbl = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
+    lbl.textContent = okText;
+    b.appendChild(lbl);
+    b.setAttribute("data-icon-label", okText);
+    setTimeout(() => {
+      setButtonIcon(b, icon, label, 11);
+      const lbl2 = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
+      lbl2.textContent = label;
+      b.appendChild(lbl2);
+      b.setAttribute("data-icon-label", label);
+    }, 1500);
+  }
+
   // Copy button
-  const copyBtn = toolBtn("\uD83D\uDCCC Copy", "Copy code content", () => {
+  const copyBtn = toolIconBtn("copy", "Copy", "Copy code content", () => {
     try {
       new ztoolkit.Clipboard().addText(content, "text/unicode").copy();
-      copyBtn.textContent = "\u2713 Copied";
-      setTimeout(() => {
-        copyBtn.textContent = "\uD83D\uDCCC Copy";
-      }, 1500);
+      toolFlashBtn(copyBtn, true, "Copied");
     } catch (e) {
-      copyBtn.textContent = "\u274C Failed";
-      setTimeout(() => {
-        copyBtn.textContent = "\uD83D\uDCCC Copy";
-      }, 1500);
+      toolFlashBtn(copyBtn, false, "Failed");
     }
   });
 
   // Add to Context button
-  const ctxBtn = toolBtn(
-    "\uD83D\uDCCB Add to Context",
+  const ctxBtn = toolIconBtn(
+    "add",
+    "Add to Context",
     "Add to chat context",
     () => {
       try {
@@ -848,29 +1032,35 @@ function showCodePreviewModal(
           "toolbar",
           { text: content, mimeType: `text/${lang}` },
         );
-        ctxBtn.textContent = "\u2713 Added";
-        setTimeout(() => {
-          ctxBtn.textContent = "\uD83D\uDCCB Add to Context";
-        }, 1500);
+        toolFlashBtn(ctxBtn, true, "Added");
       } catch (e) {
         Zotero.debug(`[seerai] Error adding code to context: ${e}`);
-        ctxBtn.textContent = "\u274C Error";
-        setTimeout(() => {
-          ctxBtn.textContent = "\uD83D\uDCCB Add to Context";
-        }, 1500);
+        toolFlashBtn(ctxBtn, false, "Error");
       }
     },
   );
 
   // Expand button
-  const expandBtn = toolBtn("\u26F6 Expand", "Expand to full window", () => {
-    isExpanded = !isExpanded;
-    Object.assign(container.style, containerDefaults());
-    expandBtn.textContent = isExpanded ? "\u26F6 Collapse" : "\u26F6 Expand";
-    expandBtn.title = isExpanded
-      ? "Collapse to normal size"
-      : "Expand to full window";
-  });
+  const expandBtn = toolIconBtn(
+    "open-link",
+    "Expand",
+    "Expand to full window",
+    () => {
+      isExpanded = !isExpanded;
+      Object.assign(container.style, containerDefaults());
+      const newLabel = isExpanded ? "Collapse" : "Expand";
+      const newIcon: IconName = isExpanded ? "close" : "open-link";
+      setButtonIcon(expandBtn, newIcon, newLabel, 11);
+      const lbl = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
+      lbl.textContent = newLabel;
+      expandBtn.appendChild(lbl);
+      expandBtn.setAttribute("data-icon-label", newLabel);
+      expandBtn.setAttribute("data-icon-name", newIcon);
+      expandBtn.title = isExpanded
+        ? "Collapse to normal size"
+        : "Expand to full window";
+    },
+  );
   expandBtn.style.marginLeft = "auto";
 
   toolbar.appendChild(copyBtn);
@@ -1165,9 +1355,13 @@ export function createRAGProgressUI(doc: Document): {
   `;
 
   const spinner = doc.createElementNS(RAG_HTML_NS, "span") as HTMLElement;
-  spinner.textContent = "\u25CE"; // ◎
+  spinner.replaceChildren(
+    createSvgIcon(doc, "loading", { size: 14, strokeWidth: 1.8 }),
+  );
   spinner.style.cssText = `
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     animation: rag-spin 1.2s linear infinite;
     font-size: 14px;
   `;
@@ -1235,19 +1429,31 @@ export function createRAGProgressUI(doc: Document): {
 
     const icon = stepIcons[event.step] || "\u25CE";
 
+    const setSpinnerIcon = (name: IconName, color?: string) => {
+      spinner.replaceChildren(
+        createSvgIcon(doc, name, { size: 14, strokeWidth: 1.8 }),
+      );
+      if (color) spinner.style.color = color;
+    };
+
     if (event.step === "complete") {
-      spinner.textContent = "\u2713"; // ✓
       spinner.style.animation = "none";
       if (event.error) {
-        spinner.style.color = "var(--accent-red, #FF3B30)";
+        setSpinnerIcon("x-circle", "var(--accent-red, #FF3B30)");
       } else {
-        spinner.style.color = "var(--accent-green, #34C759)";
+        setSpinnerIcon("check-circle", "var(--accent-green, #34C759)");
       }
       statusLabel.textContent = `Smart Context: ${event.message}`;
       // Keep open so user can inspect passages
       details.open = true;
     } else {
-      spinner.textContent = icon;
+      if (event.step === "assembling") {
+        setSpinnerIcon("sparkle");
+      } else if (event.step === "embedding-passthrough") {
+        setSpinnerIcon("table");
+      } else {
+        setSpinnerIcon("loading");
+      }
       statusLabel.textContent = `Smart Context: ${event.message}`;
     }
 
@@ -1284,9 +1490,11 @@ export function createRAGProgressUI(doc: Document): {
           RAG_HTML_NS,
           "button",
         ) as HTMLButtonElement;
-        thumbsUp.textContent = "\u2714";
+        thumbsUp.title = "Helpful";
+        thumbsUp.setAttribute("aria-label", "Helpful");
         thumbsUp.style.cssText =
-          "background: none; border: 1px solid var(--border-secondary); border-radius: 3px; padding: 1px 5px; cursor: pointer; font-size: 11px; color: var(--text-secondary); line-height: 1;";
+          "background: none; border: 1px solid var(--border-secondary); border-radius: 3px; padding: 1px 5px; cursor: pointer; font-size: 11px; color: var(--text-secondary); line-height: 1; display: inline-flex; align-items: center;";
+        setButtonIcon(thumbsUp, "thumbs-up", "Helpful", 12);
         thumbsUp.onclick = () => {
           thumbsUp.style.background = "var(--accent-green, #34C759)";
           thumbsUp.style.color = "#fff";
@@ -1299,9 +1507,11 @@ export function createRAGProgressUI(doc: Document): {
           RAG_HTML_NS,
           "button",
         ) as HTMLButtonElement;
-        thumbsDown.textContent = "\u2718";
+        thumbsDown.title = "Not helpful";
+        thumbsDown.setAttribute("aria-label", "Not helpful");
         thumbsDown.style.cssText =
-          "background: none; border: 1px solid var(--border-secondary); border-radius: 3px; padding: 1px 5px; cursor: pointer; font-size: 11px; color: var(--text-secondary); line-height: 1;";
+          "background: none; border: 1px solid var(--border-secondary); border-radius: 3px; padding: 1px 5px; cursor: pointer; font-size: 11px; color: var(--text-secondary); line-height: 1; display: inline-flex; align-items: center;";
+        setButtonIcon(thumbsDown, "x", "Not helpful", 12);
         thumbsDown.onclick = () => {
           thumbsDown.style.background = "var(--accent-red, #FF3B30)";
           thumbsDown.style.color = "#fff";
@@ -1317,7 +1527,9 @@ export function createRAGProgressUI(doc: Document): {
 
   // ── Dismiss function — sets a non-progress state ────────────────────
   function dismiss(reason: string): void {
-    spinner.textContent = "\u2713";
+    spinner.replaceChildren(
+      createSvgIcon(doc, "check", { size: 14, strokeWidth: 1.8 }),
+    );
     spinner.style.animation = "none";
     spinner.style.color = "var(--text-tertiary, #888)";
     statusLabel.textContent = `Smart Context: ${reason}`;

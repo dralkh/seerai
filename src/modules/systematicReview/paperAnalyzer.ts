@@ -12,14 +12,14 @@ import { modelConfidenceSchema } from "./modelOutput";
 import { getReviewSourceDocument } from "./reviewSourceService";
 
 const AnalysisSchema = z.object({
-  studyDesign: z.string().optional(),
-  population: z.string().optional(),
-  intervention: z.string().optional(),
-  comparator: z.string().optional(),
-  outcomes: z.array(z.string()).optional(),
-  sampleSize: z.number().int().nonnegative().optional(),
-  methods: z.string().optional(),
-  limitations: z.string().optional(),
+  studyDesign: z.string().nullish(),
+  population: z.string().nullish(),
+  intervention: z.string().nullish(),
+  comparator: z.string().nullish(),
+  outcomes: z.array(z.string()).nullish(),
+  sampleSize: z.number().int().nonnegative().nullish(),
+  methods: z.string().nullish(),
+  limitations: z.string().nullish(),
   recommendation: z
     .object({
       decision: z.enum(["included", "maybe", "excluded"]),
@@ -30,12 +30,12 @@ const AnalysisSchema = z.object({
           criterionId: z.string(),
           verdict: z.enum(["met", "not_met", "unclear"]),
           rationale: z.string(),
-          quote: z.string().optional(),
-          confidence: modelConfidenceSchema.optional(),
+          quote: z.string().nullish(),
+          confidence: modelConfidenceSchema.nullish(),
         }),
       ),
     })
-    .optional(),
+    .nullish(),
   evidence: z
     .array(
       z.object({
@@ -187,6 +187,8 @@ Return:
   await options?.onStage?.("validating");
   Zotero.debug(`[seerai] Review analysis ${item.id}: validating model output`);
   const parsed = AnalysisSchema.parse(parseJSON(response));
+  const stripNull = <T>(value: T | null | undefined): T | undefined =>
+    value === null ? undefined : (value as T | undefined);
   const normalizedContent = normalize(content);
   const evidence = parsed.evidence.filter((entry) =>
     normalizedContent.includes(normalize(entry.quote)),
@@ -196,14 +198,17 @@ Return:
     value !== undefined && groundedFields.has(field) ? value : undefined;
   const model = getActiveModelConfig()?.model || "configured model";
   const analysis: NonNullable<SystematicReviewPaper["analysis"]> = {
-    studyDesign: requireEvidence("studyDesign", parsed.studyDesign),
-    population: requireEvidence("population", parsed.population),
-    intervention: requireEvidence("intervention", parsed.intervention),
-    comparator: requireEvidence("comparator", parsed.comparator),
-    outcomes: requireEvidence("outcomes", parsed.outcomes),
-    sampleSize: requireEvidence("sampleSize", parsed.sampleSize),
-    methods: requireEvidence("methods", parsed.methods),
-    limitations: requireEvidence("limitations", parsed.limitations),
+    studyDesign: requireEvidence("studyDesign", stripNull(parsed.studyDesign)),
+    population: requireEvidence("population", stripNull(parsed.population)),
+    intervention: requireEvidence(
+      "intervention",
+      stripNull(parsed.intervention),
+    ),
+    comparator: requireEvidence("comparator", stripNull(parsed.comparator)),
+    outcomes: requireEvidence("outcomes", stripNull(parsed.outcomes)),
+    sampleSize: requireEvidence("sampleSize", stripNull(parsed.sampleSize)),
+    methods: requireEvidence("methods", stripNull(parsed.methods)),
+    limitations: requireEvidence("limitations", stripNull(parsed.limitations)),
     evidence,
     model,
     createdAt: new Date().toISOString(),
@@ -218,9 +223,8 @@ Return:
   );
   const groundedCriteria = expectedCriteria.map((expected) => {
     const criterion = returnedCriteria.get(expected.id);
-    const grounded =
-      criterion?.quote &&
-      normalizedContent.includes(normalize(criterion.quote));
+    const quote = stripNull(criterion?.quote);
+    const grounded = quote && normalizedContent.includes(normalize(quote));
     return {
       criterionId: expected.id,
       verdict:
@@ -229,8 +233,8 @@ Return:
           : criterion?.verdict || ("unclear" as const),
       rationale:
         criterion?.rationale || "The model did not assess this criterion",
-      quote: grounded ? criterion.quote : undefined,
-      confidence: criterion?.confidence,
+      quote: grounded ? quote : undefined,
+      confidence: criterion ? stripNull(criterion.confidence) : undefined,
     };
   });
   const { decision, rationale } = deriveScreeningRecommendation(

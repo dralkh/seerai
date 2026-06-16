@@ -10,6 +10,7 @@ import {
 } from "./chat/modelConfig";
 import { AIModelConfig, ModelType, MODEL_TYPE_ENDPOINTS } from "./chat/types";
 import { CloudProviderManager, CloudProviderId } from "./drive";
+import { createSvgIcon } from "./chat/ui/icons";
 
 // Track selected model config ID
 let selectedConfigId: string | null = null;
@@ -1433,8 +1434,10 @@ function showModelConfigDialog(existingConfig?: AIModelConfig) {
     `;
 
     const iconBadge = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-    iconBadge.textContent = info.icon;
-    iconBadge.style.cssText = `font-size: 15px;`;
+    iconBadge.style.cssText = `font-size: 15px; display: inline-flex; align-items: center;`;
+    iconBadge.appendChild(
+      createSvgIcon(doc, info.icon, { size: 15, strokeWidth: 1.7 }),
+    );
     rowHeader.appendChild(iconBadge);
 
     const capLabel = doc.createElementNS(HTML_NS, "span") as HTMLElement;

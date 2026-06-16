@@ -12,6 +12,7 @@ import { removeDriveContextFileItem } from "../../drive/cloudContext";
 import { getWorkspaceStore } from "../workspace/store";
 import { convertDocxToMarkdown } from "../../docxConverter";
 import { stripBase64Data } from "../imageUtils";
+import { createSvgIcon, type IconName } from "../ui/icons";
 
 let _lastContextChipsListener: ((items: ContextItem[]) => void) | null = null;
 
@@ -57,9 +58,16 @@ export function createContextChipsArea(doc: Document): HTMLElement {
 
   // Label Text
   const label = doc.createElement("span");
-  label.style.fontSize = "11px";
-  label.style.color = "var(--text-secondary, #666)";
-  label.style.fontWeight = "600";
+  label.style.cssText =
+    "font-size: 11px; color: var(--text-secondary, #666); font-weight: 600; display: inline-flex; align-items: center; gap: 4px;";
+  const labelIcon = createSvgIcon(doc, "attachment", {
+    size: 12,
+    strokeWidth: 1.8,
+  });
+  const labelText = doc.createElement("span");
+  labelText.textContent = "Context:";
+  label.appendChild(labelIcon);
+  label.appendChild(labelText);
   header.appendChild(label);
 
   // Token Usage Container (placed in middle)
@@ -93,17 +101,18 @@ export function createContextChipsArea(doc: Document): HTMLElement {
   // Copy Button
   const copyBtn = doc.createElement("span");
   copyBtn.id = "context-copy-btn";
-  copyBtn.innerText = "📋 Copy";
-  copyBtn.style.fontSize = "10px";
-  copyBtn.style.color = "var(--text-tertiary, #888)";
-  copyBtn.style.cursor = "pointer";
-  copyBtn.style.textDecoration = "underline";
-  copyBtn.style.opacity = "0.8";
+  copyBtn.style.cssText =
+    "font-size: 10px; color: var(--text-tertiary, #888); cursor: pointer; text-decoration: underline; opacity: 0.8; display: inline-flex; align-items: center; gap: 3px;";
+  const copyIcon = createSvgIcon(doc, "copy", { size: 10, strokeWidth: 1.8 });
+  const copyLabel = doc.createElement("span");
+  copyLabel.textContent = "Copy";
+  copyBtn.appendChild(copyIcon);
+  copyBtn.appendChild(copyLabel);
   copyBtn.title = "Copy all context items content to clipboard";
   copyBtn.addEventListener("mouseenter", () => (copyBtn.style.opacity = "1"));
   copyBtn.addEventListener("mouseleave", () => (copyBtn.style.opacity = "0.8"));
   copyBtn.addEventListener("click", async () => {
-    await copyContextItemsContent(copyBtn);
+    await copyContextItemsContent(copyBtn, copyIcon, copyLabel);
   });
   btnContainer.appendChild(copyBtn);
 
@@ -155,7 +164,10 @@ function updateChips(
   }
 
   container.style.display = "flex";
-  label.innerText = `📎 Context (${items.length}):`;
+  const labelText = label.querySelector("span") as HTMLElement | null;
+  if (labelText) {
+    labelText.textContent = `Context (${items.length}):`;
+  }
 
   items.forEach((item, index) => {
     const chip = doc.createElement("div");
@@ -176,22 +188,33 @@ function updateChips(
     chip.style.boxShadow = "0 1px 2px rgba(0,0,0,0.1)";
 
     // Icon + Name in a wrapping span for multi-line text
-    const icon =
-      item.type === "file" && item.metadata?.driveFileId
-        ? (item.metadata?.providerIcon as string) ||
-          CONTEXT_ICONS[item.type] ||
-          ""
-        : CONTEXT_ICONS[item.type] || "";
+    const iconName: IconName = CONTEXT_ICONS[item.type] || "tag";
+    const providerIcon = item.metadata?.providerIcon as string | undefined;
+    const useProviderIcon =
+      item.type === "file" &&
+      item.metadata?.driveFileId &&
+      providerIcon &&
+      (providerIcon.startsWith("http") || providerIcon.startsWith("/"));
 
     const chipText = doc.createElement("span");
-    chipText.style.minWidth = "0";
-    chipText.style.flex = "1 1 auto";
-    chipText.style.whiteSpace = "normal";
-    chipText.style.wordBreak = "break-word";
-    chipText.style.overflowWrap = "break-word";
+    chipText.style.cssText =
+      "min-width: 0; flex: 1 1 auto; white-space: normal; word-break: break-word; overflow-wrap: break-word; display: inline-flex; align-items: center; gap: 4px;";
+    if (useProviderIcon) {
+      const providerImg = doc.createElement("img") as HTMLImageElement;
+      providerImg.src = providerIcon as string;
+      providerImg.style.cssText =
+        "width: 12px; height: 12px; flex-shrink: 0; object-fit: contain;";
+      chipText.appendChild(providerImg);
+    } else {
+      chipText.appendChild(
+        createSvgIcon(doc, iconName, { size: 12, strokeWidth: 1.8 }),
+      );
+    }
     const truncatedName = truncateWords(item.displayName, 4);
-    chipText.innerText = `${icon} ${truncatedName}`;
-    chipText.title = `${icon} ${item.fullName || item.displayName} (${item.type})`;
+    const nameSpan = doc.createElement("span");
+    nameSpan.textContent = truncatedName;
+    chipText.appendChild(nameSpan);
+    chipText.title = `${item.fullName || item.displayName} (${item.type})`;
 
     // Click to navigate in Zotero
     chipText.addEventListener("click", (e) => {
@@ -225,7 +248,7 @@ function updateChips(
       const extractionError = item.metadata.extractionError as
         | string
         | undefined;
-      const parts: string[] = [`${icon} ${item.fullName || item.displayName}`];
+      const parts: string[] = [item.fullName || item.displayName];
       if (fileSize) {
         const sizeStr =
           fileSize >= 1_000_000
@@ -250,12 +273,13 @@ function updateChips(
 
     // Remove Button
     const removeBtn = doc.createElement("span");
-    removeBtn.innerText = "✕";
-    removeBtn.style.marginLeft = "6px";
-    removeBtn.style.cursor = "pointer";
-    removeBtn.style.opacity = "0.8";
-    removeBtn.style.fontSize = "10px";
-    removeBtn.style.fontWeight = "bold";
+    removeBtn.title = "Remove from context";
+    removeBtn.setAttribute("aria-label", "Remove from context");
+    removeBtn.style.cssText =
+      "margin-left: 6px; cursor: pointer; opacity: 0.8; font-size: 10px; display: inline-flex; align-items: center;";
+    removeBtn.appendChild(
+      createSvgIcon(doc, "close", { size: 10, strokeWidth: 1.8 }),
+    );
 
     removeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -287,7 +311,11 @@ function updateChips(
  * Resolves collections, tags, authors, and tables into their full content
  * (mirroring what the chat actually sends to the model).
  */
-async function copyContextItemsContent(copyBtn: HTMLElement): Promise<void> {
+async function copyContextItemsContent(
+  copyBtn: HTMLElement,
+  copyIcon: SVGElement,
+  copyLabel: HTMLElement,
+): Promise<void> {
   const contextManager = ChatContextManager.getInstance();
   const items = contextManager.getItems();
 
@@ -511,13 +539,7 @@ async function copyContextItemsContent(copyBtn: HTMLElement): Promise<void> {
       );
 
       // Show success feedback
-      const originalText = copyBtn.innerText;
-      copyBtn.innerText = "✓ Copied!";
-      copyBtn.style.color = "var(--accent-green, #34C759)";
-      setTimeout(() => {
-        copyBtn.innerText = originalText;
-        copyBtn.style.color = "var(--text-tertiary, #888)";
-      }, 2000);
+      showCopyFeedback(copyBtn, copyIcon, copyLabel, true);
     } else {
       // Fallback for older environments (Zotero/Firefox)
       // @ts-expect-error - Firefox XPCOM API
@@ -530,24 +552,52 @@ async function copyContextItemsContent(copyBtn: HTMLElement): Promise<void> {
       );
 
       // Show success feedback
-      const originalText = copyBtn.innerText;
-      copyBtn.innerText = "✓ Copied!";
-      copyBtn.style.color = "var(--accent-green, #34C759)";
-      setTimeout(() => {
-        copyBtn.innerText = originalText;
-        copyBtn.style.color = "var(--text-tertiary, #888)";
-      }, 2000);
+      showCopyFeedback(copyBtn, copyIcon, copyLabel, true);
     }
   } catch (e) {
     Zotero.debug(`[seerai] Error copying to clipboard: ${e}`);
 
     // Show error feedback
-    const originalText = copyBtn.innerText;
-    copyBtn.innerText = "✗ Failed";
-    copyBtn.style.color = "var(--accent-red, #FF3B30)";
-    setTimeout(() => {
-      copyBtn.innerText = originalText;
-      copyBtn.style.color = "var(--text-tertiary, #888)";
-    }, 2000);
+    showCopyFeedback(copyBtn, copyIcon, copyLabel, false);
   }
+}
+
+function showCopyFeedback(
+  copyBtn: HTMLElement,
+  copyIcon: SVGElement,
+  copyLabel: HTMLElement,
+  success: boolean,
+) {
+  const doc = copyBtn.ownerDocument!;
+  copyIcon.replaceChildren();
+  if (success) {
+    copyIcon.appendChild(
+      createSvgIcon(doc, "check", {
+        size: 10,
+        strokeWidth: 1.8,
+      }),
+    );
+  } else {
+    copyIcon.appendChild(
+      createSvgIcon(doc, "x", {
+        size: 10,
+        strokeWidth: 1.8,
+      }),
+    );
+  }
+  copyBtn.style.color = success
+    ? "var(--accent-green, #34C759)"
+    : "var(--accent-red, #FF3B30)";
+  const originalLabel = copyLabel.textContent || "";
+  copyLabel.textContent = success ? "Copied!" : "Failed";
+  setTimeout(() => {
+    copyIcon.replaceChildren(
+      createSvgIcon(doc, "copy", {
+        size: 10,
+        strokeWidth: 1.8,
+      }),
+    );
+    copyLabel.textContent = originalLabel;
+    copyBtn.style.color = "var(--text-tertiary, #888)";
+  }, 2000);
 }

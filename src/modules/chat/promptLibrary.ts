@@ -497,20 +497,22 @@ export function hasPlaceholders(template: string): boolean {
 
 export const CATEGORY_LABELS: Record<
   PromptCategory,
-  { label: string; icon: string }
+  { label: string; icon: import("./ui/icons").IconName }
 > = {
-  analysis: { label: "Analysis", icon: "\uD83D\uDD0D" },
-  comparative: { label: "Comparative", icon: "\u2696\uFE0F" },
-  writing: { label: "Writing", icon: "\u270D\uFE0F" },
-  summary: { label: "Summary", icon: "\uD83D\uDCC4" },
-  skills: { label: "Skills", icon: "\uD83E\uDEE1" },
-  custom: { label: "Custom", icon: "\u2699\uFE0F" },
+  analysis: { label: "Analysis", icon: "search" },
+  comparative: { label: "Comparative", icon: "scale" },
+  writing: { label: "Writing", icon: "edit" },
+  summary: { label: "Summary", icon: "paper" },
+  skills: { label: "Skills", icon: "thumbs-up" },
+  custom: { label: "Custom", icon: "settings" },
 };
 
 export function getCategoryLabel(category: PromptCategory): string {
   return CATEGORY_LABELS[category]?.label || category;
 }
 
-export function getCategoryIcon(category: PromptCategory): string {
-  return CATEGORY_LABELS[category]?.icon || "📝";
+export function getCategoryIcon(
+  category: PromptCategory,
+): import("./ui/icons").IconName {
+  return CATEGORY_LABELS[category]?.icon || "settings";
 }

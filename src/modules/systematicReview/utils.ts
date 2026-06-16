@@ -155,6 +155,85 @@ export function formatAuthors(authors: string): string {
   return parts.slice(0, 3).join(", ") + " et al.";
 }
 
+const SOURCE_LABEL_ADJECTIVES = [
+  "swift",
+  "calm",
+  "bright",
+  "clear",
+  "bold",
+  "fair",
+  "keen",
+  "warm",
+  "cool",
+  "deep",
+  "soft",
+  "wild",
+  "pure",
+  "true",
+  "rich",
+  "firm",
+  "open",
+  "wide",
+  "high",
+  "low",
+  "new",
+  "old",
+  "thin",
+  "thick",
+  "fast",
+  "slow",
+  "strong",
+  "light",
+  "sharp",
+  "smooth",
+  "still",
+  "fresh",
+];
+
+const SOURCE_LABEL_NOUNS = [
+  "river",
+  "ocean",
+  "forest",
+  "mountain",
+  "meadow",
+  "valley",
+  "stream",
+  "cloud",
+  "stone",
+  "flame",
+  "spark",
+  "wind",
+  "rain",
+  "frost",
+  "snow",
+  "leaf",
+  "branch",
+  "root",
+  "seed",
+  "field",
+  "path",
+  "bridge",
+  "tower",
+  "beacon",
+  "horizon",
+  "dawn",
+  "dusk",
+  "echo",
+  "glade",
+  "harbor",
+  "summit",
+];
+
+export function generateSourceLabel(): string {
+  const adj =
+    SOURCE_LABEL_ADJECTIVES[
+      Math.floor(Math.random() * SOURCE_LABEL_ADJECTIVES.length)
+    ];
+  const noun =
+    SOURCE_LABEL_NOUNS[Math.floor(Math.random() * SOURCE_LABEL_NOUNS.length)];
+  return `${adj}-${noun}`;
+}
+
 export function setupKeyboardShortcuts(
   container: HTMLElement,
   handlers: {

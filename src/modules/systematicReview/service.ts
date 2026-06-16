@@ -35,6 +35,15 @@ import {
   proposeExtractionTemplate,
 } from "./extractionWorkflow";
 import {
+  runProtocolGeneration,
+  type RunProtocolGenerationInput,
+  type ExtractedDocument,
+} from "./documentAnalyzer";
+import type {
+  ProtocolGenerationContext,
+  ProtocolGenerationResult,
+} from "./types";
+import {
   ReviewCancellationController,
   ReviewCancellationSignal,
 } from "./cancellation";
@@ -154,6 +163,47 @@ export class SystematicReviewService {
     return template;
   }
 
+  async generateProtocolProposals(
+    state: SystematicReviewState,
+    documents: ExtractedDocument[],
+    context: ProtocolGenerationContext = {},
+    onStep?: (
+      step: "scope" | "eligibility" | "mapping" | "template",
+      result: ProtocolGenerationResult,
+    ) => void,
+  ): Promise<ProtocolGenerationResult> {
+    const project = state.spaces.find(
+      (candidate) => candidate.id === state.activeSpaceId,
+    );
+    if (!project) throw new Error("Active review project is unavailable");
+    const input: RunProtocolGenerationInput = {
+      documents,
+      baselineRevision: context.baselineRevision,
+      baselineTemplate: context.baselineTemplate,
+      labelDefs: state.labelDefs,
+      space: project,
+      onStep,
+    };
+    return runProtocolGeneration(input);
+  }
+
+  addExtractionTemplateProposal(
+    state: SystematicReviewState,
+    template: ExtractionTemplate,
+  ): ExtractionTemplate {
+    state.extractionTemplates.forEach((candidate) => {
+      if (candidate.status === "draft") candidate.status = "archived";
+    });
+    const proposal: ExtractionTemplate = {
+      ...template,
+      status: "draft",
+      source: "model",
+      updatedAt: new Date().toISOString(),
+    };
+    state.extractionTemplates.push(proposal);
+    return proposal;
+  }
+
   activateTemplate(
     state: SystematicReviewState,
     templateId: string,
@@ -221,9 +271,23 @@ export class SystematicReviewService {
         ),
       ),
     );
+    const overlapsWithExtraction = (
+      jobKind: ReviewJobKind,
+      target: ReviewJobKind,
+    ): boolean => {
+      if (jobKind === target) return true;
+      const extractionKinds: ReviewJobKind[] = [
+        "extraction",
+        "evidence_analysis",
+        "gap_analysis",
+      ];
+      return (
+        extractionKinds.includes(jobKind) && extractionKinds.includes(target)
+      );
+    };
     const activePaperIds = new Set(
       this.activeJobs(state)
-        .filter((job) => job.kind === kind)
+        .filter((job) => overlapsWithExtraction(job.kind, kind))
         .flatMap((job) =>
           job.papers
             .filter((paper) => paper.stage !== "completed")
@@ -239,9 +303,14 @@ export class SystematicReviewService {
       );
     }
     const revision = getActiveProtocolRevision(state.protocol);
-    const template =
-      kind === "extraction" ? this.getExtractionTemplate(state) : undefined;
-    if (kind === "extraction" && !template) {
+    const requiresTemplate =
+      kind === "extraction" ||
+      kind === "evidence_analysis" ||
+      kind === "gap_analysis";
+    const template = requiresTemplate
+      ? this.getExtractionTemplate(state)
+      : undefined;
+    if (requiresTemplate && !template) {
       throw new Error("Approve an extraction template before extracting data");
     }
     const now = new Date().toISOString();
@@ -286,6 +355,40 @@ export class SystematicReviewService {
     return job;
   }
 
+  async startEvidenceAnalysisJob(
+    state: SystematicReviewState,
+    paperIds?: number[],
+  ): Promise<ReviewJob> {
+    const { getIncludedPapers } = await import("./extractionHealth");
+    const included = getIncludedPapers(state).map((paper) => paper.id);
+    const target = (paperIds && paperIds.length ? paperIds : included).filter(
+      (id) => included.includes(id),
+    );
+    return this.startReviewJob(state, "evidence_analysis", target);
+  }
+
+  async startGapAnalysisJob(
+    state: SystematicReviewState,
+    paperIds?: number[],
+  ): Promise<ReviewJob> {
+    const { getIncludedPapers } = await import("./extractionHealth");
+    const included = getIncludedPapers(state).map((paper) => paper.id);
+    const target = (paperIds && paperIds.length ? paperIds : included).filter(
+      (id) => included.includes(id),
+    );
+    return this.startReviewJob(state, "gap_analysis", target);
+  }
+
+  async startFailedExtractionRetry(
+    state: SystematicReviewState,
+  ): Promise<ReviewJob | undefined> {
+    const { getPapersWithFailedExtractions } =
+      await import("./extractionHealth");
+    const ids = getPapersWithFailedExtractions(state);
+    if (!ids.length) return undefined;
+    return this.startReviewJob(state, "extraction", ids);
+  }
+
   private recoverStaleJobs(state: SystematicReviewState): void {
     const now = Date.now();
     state.reviewJobs.forEach((job) => {
@@ -318,11 +421,16 @@ export class SystematicReviewService {
     ) {
       return job;
     }
-    const template =
-      job.kind === "extraction"
-        ? this.getExtractionTemplateRevision(state, job.templateRevisionId)
-        : undefined;
-    if (job.kind === "extraction" && !template) {
+    const template = this.getExtractionTemplateRevision(
+      state,
+      job.templateRevisionId,
+    );
+    if (
+      (job.kind === "extraction" ||
+        job.kind === "evidence_analysis" ||
+        job.kind === "gap_analysis") &&
+      !template
+    ) {
       job.status = "failed";
       job.error = "The queued extraction template revision is unavailable";
       await this.save(state);
@@ -389,7 +497,11 @@ export class SystematicReviewService {
               paper.sample = result.analysis.sampleSize;
               task.evidenceCount = result.analysis.evidence.length;
               task.sourceSummary = result.analysis.sourceSummary;
-            } else {
+            } else if (
+              job.kind === "extraction" ||
+              job.kind === "evidence_analysis" ||
+              job.kind === "gap_analysis"
+            ) {
               task.stage = "reading_source";
               const extraction = await extractReviewPaper(
                 item,
@@ -469,6 +581,69 @@ export class SystematicReviewService {
       ),
     );
     this.jobControllers.delete(job.id);
+    if (
+      job.status === "running" &&
+      (job.kind === "evidence_analysis" || job.kind === "gap_analysis")
+    ) {
+      if (this.hasAnyIncompletePaper(job)) {
+        job.status = "completed_with_issues";
+        job.error =
+          "Some papers failed extraction; downstream stages were skipped";
+        job.updatedAt = new Date().toISOString();
+        job.completedAt = job.updatedAt;
+        await this.save(state);
+        Zotero.debug(
+          `[seerai] Review job ${job.id}: ${job.status} (extraction incomplete)`,
+        );
+        return job;
+      }
+      try {
+        const pipelinePapers = job.papers;
+        for (const task of pipelinePapers) {
+          task.stage = "synthesizing";
+          job.updatedAt = new Date().toISOString();
+        }
+        await this.save(state);
+        const autoVerified = this.autoVerifyValidProposals(
+          state,
+          pipelinePapers.map((task) => task.paperId),
+        );
+        if (autoVerified.verifiedRows) {
+          Zotero.debug(
+            `[seerai] Review job ${job.id}: auto-verified ${autoVerified.verifiedRows} valid proposal(s) across ${autoVerified.papers} paper(s) before synthesis`,
+          );
+          await this.save(state);
+        }
+        const synthesis = this.runSynthesis(state, true);
+        job.synthesisRunId = synthesis.id;
+        Zotero.debug(
+          `[seerai] Review job ${job.id}: synthesis ${synthesis.id} produced ${synthesis.domains.length} domain(s)`,
+        );
+        if (job.kind === "gap_analysis") {
+          for (const task of pipelinePapers) {
+            task.stage = "analyzing_gaps";
+            job.updatedAt = new Date().toISOString();
+          }
+          await this.save(state);
+          const gaps = this.generateGaps(state, synthesis.id, true);
+          job.gapAnalysisRunId = gaps.id;
+          Zotero.debug(
+            `[seerai] Review job ${job.id}: gap analysis ${gaps.id} produced ${gaps.gaps.length} candidate(s)`,
+          );
+        }
+        for (const task of pipelinePapers) {
+          task.stage = "completed";
+          task.completedAt = new Date().toISOString();
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        job.status = "failed";
+        job.error = `Pipeline stage failed: ${message}`;
+        Zotero.debug(
+          `[seerai] Review job ${job.id}: pipeline failed: ${message}`,
+        );
+      }
+    }
     if (job.status === "running") {
       const failedCount = job.papers.filter(
         (paper) => paper.stage === "failed",
@@ -489,6 +664,12 @@ export class SystematicReviewService {
     await this.save(state);
     Zotero.debug(`[seerai] Review job ${job.id}: ${job.status}`);
     return job;
+  }
+
+  private hasAnyIncompletePaper(job: ReviewJob): boolean {
+    return job.papers.some(
+      (paper) => paper.stage === "failed" || paper.stage === "cancelled",
+    );
   }
 
   private isRetryableReviewError(message: string): boolean {
@@ -683,6 +864,53 @@ export class SystematicReviewService {
     row.revision = (row.revision || 1) + 1;
     row.updatedAt = new Date().toISOString();
     this.markAnalysisRunsStale(state, "Extraction review changed");
+  }
+
+  autoVerifyValidProposals(
+    state: SystematicReviewState,
+    paperIds?: number[],
+  ): { verifiedRows: number; papers: number } {
+    const targetIds = paperIds && paperIds.length ? paperIds : null;
+    let verifiedRows = 0;
+    let papersTouched = 0;
+    const sourcePapers = targetIds
+      ? state.papers.filter((paper) => targetIds.includes(paper.id))
+      : state.papers.filter(
+          (paper) =>
+            paper.status === "included" &&
+            (paper.screeningStage === "final" || !paper.screeningStage),
+        );
+    const now = new Date().toISOString();
+    for (const paper of sourcePapers) {
+      const rows = state.extractions[paper.id];
+      if (!rows || !rows.length) continue;
+      let touched = false;
+      for (const row of rows) {
+        if (row.verificationStatus !== "proposed") continue;
+        const blocking = row.issues?.find(
+          (issue) => issue.severity === "error",
+        );
+        if (blocking) continue;
+        if (!row.sourceQuote?.trim()) continue;
+        const validation = validateExtractionRow(row);
+        if (!validation.valid) continue;
+        row.verificationStatus = "verified";
+        row.revision = (row.revision || 1) + 1;
+        row.updatedAt = now;
+        verifiedRows++;
+        touched = true;
+      }
+      if (touched) {
+        papersTouched++;
+      }
+    }
+    if (verifiedRows > 0) {
+      this.markAnalysisRunsStale(
+        state,
+        "Proposals auto-verified for synthesis",
+      );
+    }
+    return { verifiedRows, papers: papersTouched };
   }
 
   private markAnalysisRunsStale(
@@ -996,12 +1224,19 @@ export class SystematicReviewService {
   addPapers(
     state: SystematicReviewState,
     paperIds: number[],
+    sourceLabel?: string,
   ): SystematicReviewPaper[] {
     const existing = new Map(state.papers.map((paper) => [paper.id, paper]));
     for (const id of paperIds) {
       const paper = existing.get(id);
-      if (paper) paper.manualAdded = true;
+      if (paper) {
+        paper.manualAdded = true;
+        if (sourceLabel && !paper.sourceLabel) {
+          paper.sourceLabel = sourceLabel;
+        }
+      }
     }
+    const trimmedLabel = sourceLabel?.trim() || undefined;
     const added = Array.from(new Set(paperIds))
       .filter((id) => Number.isInteger(id) && id > 0 && !existing.has(id))
       .map<SystematicReviewPaper>((id) => ({
@@ -1010,9 +1245,25 @@ export class SystematicReviewService {
         aiStatus: "manual",
         confidence: 0,
         manualAdded: true,
+        sourceLabel: trimmedLabel,
       }));
     state.papers.push(...added);
     return added;
+  }
+
+  setManualSourceType(
+    state: SystematicReviewState,
+    label: string,
+    sourceType: "Database" | "Register" | "Other source" | undefined,
+  ): number {
+    let updated = 0;
+    for (const paper of state.papers) {
+      if (paper.sourceLabel !== label) continue;
+      if (paper.folderId) continue;
+      paper.sourceType = sourceType;
+      updated++;
+    }
+    return updated;
   }
 
   removePapers(state: SystematicReviewState, paperIds: number[]): number[] {

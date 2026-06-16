@@ -3,6 +3,8 @@
  * Handles papers, tags, authors, collections, topics, and tables
  */
 
+import type { IconName } from "../ui/icons";
+
 export type ContextItemType =
   | "paper"
   | "tag"
@@ -68,16 +70,16 @@ export const CONTEXT_TRIGGERS: Record<string, ContextItemType> = {
 /**
  * Type to icon mapping for UI display
  */
-export const CONTEXT_ICONS: Record<ContextItemType, string> = {
-  paper: "📄",
-  tag: "🏷️",
-  author: "👤",
-  collection: "📁",
-  topic: "#",
-  table: "📊",
-  file: "📎",
-  workspace: "📂",
-  review: "R",
+export const CONTEXT_ICONS: Record<ContextItemType, IconName> = {
+  paper: "paper",
+  tag: "tag",
+  author: "user",
+  collection: "folder",
+  topic: "calendar-star",
+  table: "table",
+  file: "attachment",
+  workspace: "folder-open",
+  review: "review",
 };
 
 /**

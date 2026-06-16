@@ -23,6 +23,8 @@ cd mcp-server && npm run dev      # Run MCP server with tsx
 
 **Always run `npm run lint:check` and `npm run build` after making changes.**
 
+**Tests (`npm test`):** Only run when the change touches testable logic (service helpers, state shapes, protocol/template flow, persistence schemas, bug fixes). Skip for pure formatting, comment, UI-style-only, or non-functional edits. When a test is warranted, run only the relevant file rather than the full suite when possible (e.g. `npx mocha test/<file>.test.ts`).
+
 ## Tech Stack
 
 | Layer          | Technology                                           |

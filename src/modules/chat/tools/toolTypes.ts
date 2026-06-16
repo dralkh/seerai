@@ -897,6 +897,25 @@ export type SystematicReviewParams =
       paper_ids: number[];
     }
   | {
+      action: "run_evidence_analysis";
+      project_id?: string;
+      paper_ids?: number[];
+    }
+  | {
+      action: "run_gap_analysis";
+      project_id?: string;
+      paper_ids?: number[];
+    }
+  | {
+      action: "retry_failed_extractions";
+      project_id?: string;
+    }
+  | {
+      action: "get_extraction_logs";
+      project_id?: string;
+      paper_id?: number;
+    }
+  | {
       action:
         | "get_review_job"
         | "pause_review_job"

@@ -17,6 +17,7 @@ import {
   getCategoryLabel,
   CATEGORY_LABELS,
 } from "../promptLibrary";
+import { createSvgIcon, setButtonIcon, type IconName } from "./icons";
 
 // ==================== Types ====================
 
@@ -96,8 +97,13 @@ export async function showPromptPicker(
 
   const title = doc.createElement("div");
   title.style.cssText =
-    "font-weight: 600; font-size: 14px; color: var(--text-primary);";
-  title.textContent = "📚 Prompt Library";
+    "font-weight: 600; font-size: 14px; color: var(--text-primary); display: flex; align-items: center; gap: 6px;";
+  title.appendChild(
+    createSvgIcon(doc, "library", { size: 14, strokeWidth: 1.8 }),
+  );
+  const titleText = doc.createElementNS(HTML_NS, "span");
+  titleText.textContent = "Prompt Library";
+  title.appendChild(titleText);
 
   header.appendChild(title);
   container.appendChild(header);
@@ -109,7 +115,7 @@ export async function showPromptPicker(
 
   const searchInput = doc.createElement("input");
   searchInput.type = "text";
-  searchInput.placeholder = "🔍 Search prompts...";
+  searchInput.placeholder = "Search prompts...";
   searchInput.style.cssText = `
         width: 100%;
         padding: 8px 12px;
@@ -143,7 +149,7 @@ export async function showPromptPicker(
   const allTab = createCategoryTab(
     doc,
     "All",
-    "📋",
+    "table",
     currentCategory === null,
     () => {
       currentCategory = null;
@@ -159,7 +165,7 @@ export async function showPromptPicker(
 
   for (const [cat, info] of Object.entries(CATEGORY_LABELS) as [
     PromptCategory,
-    { label: string; icon: string },
+    { label: string; icon: IconName },
   ][]) {
     const tab = createCategoryTab(
       doc,
@@ -220,9 +226,20 @@ export async function showPromptPicker(
                     color: var(--text-tertiary);
                     font-size: 13px;
                 `;
-        empty.innerHTML = searchQuery
-          ? "🔍 No prompts match your search"
-          : "📭 No prompts available";
+        empty.innerHTML = "";
+        empty.style.cssText =
+          "display: flex; align-items: center; justify-content: center; gap: 6px;";
+        empty.appendChild(
+          createSvgIcon(doc, searchQuery ? "search" : "idea", {
+            size: 14,
+            strokeWidth: 1.7,
+          }),
+        );
+        const emptyLabel = doc.createElementNS(HTML_NS, "span");
+        emptyLabel.textContent = searchQuery
+          ? "No prompts match your search"
+          : "No prompts available";
+        empty.appendChild(emptyLabel);
         listContainer.appendChild(empty);
         return;
       }
@@ -381,7 +398,7 @@ export async function showPromptPicker(
 function createCategoryTab(
   doc: Document,
   label: string,
-  icon: string,
+  icon: IconName,
   isActive: boolean,
   onClick: () => void,
 ): HTMLElement {
@@ -400,7 +417,10 @@ function createCategoryTab(
         background: ${isActive ? "var(--highlight-primary)" : "var(--background-secondary)"};
         color: ${isActive ? "var(--highlight-text)" : "var(--text-secondary)"};
     `;
-  tab.innerHTML = `<span>${icon}</span> <span>${label}</span>`;
+  tab.appendChild(createSvgIcon(doc, icon, { size: 12, strokeWidth: 1.8 }));
+  const lbl = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  lbl.textContent = label;
+  tab.appendChild(lbl);
   tab.addEventListener("click", onClick);
   return tab;
 }
@@ -469,8 +489,8 @@ function createPromptCard(
         HTML_NS,
         "button",
       ) as HTMLButtonElement;
-      editBtn.textContent = "✏️";
       editBtn.title = "Edit";
+      setButtonIcon(editBtn, "edit", "Edit", 12);
       editBtn.style.cssText = `
             background: none;
             border: none;
@@ -498,8 +518,8 @@ function createPromptCard(
         HTML_NS,
         "button",
       ) as HTMLButtonElement;
-      deleteBtn.textContent = "🗑️";
       deleteBtn.title = "Delete";
+      setButtonIcon(deleteBtn, "trash", "Delete", 12);
       deleteBtn.style.cssText = `
             background: none;
             border: none;
@@ -675,11 +695,11 @@ async function showPromptEditor(
     `;
   for (const [cat, info] of Object.entries(CATEGORY_LABELS) as [
     PromptCategory,
-    { label: string; icon: string },
+    { label: string; icon: IconName },
   ][]) {
     const option = doc.createElement("option");
     option.value = cat;
-    option.textContent = `${info.icon} ${info.label}`;
+    option.textContent = `${info.label}`;
     if (existingPrompt?.category === cat) option.selected = true;
     categorySelect.appendChild(option);
   }
@@ -814,7 +834,7 @@ async function showPromptEditor(
     } catch (error) {
       Zotero.debug(`[seerai] Error saving prompt: ${error}`);
       // Visual feedback for error
-      saveBtn.textContent = "❌ Failed";
+      saveBtn.textContent = "Failed";
       saveBtn.style.background = "#e53935";
       setTimeout(() => {
         saveBtn.textContent = existingPrompt ? "Save Changes" : "Create Prompt";

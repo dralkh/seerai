@@ -157,3 +157,57 @@ export function applyProtocolPreset(
     warnings: [],
   };
 }
+
+export function protocolPresetToJson(preset: ProtocolPreset): string {
+  return JSON.stringify(preset, null, 2);
+}
+
+export function revisionToProtocolPreset(
+  revision: ProtocolRevision,
+  name: string,
+): ProtocolPreset {
+  return {
+    id: "",
+    name: name.trim() || "Protocol",
+    createdAt: revision.createdAt,
+    updatedAt: new Date().toISOString(),
+    researchQuestion: revision.researchQuestion,
+    framework: revision.framework,
+    frameworkReason: revision.frameworkReason,
+    dimensions: deepCopy(revision.dimensions),
+    eligibilityRules: deepCopy(revision.eligibilityRules),
+    includeKeywordAids: [...revision.includeKeywordAids],
+    excludeKeywordAids: [...revision.excludeKeywordAids],
+  };
+}
+
+export function parseProtocolPresetJson(text: string): ProtocolPreset {
+  const data = JSON.parse(text);
+  return ProtocolPresetSchema.parse(data);
+}
+
+export async function importProtocolPreset(
+  preset: ProtocolPreset,
+): Promise<ProtocolPreset> {
+  const presets = await loadProtocolPresets();
+  if (
+    presets.some(
+      (existing) =>
+        existing.name.trim().toLowerCase() === preset.name.trim().toLowerCase(),
+    )
+  ) {
+    throw new Error("A protocol preset with this name already exists");
+  }
+  const now = new Date().toISOString();
+  const imported: ProtocolPreset = {
+    ...preset,
+    id: `protocol_preset_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: preset.createdAt || now,
+    updatedAt: now,
+  };
+  const next = presets.filter((existing) => existing.id !== imported.id);
+  next.push(imported);
+  next.sort((a, b) => a.name.localeCompare(b.name));
+  await writeProtocolPresets(next);
+  return imported;
+}

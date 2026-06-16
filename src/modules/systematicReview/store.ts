@@ -113,6 +113,8 @@ const PaperSchema = z.object({
   note: z.string().optional(),
   folderId: z.string().optional(),
   manualAdded: z.boolean().optional(),
+  sourceLabel: z.string().optional(),
+  sourceType: z.enum(["Database", "Register", "Other source"]).optional(),
   bias: z.enum(["Low", "Some concerns", "High", "Unclear"]).optional(),
   design: z.string().optional(),
   ev: z.string().optional(),
@@ -212,6 +214,8 @@ const ReviewJobPaperSchema = z.object({
     "extracting",
     "validating",
     "saving",
+    "synthesizing",
+    "analyzing_gaps",
     "completed",
     "failed",
     "cancelled",
@@ -228,7 +232,7 @@ const ReviewJobPaperSchema = z.object({
 
 const ReviewJobSchema = z.object({
   id: z.string(),
-  kind: z.enum(["analysis", "extraction"]),
+  kind: z.enum(["analysis", "extraction", "evidence_analysis", "gap_analysis"]),
   projectId: z.string(),
   protocolRevisionId: z.string(),
   templateRevisionId: z.string().optional(),
@@ -250,6 +254,8 @@ const ReviewJobSchema = z.object({
   startedAt: z.string().optional(),
   completedAt: z.string().optional(),
   error: z.string().optional(),
+  synthesisRunId: z.string().optional(),
+  gapAnalysisRunId: z.string().optional(),
 });
 
 const RoBSchema = z.object({

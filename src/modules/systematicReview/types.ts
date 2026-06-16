@@ -21,6 +21,8 @@
  *   - synthesisEdits, gapEdits (user edits)
  */
 
+import type { ReviewCancellationSignal } from "./cancellation";
+
 export type SRSubTab =
   | "screening"
   | "evidence"
@@ -96,6 +98,8 @@ export interface SystematicReviewPaper {
   note?: string;
   folderId?: string;
   manualAdded: boolean;
+  sourceLabel?: string;
+  sourceType?: "Database" | "Register" | "Other source";
   bias?: "Low" | "Some concerns" | "High" | "Unclear";
   design?: string; // Study design (RCT, Cohort, Review, etc.)
   ev?: string; // Evidence level (Strong, Moderate, Weak)
@@ -510,6 +514,31 @@ export interface ReviewSourceSummary {
   warnings: string[];
 }
 
+export interface ExtractionLogEntry {
+  code: string;
+  severity: "warning" | "error";
+  source: "job" | "source" | "row" | "missing_outcome" | "validation";
+  field?: string;
+  message: string;
+  rawValue?: string;
+}
+
+export interface PaperExtractionLog {
+  paperId: number;
+  jobError?: string;
+  sourceKind?: ReviewSourceSummary["kind"];
+  sourceWarnings: string[];
+  rowIssues: Array<
+    ExtractionLogEntry & {
+      rowId?: string;
+      outcome?: string;
+      effectType?: string;
+    }
+  >;
+  missingOutcomes: Array<{ outcomeId?: string; name: string }>;
+  collectedAt: string;
+}
+
 export interface ExtractionOutcomeDefinition {
   id: string;
   name: string;
@@ -536,7 +565,11 @@ export interface ExtractionTemplate {
   updatedAt: string;
 }
 
-export type ReviewJobKind = "analysis" | "extraction";
+export type ReviewJobKind =
+  | "analysis"
+  | "extraction"
+  | "evidence_analysis"
+  | "gap_analysis";
 export type ReviewJobStatus =
   | "queued"
   | "running"
@@ -553,6 +586,8 @@ export type ReviewJobPaperStage =
   | "extracting"
   | "validating"
   | "saving"
+  | "synthesizing"
+  | "analyzing_gaps"
   | "completed"
   | "failed"
   | "cancelled";
@@ -585,6 +620,8 @@ export interface ReviewJob {
   startedAt?: string;
   completedAt?: string;
   error?: string;
+  synthesisRunId?: string;
+  gapAnalysisRunId?: string;
 }
 
 export interface RoBAssessment {
@@ -872,4 +909,65 @@ export interface SystematicReviewState {
   quickSkip: boolean;
   kwFilterActive: boolean;
   kwFilterKeyword: string | null;
+}
+
+export type ProtocolGenerationStep =
+  | "scope"
+  | "eligibility"
+  | "mapping"
+  | "template";
+
+export type ProtocolGenerationStatus =
+  | "idle"
+  | "running"
+  | "complete"
+  | "error";
+
+export interface ScopeProposal {
+  researchQuestion: string;
+  framework: string;
+  frameworkReason: string;
+  dimensions: ProtocolDimension[];
+  warnings: string[];
+  provenance: ProtocolProvenance[];
+}
+
+export interface EligibilityProposal {
+  inclusionRules: string[];
+  exclusionRules: string[];
+  includeKeywordAids: string[];
+  excludeKeywordAids: string[];
+  dimensionKeywordAids: Record<string, string[]>;
+}
+
+export interface MappingProposal {
+  evidenceLabels: Record<string, string[]>;
+}
+
+export interface ProtocolGenerationResult {
+  scope: ScopeProposal;
+  eligibility: EligibilityProposal;
+  mapping: MappingProposal;
+  template: ExtractionTemplate;
+  summary: {
+    scope?: string;
+    eligibility?: string;
+    mapping?: string;
+    template?: string;
+  };
+  errors: Partial<Record<ProtocolGenerationStep, string>>;
+}
+
+export type LlmChatCompletion = (
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
+  options?: {
+    signal?: ReviewCancellationSignal;
+    timeoutMs?: number;
+    isolated?: boolean;
+  },
+) => Promise<string>;
+
+export interface ProtocolGenerationContext {
+  baselineRevision?: ProtocolRevision;
+  baselineTemplate?: ExtractionTemplate;
 }

@@ -35,6 +35,7 @@ import { getActiveModelConfig } from "./modelConfig";
 import { agentTracer } from "./tracer";
 import { ChatStateManager } from "./stateManager";
 import { getWorkspaceStore } from "./workspace/store";
+import { createSvgIcon, type IconName } from "./ui/icons";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -330,7 +331,14 @@ export function createQuestionPanel(
     justify-content: space-between;
   `;
   const bannerText = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-  bannerText.textContent = "\u2753 Questions from Assistant";
+  bannerText.style.cssText =
+    "display: inline-flex; align-items: center; gap: 6px;";
+  bannerText.appendChild(
+    createSvgIcon(doc, "help", { size: 14, strokeWidth: 1.8 }),
+  );
+  const bannerTextLabel = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  bannerTextLabel.textContent = "Questions from Assistant";
+  bannerText.appendChild(bannerTextLabel);
   const stepLabel = doc.createElementNS(HTML_NS, "span") as HTMLElement;
   stepLabel.style.cssText = "font-size: 12px; font-weight: 400; opacity: 0.9;";
   banner.appendChild(bannerText);
@@ -659,8 +667,13 @@ export function createToolProcessUI(doc: Document): {
 
   // Icon
   const icon = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-  icon.textContent = "🧠"; // Brain icon for process
+  icon.replaceChildren(
+    createSvgIcon(doc, "brain", { size: 14, strokeWidth: 1.7 }),
+  );
   icon.style.filter = "grayscale(100%) opacity(0.7)";
+  icon.style.display = "inline-flex";
+  icon.style.alignItems = "center";
+  icon.style.justifyContent = "center";
   summary.appendChild(icon);
 
   // Text Label
@@ -761,10 +774,35 @@ export function createToolProcessUI(doc: Document): {
   details.appendChild(listContainer);
 
   // State helpers
+  const setProcessIcon = (
+    name: IconName,
+    options: {
+      color?: string;
+      animate?: boolean | string;
+      filter?: string;
+    } = {},
+  ) => {
+    icon.replaceChildren(
+      createSvgIcon(doc, name, { size: 14, strokeWidth: 1.7 }),
+    );
+    icon.style.color = options.color ?? "var(--text-secondary)";
+    if (options.animate) {
+      icon.style.animation =
+        typeof options.animate === "string"
+          ? `pulse ${options.animate} infinite`
+          : "pulse 1.5s infinite";
+    } else {
+      icon.style.animation = "none";
+    }
+    icon.style.filter = options.filter ?? "none";
+  };
+
   const setThinking = () => {
     label.textContent = "Processing task...";
-    icon.textContent = "⚡";
-    icon.style.animation = "pulse 1.5s infinite";
+    setProcessIcon("lightning", {
+      animate: "1.5s",
+      filter: "grayscale(100%) opacity(0.7)",
+    });
     // Only close if we haven't started any tools yet
     if (!listContainer.firstChild) {
       details.open = false;
@@ -775,9 +813,7 @@ export function createToolProcessUI(doc: Document): {
   const setExecutingTool = (toolName: string) => {
     const displayName = toolName.replace(/_/g, " ");
     label.textContent = `Calling ${displayName}...`;
-    icon.textContent = "🔧";
-    icon.style.filter = "none";
-    icon.style.animation = "pulse 1s infinite";
+    setProcessIcon("wrench", { animate: "1s" });
     // Do NOT force open here
     // BUT user often wants to see new tools.
     // Letting persistence handle this in assistant.ts is better.
@@ -790,10 +826,7 @@ export function createToolProcessUI(doc: Document): {
     } else {
       label.textContent = `Completed ${count} analysis turn${count !== 1 ? "s" : ""}`;
     }
-    icon.textContent = "✓";
-    icon.style.filter = "none";
-    icon.style.color = "var(--accent-green, #34C759)";
-    icon.style.animation = "none";
+    setProcessIcon("check-circle", { color: "var(--accent-green, #34C759)" });
     // Keep current open state
   };
 
@@ -805,18 +838,16 @@ export function createToolProcessUI(doc: Document): {
     }
     // Keep executing icon or completed icon?
     // If updating progress, it means we are running but maybe not currently executing a tool (e.g. between turns)
-    icon.textContent = "⚡";
-    icon.style.filter = "none";
-    icon.style.color = "var(--text-secondary)"; // Neutral color
-    icon.style.animation = "pulse 2s infinite";
+    setProcessIcon("lightning", {
+      color: "var(--text-secondary)",
+      animate: "2s",
+    });
   };
 
   const setFailed = (error: string) => {
     label.textContent = `Failed: ${error}`;
     label.style.color = "var(--accent-red, #FF3B30)";
-    icon.textContent = "✗";
-    icon.style.filter = "none";
-    icon.style.color = "var(--accent-red, #FF3B30)";
+    setProcessIcon("x-circle", { color: "var(--accent-red, #FF3B30)" });
     icon.style.animation = "none";
     details.open = true; // Auto-expand on failure
   };

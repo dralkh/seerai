@@ -1,5 +1,10 @@
 import { assert } from "chai";
-import { applyProtocolPreset } from "../src/modules/systematicReview/protocolPresets";
+import {
+  applyProtocolPreset,
+  parseProtocolPresetJson,
+  protocolPresetToJson,
+  revisionToProtocolPreset,
+} from "../src/modules/systematicReview/protocolPresets";
 import { createProtocolRevision } from "../src/modules/systematicReview/protocol";
 
 describe("Systematic review protocol presets", function () {
@@ -43,5 +48,36 @@ describe("Systematic review protocol presets", function () {
     );
     assert.deepEqual(applied.provenance, []);
     assert.notStrictEqual(applied.dimensions, revision.dimensions);
+  });
+
+  it("round-trips a protocol revision through preset JSON", function () {
+    const revision = createProtocolRevision({
+      actor: "user",
+      researchQuestion: "Effect of X on Y",
+      framework: "PICO",
+      dimensions: [
+        {
+          key: "P",
+          label: "Population",
+          description: "Patients",
+          value: "Adults",
+          keywordAids: ["adult"],
+          evidenceLabels: ["rct"],
+        },
+      ],
+      eligibilityRules: [],
+      includeKeywordAids: ["trial"],
+      excludeKeywordAids: ["protocol"],
+      provenance: [],
+      warnings: [],
+    });
+    const preset = revisionToProtocolPreset(revision, "X on Y");
+    const json = protocolPresetToJson(preset);
+    const parsed = parseProtocolPresetJson(json);
+    assert.equal(parsed.name, "X on Y");
+    assert.equal(parsed.framework, "PICO");
+    assert.equal(parsed.researchQuestion, "Effect of X on Y");
+    assert.equal(parsed.dimensions.length, 1);
+    assert.equal(parsed.dimensions[0].value, "Adults");
   });
 });
