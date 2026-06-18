@@ -607,6 +607,225 @@ export function createQuestionPanel(
   return panel;
 }
 
+function safeJsonParse(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value || "{}");
+    return parsed && typeof parsed === "object"
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function truncateMiddle(value: string, max = 140): string {
+  if (value.length <= max) return value;
+  const head = Math.floor((max - 3) * 0.62);
+  const tail = max - 3 - head;
+  return `${value.slice(0, head)}...${value.slice(value.length - tail)}`;
+}
+
+function stringifyPreview(value: unknown, max = 160): string {
+  if (value === undefined || value === null) return "";
+  const text =
+    typeof value === "string" ? value : JSON.stringify(value, null, 2) || "";
+  return truncateMiddle(text.replace(/\s+/g, " ").trim(), max);
+}
+
+export function getFriendlyToolAction(toolName: string): string {
+  const names: Record<string, string> = {
+    search_library: "Searched Zotero library",
+    search_external: "Searched external papers",
+    get_item_metadata: "Read item metadata",
+    read_item_content: "Read item content",
+    import_paper: "Imported paper",
+    generate_item_tags: "Generated tags",
+    semantic_search: "Ran semantic search",
+    keyword_search: "Ran keyword search",
+    read_chunks: "Read evidence chunks",
+    search_similar: "Searched similar papers",
+    web: "Used web research",
+    workspace_read_file: "Read file",
+    workspace_write_file: "Wrote file",
+    workspace_edit_file: "Edited file",
+    workspace_glob: "Listed files",
+    workspace_grep: "Searched files",
+    workspace_bash: "Ran command",
+    workspace_diff: "Reviewed workspace diff",
+    workspace_log: "Reviewed workspace log",
+    read_file: "Read file",
+    write_file: "Wrote file",
+    patch: "Applied patch",
+    search_files: "Searched files",
+    skills_list: "Searched skills",
+    skill_view: "Opened skill",
+    skill_info: "Inspected skill assets",
+    skill_reference: "Read skill reference",
+    terminal: "Ran terminal command",
+    process: "Managed process",
+    execute_code: "Executed code",
+    check_environment: "Checked environment",
+    todowrite: "Updated task list",
+    todoread: "Read task list",
+    task_complete: "Completed task",
+    collection: "Updated collection",
+    table: "Updated table",
+    note: "Updated note",
+    context: "Updated context",
+    related_papers: "Found related papers",
+    systematic_review: "Updated review",
+  };
+  return names[toolName] || toolName.replace(/_/g, " ");
+}
+
+export function summarizeToolTarget(toolCall: ToolCall): string {
+  const args = safeJsonParse(toolCall.function.arguments);
+  const pick = (...keys: string[]) => {
+    for (const key of keys) {
+      const value = args[key];
+      if (value !== undefined && value !== null && value !== "") {
+        return stringifyPreview(value, 120);
+      }
+    }
+    return "";
+  };
+
+  switch (toolCall.function.name) {
+    case "search_library":
+    case "search_external":
+    case "semantic_search":
+    case "keyword_search":
+    case "search_similar":
+    case "skills_list":
+    case "search_files":
+      return pick("query", "pattern", "path");
+    case "web":
+      return [pick("action"), pick("query", "url")].filter(Boolean).join(": ");
+    case "workspace_read_file":
+    case "workspace_write_file":
+    case "workspace_edit_file":
+    case "read_file":
+    case "write_file":
+    case "patch":
+      return pick("path", "file_path");
+    case "workspace_bash":
+    case "terminal":
+    case "execute_code":
+      return pick("command", "code");
+    case "skill_view":
+    case "skill_info":
+    case "skill_reference":
+      return pick("name", "path");
+    case "get_item_metadata":
+    case "read_item_content":
+      return pick("item_id", "item_ids");
+    default:
+      return pick("action", "name", "title", "id", "path", "query");
+  }
+}
+
+export function summarizeToolResult(
+  toolCall: ToolCall,
+  result?: ToolResult,
+): string {
+  if (!result) return "Running";
+  if (!result.success) return result.error || "Failed";
+  if (result.summary) return result.summary;
+
+  const data = result.data as Record<string, unknown> | undefined;
+  if (!data || typeof data !== "object") return "Completed";
+
+  if (Array.isArray(data.items)) {
+    return `${data.items.length} item${data.items.length === 1 ? "" : "s"}`;
+  }
+  if (Array.isArray(data.papers)) {
+    return `${data.papers.length} paper${data.papers.length === 1 ? "" : "s"}`;
+  }
+  if (typeof data.path === "string") {
+    return `${toolCall.function.name.includes("write") ? "Saved" : "Opened"} ${data.path}`;
+  }
+  if (typeof data.exitCode === "number" || typeof data.exit_code === "number") {
+    const code = data.exitCode ?? data.exit_code;
+    return `Exit ${code}`;
+  }
+  if (typeof data.total_count === "number") {
+    return `${data.total_count} result${data.total_count === 1 ? "" : "s"}`;
+  }
+  if (typeof data.total === "number") {
+    return `${data.total} result${data.total === 1 ? "" : "s"}`;
+  }
+
+  return "Completed";
+}
+
+export function createToolDisplay(
+  toolCall: ToolCall,
+  result?: ToolResult,
+): {
+  title: string;
+  target: string;
+  summary: string;
+  status: "running" | "success" | "error";
+} {
+  return {
+    title: getFriendlyToolAction(toolCall.function.name),
+    target: summarizeToolTarget(toolCall),
+    summary: summarizeToolResult(toolCall, result),
+    status: !result ? "running" : result.success ? "success" : "error",
+  };
+}
+
+function getStatusIconName(status: "running" | "success" | "error"): IconName {
+  if (status === "success") return "check-circle";
+  if (status === "error") return "x-circle";
+  return "hourglass";
+}
+
+function getToolLogText(container: HTMLElement): string {
+  const rows = Array.from(
+    container.querySelectorAll(".tool-execution-card"),
+  ) as HTMLElement[];
+  return rows
+    .map((row, index) => {
+      const title =
+        row.querySelector(".tool-row-title")?.textContent?.trim() || "Tool";
+      const target =
+        row.querySelector(".tool-row-target")?.textContent?.trim() || "";
+      const result =
+        row.querySelector(".tool-row-result")?.textContent?.trim() || "";
+      const input =
+        row.querySelector("[data-tool-section='input'] pre")?.textContent || "";
+      const output =
+        row.querySelector("[data-tool-section='output'] pre")?.textContent ||
+        "";
+      const error =
+        row.querySelector("[data-tool-section='error'] pre")?.textContent || "";
+      return [
+        `#${index + 1} ${title}${target ? ` - ${target}` : ""}`,
+        result ? `Result: ${result}` : "",
+        input ? `Input:\n${input}` : "",
+        output ? `Output:\n${output}` : "",
+        error ? `Error:\n${error}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
+}
+
+function toolIconButton(
+  doc: Document,
+  iconName: IconName,
+  title: string,
+): HTMLButtonElement {
+  const button = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+  button.type = "button";
+  button.className = "tool-timeline-btn";
+  button.title = title;
+  button.appendChild(createSvgIcon(doc, iconName, { size: 13 }));
+  return button;
+}
+
 export function createToolProcessUI(doc: Document): {
   container: HTMLElement;
   setThinking: () => void;
@@ -628,90 +847,40 @@ export function createToolProcessUI(doc: Document): {
   const details = doc.createElementNS(HTML_NS, "details") as HTMLDetailsElement;
   details.className = "tool-process-container";
 
-  // Initially hidden (collapsed)
   details.open = false;
 
-  details.style.cssText = `
-        margin: 8px 0;
-        border: 1px solid var(--border-secondary, #e0e0e0);
-        border-radius: 8px;
-        background: var(--background-primary, #fff);
-        overflow: hidden;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
-        min-width: 0;
-        max-width: 100%;
-        box-sizing: border-box;
-        user-select: text;
-    `;
-
   const summary = doc.createElementNS(HTML_NS, "summary") as HTMLElement;
-  summary.style.cssText = `
-        padding: 8px 12px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        font-weight: 500;
-        color: var(--text-secondary, #666);
-        list-style: none;
-        user-select: none;
-        transition: background 0.2s;
-    `;
+  summary.className = "tool-process-summary";
 
-  // Hover effect
-  summary.onmouseover = () => {
-    summary.style.background = "var(--fill-quinary, rgba(0,0,0,0.02))";
-  };
-  summary.onmouseout = () => {
-    summary.style.background = "transparent";
-  };
-
-  // Icon
   const icon = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  icon.className = "process-icon tool-process-icon";
   icon.replaceChildren(
     createSvgIcon(doc, "brain", { size: 14, strokeWidth: 1.7 }),
   );
-  icon.style.filter = "grayscale(100%) opacity(0.7)";
-  icon.style.display = "inline-flex";
-  icon.style.alignItems = "center";
-  icon.style.justifyContent = "center";
   summary.appendChild(icon);
 
-  // Text Label
+  const labelWrap = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  labelWrap.className = "tool-process-label-wrap";
+
   const label = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-  label.textContent = "Thinking...";
-  label.style.flex = "1";
-  summary.appendChild(label);
+  label.className = "process-label tool-process-label";
+  label.textContent = "Agent activity";
+  labelWrap.appendChild(label);
 
-  // Expand All Button
-  const expandBtn = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-  expandBtn.textContent = "⤢"; // Open symbol
-  expandBtn.title = "Expand All Steps";
-  expandBtn.style.cssText = `
-        padding: 2px 6px;
-        margin-right: 8px;
-        border-radius: 4px;
-        font-size: 14px;
-        color: var(--text-tertiary, #999);
-        cursor: pointer;
-        opacity: 0.7;
-    `;
-  expandBtn.onmouseover = () => {
-    expandBtn.style.backgroundColor = "var(--fill-quaternary, rgba(0,0,0,0.1))";
-  };
-  expandBtn.onmouseout = () => {
-    expandBtn.style.backgroundColor = "transparent";
-  };
+  const subLabel = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  subLabel.className = "tool-process-subtitle";
+  subLabel.textContent = "Planning";
+  labelWrap.appendChild(subLabel);
+  summary.appendChild(labelWrap);
 
+  const controls = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  controls.className = "tool-timeline-controls";
+
+  const expandBtn = toolIconButton(doc, "chevron-down", "Expand all tools");
   expandBtn.onclick = (e) => {
     e.preventDefault();
     e.stopPropagation();
-
-    // Open parent
     details.open = true;
-
-    // Open all children
     const childDetails = details.querySelectorAll(
       "details.tool-execution-card",
     );
@@ -719,35 +888,52 @@ export function createToolProcessUI(doc: Document): {
       (cd as HTMLDetailsElement).open = true;
     });
   };
-  summary.appendChild(expandBtn);
 
-  // Chevron
+  const collapseBtn = toolIconButton(doc, "chevron-up", "Collapse all tools");
+  collapseBtn.onclick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const childDetails = details.querySelectorAll(
+      "details.tool-execution-card",
+    );
+    childDetails.forEach((cd: Element) => {
+      (cd as HTMLDetailsElement).open = false;
+    });
+    details.open = false;
+  };
+
+  const copyBtn = toolIconButton(doc, "copy", "Copy tool log");
+  copyBtn.onclick = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const text = getToolLogText(details);
+    try {
+      await doc.defaultView?.navigator.clipboard?.writeText(text);
+      copyBtn.classList.add("copied");
+      setTimeout(() => copyBtn.classList.remove("copied"), 900);
+    } catch {
+      Zotero.debug("[seerai] Failed to copy tool log");
+    }
+  };
+
+  controls.appendChild(expandBtn);
+  controls.appendChild(collapseBtn);
+  controls.appendChild(copyBtn);
+  summary.appendChild(controls);
+
   const chevron = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-  chevron.innerHTML = `<svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  chevron.style.color = "var(--text-tertiary, #999)";
-  chevron.style.transition = "transform 0.2s ease";
-  chevron.style.transform = "rotate(-90deg)"; // Initial closed state
+  chevron.className = "tool-process-chevron";
+  chevron.appendChild(createSvgIcon(doc, "chevron-down", { size: 13 }));
   summary.appendChild(chevron);
 
   details.addEventListener("toggle", () => {
-    chevron.style.transform = details.open ? "rotate(0deg)" : "rotate(-90deg)";
+    chevron.classList.toggle("open", details.open);
   });
 
   details.appendChild(summary);
 
   const statsBar = doc.createElementNS(HTML_NS, "div") as HTMLElement;
   statsBar.className = "agent-stats-bar";
-  statsBar.style.cssText = `
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px 12px;
-    padding: 4px 12px;
-    font-size: 11px;
-    color: var(--text-tertiary, #999);
-    border-bottom: 1px solid var(--border-secondary, #e0e0e0);
-    line-height: 1.4;
-  `;
 
   const statsTurns = doc.createElementNS(HTML_NS, "span") as HTMLElement;
   const statsTools = doc.createElementNS(HTML_NS, "span") as HTMLElement;
@@ -762,17 +948,8 @@ export function createToolProcessUI(doc: Document): {
   statsBar.appendChild(statsLast);
   details.appendChild(statsBar);
 
-  // Container for card list
   const listContainer = doc.createElementNS(HTML_NS, "div") as HTMLElement;
   listContainer.className = "tool-list-container";
-  listContainer.style.cssText = `
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        padding: 8px;
-        background: var(--fill-quinary, rgba(0,0,0,0.02));
-        border-top: 1px solid var(--border-secondary, #e0e0e0);
-    `;
   details.appendChild(listContainer);
 
   // State helpers
@@ -788,6 +965,7 @@ export function createToolProcessUI(doc: Document): {
       createSvgIcon(doc, name, { size: 14, strokeWidth: 1.7 }),
     );
     icon.style.color = options.color ?? "var(--text-secondary)";
+    icon.classList.toggle("is-running", !!options.animate);
     if (options.animate) {
       icon.style.animation =
         typeof options.animate === "string"
@@ -800,46 +978,47 @@ export function createToolProcessUI(doc: Document): {
   };
 
   const setThinking = () => {
-    label.textContent = "Processing task...";
+    label.textContent = "Agent activity";
+    subLabel.textContent = "Planning next step";
+    details.classList.remove("is-complete", "is-failed");
+    details.classList.add("is-running");
     setProcessIcon("lightning", {
       animate: "1.5s",
       filter: "grayscale(100%) opacity(0.7)",
     });
-    // Only close if we haven't started any tools yet
-    if (!listContainer.firstChild) {
-      details.open = false;
-    }
-    // Force open if user explicitly keeps it open should be handled by caller persistence
   };
 
   const setExecutingTool = (toolName: string) => {
-    const displayName = toolName.replace(/_/g, " ");
-    label.textContent = `Calling ${displayName}...`;
+    label.textContent = "Agent activity";
+    subLabel.textContent = getFriendlyToolAction(toolName);
+    details.classList.remove("is-complete", "is-failed");
+    details.classList.add("is-running");
     setProcessIcon("tool", { animate: "1s" });
-    // Do NOT force open here
-    // BUT user often wants to see new tools.
-    // Letting persistence handle this in assistant.ts is better.
-    // details.open = true;
   };
 
   const setCompleted = (count: number, toolCount?: number) => {
     if (toolCount !== undefined && toolCount !== count) {
-      label.textContent = `Completed ${toolCount} action${toolCount !== 1 ? "s" : ""} in ${count} turn${count !== 1 ? "s" : ""}`;
+      label.textContent = `Completed ${toolCount} action${toolCount !== 1 ? "s" : ""}`;
+      subLabel.textContent = `${count} turn${count !== 1 ? "s" : ""}`;
     } else {
       label.textContent = `Completed ${count} analysis turn${count !== 1 ? "s" : ""}`;
+      subLabel.textContent = "Finished";
     }
+    details.classList.remove("is-running", "is-failed");
+    details.classList.add("is-complete");
     setProcessIcon("check-circle", { color: "var(--accent-green, #34C759)" });
-    // Keep current open state
   };
 
   const updateProgress = (count: number, toolCount?: number) => {
     if (toolCount !== undefined && toolCount !== count) {
-      label.textContent = `Processing ${toolCount} action${toolCount !== 1 ? "s" : ""} in ${count} turn${count !== 1 ? "s" : ""}`;
+      label.textContent = `Running ${toolCount} action${toolCount !== 1 ? "s" : ""}`;
+      subLabel.textContent = `${count} turn${count !== 1 ? "s" : ""}`;
     } else {
-      label.textContent = `Processing ${count} analysis turn${count !== 1 ? "s" : ""}`;
+      label.textContent = `Running ${count} analysis turn${count !== 1 ? "s" : ""}`;
+      subLabel.textContent = "Working";
     }
-    // Keep executing icon or completed icon?
-    // If updating progress, it means we are running but maybe not currently executing a tool (e.g. between turns)
+    details.classList.remove("is-complete", "is-failed");
+    details.classList.add("is-running");
     setProcessIcon("lightning", {
       color: "var(--text-secondary)",
       animate: "2s",
@@ -847,11 +1026,12 @@ export function createToolProcessUI(doc: Document): {
   };
 
   const setFailed = (error: string) => {
-    label.textContent = `Failed: ${error}`;
-    label.style.color = "var(--accent-red, #FF3B30)";
+    label.textContent = "Agent stopped";
+    subLabel.textContent = truncateMiddle(error, 180);
+    details.classList.remove("is-running", "is-complete");
+    details.classList.add("is-failed");
     setProcessIcon("x-circle", { color: "var(--accent-red, #FF3B30)" });
     icon.style.animation = "none";
-    details.open = true; // Auto-expand on failure
   };
 
   const updateStats = (stats: {
@@ -887,11 +1067,10 @@ export function createToolProcessUI(doc: Document): {
     }
 
     if (stats.lastToolName) {
-      const displayName = stats.lastToolName.replace(/_/g, " ");
       const summary = stats.lastToolSummary
         ? ` \u2192 ${stats.lastToolSummary}`
         : "";
-      statsLast.textContent = `Last: ${displayName}${summary}`;
+      statsLast.textContent = `Last: ${getFriendlyToolAction(stats.lastToolName)}${summary}`;
       statsLast.style.display = "";
     } else {
       statsLast.style.display = "none";
@@ -925,174 +1104,115 @@ export function createToolExecutionUI(
   const details = doc.createElementNS(HTML_NS, "details") as HTMLDetailsElement;
   details.className = "tool-execution-card";
   details.setAttribute("data-tool-id", toolCall.id);
+  const display = createToolDisplay(toolCall, result);
+  details.classList.add(`tool-status-${display.status}`);
+  details.open = false;
 
-  // Auto-expand all completed tool calls so results are visible on re-render
-  if (result) {
-    details.open = true;
-  }
-
-  details.style.cssText = `
-        border: 1px solid var(--border-secondary, #e0e0e0);
-        border-radius: 6px;
-        background: var(--background-primary, #fff);
-        overflow: hidden;
-        min-width: 0;
-        max-width: 100%;
-        box-sizing: border-box;
-        user-select: text;
-    `;
-
-  // Summary (Header)
   const summary = doc.createElementNS(HTML_NS, "summary") as HTMLElement;
-  summary.style.cssText = `
-        padding: 6px 10px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 12px;
-        font-weight: 500;
-        color: var(--text-primary);
-        list-style: none; /* Hide default triangle */
-        user-select: none;
-        background: var(--fill-quinary, rgba(0, 0, 0, 0.02));
-        transition: background 0.15s;
-    `;
+  summary.className = "tool-row-summary";
 
-  summary.onmouseover = () => {
-    summary.style.background = "var(--fill-quaternary, rgba(0,0,0,0.05))";
-  };
-  summary.onmouseout = () => {
-    summary.style.background = "var(--fill-quinary, rgba(0,0,0,0.02))";
-  };
-
-  // Status Icon
   const statusSpan = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-  statusSpan.style.display = "flex";
-  statusSpan.style.alignItems = "center";
-  statusSpan.style.justifyContent = "center";
-  statusSpan.style.width = "14px";
-
-  if (!result) {
-    statusSpan.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" class="spin" xmlns="http://www.w3.org/2000/svg"><path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="var(--accent-blue, #007AFF)" stroke-width="3" stroke-linecap="round" stroke-dasharray="60" stroke-dashoffset="20"></path></svg>`;
-    // Add rotation animation style is expected to be global or inline
-  } else if (result.success) {
-    statusSpan.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 6L9 17L4 12" stroke="var(--accent-green, #34C759)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  } else {
-    statusSpan.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M18 6L6 18M6 6L18 18" stroke="var(--accent-red, #FF3B30)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  }
+  statusSpan.className = "tool-row-status";
+  statusSpan.appendChild(
+    createSvgIcon(doc, getStatusIconName(display.status), { size: 14 }),
+  );
   summary.appendChild(statusSpan);
 
-  // Tool Name
-  const nameSpan = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-  nameSpan.textContent = toolCall.function.name.replace(/_/g, " ");
-  nameSpan.style.textTransform = "capitalize";
-  nameSpan.style.flex = "1";
-  summary.appendChild(nameSpan);
+  const textWrap = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  textWrap.className = "tool-row-text";
 
-  // Chevron (Visual indicator for open/closed)
+  const titleRow = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  titleRow.className = "tool-row-title-line";
+
+  const title = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  title.className = "tool-row-title";
+  title.textContent = display.title;
+  titleRow.appendChild(title);
+
+  const resultPill = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+  resultPill.className = "tool-row-result";
+  resultPill.textContent = display.summary;
+  titleRow.appendChild(resultPill);
+  textWrap.appendChild(titleRow);
+
+  if (display.target) {
+    const target = doc.createElementNS(HTML_NS, "span") as HTMLElement;
+    target.className = "tool-row-target";
+    target.textContent = display.target;
+    textWrap.appendChild(target);
+  }
+  summary.appendChild(textWrap);
+
   const chevron = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-  chevron.innerHTML = `<svg width="8" height="5" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-  chevron.style.opacity = "0.4";
-  chevron.style.transform = details.open ? "rotate(0deg)" : "rotate(-90deg)"; // Initial state
-  chevron.style.transition = "transform 0.2s";
+  chevron.className = "tool-row-chevron";
+  chevron.appendChild(createSvgIcon(doc, "chevron-down", { size: 12 }));
+  chevron.classList.toggle("open", details.open);
   summary.appendChild(chevron);
 
-  // Update chevron on toggle
   details.addEventListener("toggle", () => {
-    chevron.style.transform = details.open ? "rotate(0deg)" : "rotate(-90deg)";
+    chevron.classList.toggle("open", details.open);
   });
 
   details.appendChild(summary);
 
-  // Content (Arguments & Results)
   const content = doc.createElementNS(HTML_NS, "div") as HTMLElement;
   content.className = "tool-details-content";
-  content.style.cssText = `
-        padding: 10px;
-        border-top: 1px solid var(--border-secondary, #e0e0e0);
-        font-size: 11px;
-        font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
-        line-height: 1.4;
-        background: var(--background-primary, #fff);
-        color: var(--text-primary, #333);
-        overflow-x: auto;
-        overflow-wrap: break-word;
-        word-break: break-word;
-        max-width: 100%;
-        box-sizing: border-box;
-        user-select: text;
-        cursor: text;
-    `;
 
-  // Arguments
-  try {
-    const argsLabel = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-    argsLabel.textContent = "INPUT";
-    argsLabel.style.cssText =
-      "font-size: 10px; font-weight: 700; color: var(--text-tertiary, #8e8e93); margin-bottom: 4px; letter-spacing: 0.5px;";
-    content.appendChild(argsLabel);
+  const appendSection = (
+    label: string,
+    value: string,
+    kind: "input" | "output" | "error",
+  ) => {
+    const section = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    section.className = `tool-detail-section tool-detail-${kind}`;
+    section.setAttribute("data-tool-section", kind);
 
-    const args = JSON.parse(toolCall.function.arguments);
-    const argsPre = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-    argsPre.textContent = JSON.stringify(args, null, 2);
-    argsPre.style.whiteSpace = "pre-wrap";
-    argsPre.style.color = "var(--text-primary)";
-    content.appendChild(argsPre);
-  } catch (e) {
-    content.textContent = "Error parsing arguments";
-  }
+    const sectionLabel = doc.createElementNS(HTML_NS, "div") as HTMLElement;
+    sectionLabel.className = "tool-detail-label";
+    sectionLabel.textContent = label;
+    section.appendChild(sectionLabel);
 
-  // Result
-  if (result) {
-    const resLabel = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-    resLabel.textContent = "OUTPUT";
-    resLabel.style.cssText =
-      "font-size: 10px; font-weight: 700; color: var(--text-tertiary, #8e8e93); margin: 12px 0 4px 0; letter-spacing: 0.5px;";
-    content.appendChild(resLabel);
+    const pre = doc.createElementNS(HTML_NS, "pre") as HTMLElement;
+    pre.className = "tool-detail-pre";
+    const isLong = value.length > 2200;
+    pre.textContent = isLong
+      ? `${value.slice(0, 2200)}\n... (truncated)`
+      : value;
+    section.appendChild(pre);
 
-    const resDiv = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-    resDiv.style.whiteSpace = "pre-wrap";
-
-    if (result.success) {
-      // Check if data is complex object or simple text
-      if (result.data) {
-        // Interactive question form for workspace_question tool
-        // The interactive panel is rendered as a standalone element in the chat -
-        // here we just show a compact note
-        if (toolCall.function.name === "workspace_question") {
-          const data = result.data as Record<string, unknown>;
-          if (data.questions && Array.isArray(data.questions)) {
-            const questions = data.questions as any[];
-            const noteDiv = doc.createElementNS(HTML_NS, "div") as HTMLElement;
-            noteDiv.style.cssText =
-              "font-size: 11px; font-style: italic; color: var(--text-secondary);";
-            noteDiv.textContent = `${questions.length} question(s) asked — see interactive panel above`;
-            resDiv.style.whiteSpace = "normal";
-            resDiv.style.color = "var(--text-primary)";
-            resDiv.appendChild(noteDiv);
-          }
-        } else {
-          resDiv.textContent = JSON.stringify(result.data, null, 2);
-          resDiv.style.color = "var(--text-primary)";
-          // Truncate if extremely long
-          if (resDiv.textContent.length > 2000) {
-            resDiv.textContent =
-              resDiv.textContent.slice(0, 2000) + "... (truncated)";
-          }
-        }
-      } else {
-        resDiv.textContent = result.summary || "Success";
-        resDiv.style.color = "var(--text-secondary, #666)";
-      }
-    } else {
-      resDiv.textContent = result.error || "Unknown Error";
-      resDiv.style.color = "var(--accent-red, #FF3B30)";
-      resDiv.style.background = "var(--bg-error-light, rgba(255, 59, 48, 0.1))";
-      resDiv.style.padding = "4px";
-      resDiv.style.borderRadius = "4px";
+    if (isLong) {
+      const showBtn = doc.createElementNS(
+        HTML_NS,
+        "button",
+      ) as HTMLButtonElement;
+      showBtn.type = "button";
+      showBtn.className = "tool-detail-show-full";
+      showBtn.textContent = "Show full output";
+      showBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        pre.textContent = value;
+        showBtn.remove();
+      });
+      section.appendChild(showBtn);
     }
-    content.appendChild(resDiv);
+
+    content.appendChild(section);
+  };
+
+  const parsedArgs = safeJsonParse(toolCall.function.arguments);
+  appendSection("Input", JSON.stringify(parsedArgs, null, 2), "input");
+
+  if (result) {
+    if (!result.success) {
+      appendSection("Error", result.error || "Unknown error", "error");
+    } else {
+      const output =
+        result.data !== undefined
+          ? JSON.stringify(result.data, null, 2)
+          : result.summary || "Success";
+      appendSection("Output", output, "output");
+    }
   }
 
   details.appendChild(content);

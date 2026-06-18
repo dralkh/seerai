@@ -1,6 +1,9 @@
 import { assert } from "chai";
 import { getAgentModelCapabilities, ToolCall } from "../src/modules/openai";
-import { validateToolCallIntake } from "../src/modules/chat/agenticChat";
+import {
+  createToolDisplay,
+  validateToolCallIntake,
+} from "../src/modules/chat/agenticChat";
 
 function toolCall(name: string, args: string, id = "call_1"): ToolCall {
   return {
@@ -56,5 +59,35 @@ describe("Agent stabilization", function () {
       capabilities.knownIncompatibleReason || "",
       "does not support function/tool calling",
     );
+  });
+
+  it("formats compact tool display metadata", function () {
+    const display = createToolDisplay(
+      toolCall("workspace_write_file", '{"path":"reports/brief.md"}'),
+      {
+        success: true,
+        data: { path: "reports/brief.md" },
+      },
+    );
+
+    assert.equal(display.title, "Wrote file");
+    assert.equal(display.target, "reports/brief.md");
+    assert.equal(display.summary, "Saved reports/brief.md");
+    assert.equal(display.status, "success");
+  });
+
+  it("formats failed tool display metadata", function () {
+    const display = createToolDisplay(
+      toolCall("search_library", '{"query":"AI screening"}'),
+      {
+        success: false,
+        error: "Provider unavailable",
+      },
+    );
+
+    assert.equal(display.title, "Searched Zotero library");
+    assert.equal(display.target, "AI screening");
+    assert.equal(display.summary, "Provider unavailable");
+    assert.equal(display.status, "error");
   });
 });

@@ -124,6 +124,7 @@ import {
   createToolExecutionUI,
   createToolProcessUI,
   createQuestionPanel,
+  getFriendlyToolAction,
 } from "./chat/agenticChat";
 import { ToolResult } from "./chat/tools/toolTypes";
 import { getFilteredAgentTools } from "./chat/tools/toolDefinitions";
@@ -4914,6 +4915,9 @@ export class Assistant {
           const label = toolProcessContainer.querySelector(
             ".process-label",
           ) as HTMLElement;
+          const subLabel = toolProcessContainer.querySelector(
+            ".tool-process-subtitle",
+          ) as HTMLElement;
           const icon = toolProcessContainer.querySelector(
             ".process-icon",
           ) as HTMLElement;
@@ -4939,6 +4943,7 @@ export class Assistant {
             icon.style.animation = options.animate
               ? `pulse ${options.animate === true ? "1.5s" : options.animate} infinite`
               : "none";
+            icon.classList.toggle("is-running", !!options.animate);
             icon.style.color = options.color ?? "var(--text-secondary)";
             if (options.filter !== undefined) {
               icon.style.filter = options.filter;
@@ -4948,7 +4953,10 @@ export class Assistant {
           };
 
           const setThinking = () => {
-            if (label) label.textContent = "Processing task...";
+            if (label) label.textContent = "Agent activity";
+            if (subLabel) subLabel.textContent = "Planning next step";
+            toolProcessContainer.classList.remove("is-complete", "is-failed");
+            toolProcessContainer.classList.add("is-running");
             if (icon) {
               setProcessIcon("lightning", {
                 color: "var(--text-secondary)",
@@ -4958,8 +4966,11 @@ export class Assistant {
             (toolProcessContainer as any).open = false;
           };
           const setExecutingTool = (toolName: string) => {
-            const displayName = toolName.replace(/_/g, " ");
-            if (label) label.textContent = `Calling ${displayName}...`;
+            if (label) label.textContent = "Agent activity";
+            if (subLabel)
+              subLabel.textContent = getFriendlyToolAction(toolName);
+            toolProcessContainer.classList.remove("is-complete", "is-failed");
+            toolProcessContainer.classList.add("is-running");
             if (icon) {
               setProcessIcon("tool", {
                 color: "var(--text-secondary)",
@@ -4969,12 +4980,18 @@ export class Assistant {
           };
           const setCompleted = (count: number, toolCount?: number) => {
             if (toolCount !== undefined && toolCount !== count) {
-              if (label)
-                label.textContent = `Completed ${toolCount} action${toolCount !== 1 ? "s" : ""} in ${count} turn${count !== 1 ? "s" : ""}`;
+              if (label) {
+                label.textContent = `Completed ${toolCount} action${toolCount !== 1 ? "s" : ""}`;
+              }
+              if (subLabel)
+                subLabel.textContent = `${count} turn${count !== 1 ? "s" : ""}`;
             } else {
               if (label)
                 label.textContent = `Completed ${count} analysis turn${count !== 1 ? "s" : ""}`;
+              if (subLabel) subLabel.textContent = "Finished";
             }
+            toolProcessContainer.classList.remove("is-running", "is-failed");
+            toolProcessContainer.classList.add("is-complete");
             if (icon) {
               setProcessIcon("check-circle", {
                 color: "var(--accent-green, #34C759)",
@@ -4983,9 +5000,11 @@ export class Assistant {
           };
           const setFailed = (error: string) => {
             if (label) {
-              label.textContent = `Failed: ${error}`;
-              label.style.color = "var(--accent-red, #FF3B30)";
+              label.textContent = "Agent stopped";
             }
+            if (subLabel) subLabel.textContent = error;
+            toolProcessContainer.classList.remove("is-running", "is-complete");
+            toolProcessContainer.classList.add("is-failed");
             if (icon) {
               setProcessIcon("x-circle", {
                 color: "var(--accent-red, #FF3B30)",
@@ -4996,11 +5015,16 @@ export class Assistant {
           const updateProgress = (count: number, toolCount?: number) => {
             if (label) {
               if (toolCount !== undefined && toolCount !== count) {
-                label.textContent = `Processing ${toolCount} action${toolCount !== 1 ? "s" : ""} in ${count} turn${count !== 1 ? "s" : ""}`;
+                label.textContent = `Running ${toolCount} action${toolCount !== 1 ? "s" : ""}`;
+                if (subLabel)
+                  subLabel.textContent = `${count} turn${count !== 1 ? "s" : ""}`;
               } else {
-                label.textContent = `Processing ${count} analysis turn${count !== 1 ? "s" : ""}`;
+                label.textContent = `Running ${count} analysis turn${count !== 1 ? "s" : ""}`;
+                if (subLabel) subLabel.textContent = "Working";
               }
             }
+            toolProcessContainer.classList.remove("is-complete", "is-failed");
+            toolProcessContainer.classList.add("is-running");
             if (icon) {
               setProcessIcon("lightning", {
                 color: "var(--text-secondary)",
@@ -5063,12 +5087,6 @@ export class Assistant {
               tr.uiElement = toolCards[idx] as HTMLElement;
             }
           });
-        }
-
-        // Show stop button if streaming
-        const stopBtn = doc.getElementById("stop-btn") as HTMLElement | null;
-        if (stopBtn && this.isStreaming) {
-          stopBtn.style.display = "inline-block";
         }
 
         // Auto-scroll
@@ -25923,6 +25941,31 @@ ${tableRows}  </tbody>
       ],
     }) as unknown as HTMLInputElement;
 
+    const stopCurrentGeneration = () => {
+      openAIService.abortRequest();
+      this.isStreaming = false;
+      activeAgentSession = null;
+      input.disabled = false;
+      input.focus();
+
+      const streamingMsg = messagesArea.querySelector(
+        ".message-bubble.assistant:last-child",
+      );
+      if (!streamingMsg) return;
+      const activeContentDiv = streamingMsg.querySelector(
+        "[data-content]",
+      ) as HTMLElement | null;
+      if (!activeContentDiv) return;
+      const indicator = activeContentDiv.querySelector(".typing-indicator");
+      if (indicator) {
+        indicator.remove();
+        const stopMsg = doc.createElement("span");
+        stopMsg.style.color = "#c62828";
+        stopMsg.textContent = "Generation stopped";
+        activeContentDiv.appendChild(stopMsg);
+      }
+    };
+
     const sendBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
       properties: {
@@ -25950,10 +25993,7 @@ ${tableRows}  </tbody>
           type: "click",
           listener: () => {
             if (this.isStreaming) {
-              openAIService.abortRequest();
-              this.isStreaming = false;
-              activeAgentSession = null;
-              input.disabled = false;
+              stopCurrentGeneration();
               setToolbarIcon(sendBtn as HTMLElement, "send", "Send message");
               (sendBtn as HTMLElement).title = "Send message";
               return;
@@ -25990,71 +26030,6 @@ ${tableRows}  </tbody>
         input.dispatchEvent(draftEvt);
       }, 0);
     }
-
-    // Stop button
-    const stopBtn = ztoolkit.UI.createElement(doc, "button", {
-      namespace: "html",
-      properties: { id: "stop-btn", title: "Stop generation" },
-      styles: {
-        padding: "0 12px",
-        height: "32px",
-        fontSize: "13px",
-        border: "1px solid var(--button-stop-border, #d32f2f)",
-        borderRadius: "6px",
-        backgroundColor: "var(--button-stop-background, #ffebee)",
-        color: "var(--button-stop-text, #c62828)",
-        cursor: "pointer",
-        display: this.isStreaming ? "inline-flex" : "none",
-        alignItems: "center",
-        justifyContent: "center",
-      },
-      listeners: [
-        {
-          type: "click",
-          listener: () => {
-            openAIService.abortRequest();
-            // Force reset immediately to prevent UI lock if stream hangs
-            this.isStreaming = false;
-            activeAgentSession = null;
-            input.disabled = false;
-            const currentSendBtn = doc.getElementById(
-              "seerai-send-btn",
-            ) as HTMLElement | null;
-            if (currentSendBtn) {
-              currentSendBtn.title = "Send message";
-              setButtonIcon(currentSendBtn, "send", "Send message", 16);
-            }
-            stopBtn.style.display = "none";
-            input.focus();
-
-            // Append "Generation stopped" message immediately if possible
-            const streamingMsg = messagesArea.querySelector(
-              ".message-bubble.assistant:last-child",
-            );
-            if (streamingMsg) {
-              const contentDiv = streamingMsg.querySelector(
-                "[data-content]",
-              ) as HTMLElement;
-              if (contentDiv) {
-                const indicator = contentDiv.querySelector(".typing-indicator");
-                if (indicator) {
-                  indicator.remove();
-                  const stopMsg = doc.createElement("span");
-                  stopMsg.style.color = "#c62828";
-                  stopMsg.textContent = "Generation stopped";
-                  contentDiv.appendChild(stopMsg);
-                }
-              }
-            }
-          },
-        },
-      ],
-    });
-    applyToolbarButtonStyle(stopBtn as HTMLElement);
-    setToolbarIcon(stopBtn as HTMLElement, "stop", "Stop generation");
-    (stopBtn as HTMLElement).style.display = this.isStreaming
-      ? "inline-flex"
-      : "none";
 
     // Clear button with two-click confirmation
     let clearConfirmState = false;
@@ -28313,61 +28288,10 @@ Rules:
     applyToolbarButtonStyle(newChatBtn as HTMLElement);
     setToolbarIcon(newChatBtn as HTMLElement, "newChat", "New chat");
 
-    toolbarRight.appendChild(stopBtn);
+    toolbarRight.appendChild(newChatBtn);
+    toolbarRight.appendChild(saveBtn);
+    toolbarRight.appendChild(clearBtn);
     toolbarRight.appendChild(settingsContainer);
-    const conversationMenuContainer = doc.createElement("div");
-    conversationMenuContainer.style.cssText =
-      "position:relative;display:flex;flex-shrink:0;";
-    const conversationMenuBtn = doc.createElementNS(
-      HTML_NS,
-      "button",
-    ) as HTMLButtonElement;
-    conversationMenuBtn.type = "button";
-    applyToolbarButtonStyle(conversationMenuBtn);
-    setToolbarIcon(conversationMenuBtn, "more", "Conversation actions");
-    conversationMenuBtn.addEventListener("click", (event) => {
-      event.stopPropagation();
-      createToolbarMenu(
-        conversationMenuBtn,
-        [
-          {
-            label: "New chat",
-            icon: "newChat",
-            action: () => newChatBtn.click(),
-          },
-          {
-            label: "Save chat as note",
-            icon: "save",
-            action: () => saveBtn.click(),
-          },
-          {
-            label: "Clear chat",
-            icon: "trash",
-            danger: true,
-            action: async () => {
-              if (
-                doc.defaultView?.confirm(
-                  "Clear all messages from this conversation?",
-                )
-              ) {
-                conversationMessages = [];
-                messagesArea.replaceChildren();
-                try {
-                  await getMessageStore().clearMessages();
-                } catch (error) {
-                  Zotero.debug(
-                    `[seerai] Error clearing message store: ${error}`,
-                  );
-                }
-              }
-            },
-          },
-        ],
-        "right",
-      );
-    });
-    conversationMenuContainer.appendChild(conversationMenuBtn);
-    toolbarRight.appendChild(conversationMenuContainer);
     toolbarRow.appendChild(toolbarRight);
 
     // Web Search toggle button
@@ -28694,12 +28618,6 @@ Rules:
       setButtonIcon(activeSendBtn, "stop", "Stop generation", 16);
     }
 
-    // Show stop button
-    const stopBtn = messagesArea.ownerDocument?.getElementById(
-      "stop-btn",
-    ) as HTMLElement;
-    if (stopBtn) stopBtn.style.display = "inline-block";
-
     // Create streaming message placeholder with loading indicator
     const loadingHtml = `
             <div class="typing-indicator" style="display: flex; align-items: center; gap: 4px; color: var(--text-secondary); font-style: italic;">
@@ -28826,15 +28744,7 @@ Rules:
           const doc = session.contentDiv.ownerDocument!;
           const block = doc.createElementNS(HTML_NS, "div") as HTMLElement;
           block.className = "markdown-content agent-turn-text";
-          // Insert new text block before the tool process container or at end
-          if (session.toolProcessState?.container) {
-            session.contentDiv.insertBefore(
-              block,
-              session.toolProcessState.container,
-            );
-          } else {
-            session.contentDiv.appendChild(block);
-          }
+          session.contentDiv.appendChild(block);
           session.currentTextBlock = block;
         }
 
@@ -28863,12 +28773,18 @@ Rules:
 
             const processUI = createToolProcessUI(doc);
             session.toolProcessState = processUI;
-            session.contentDiv.appendChild(processUI.container);
+            if (session.currentTextBlock?.parentNode === session.contentDiv) {
+              session.contentDiv.insertBefore(
+                processUI.container,
+                session.currentTextBlock,
+              );
+            } else {
+              session.contentDiv.appendChild(processUI.container);
+            }
 
             processUI.setThinking();
 
-            (processUI.container as any).open = true;
-            session.isToolDetailsOpen = true;
+            session.isToolDetailsOpen = false;
 
             processUI.container.addEventListener("toggle", (e: Event) => {
               if (session) {
@@ -28898,11 +28814,6 @@ Rules:
             session.contentDiv.appendChild(toolUI);
           }
 
-          // Auto-expand the process container so tool cards are visible
-          if (session.toolProcessState?.container) {
-            (session.toolProcessState.container as any).open = true;
-          }
-
           session.toolResults.push({ toolCall, uiElement: toolUI });
           smartScrollToBottom();
         } else {
@@ -28918,7 +28829,14 @@ Rules:
 
         if (session.messagesArea && session.contentDiv && tr?.uiElement) {
           const doc = session.messagesArea.ownerDocument!;
+          const wasOpen =
+            tr.uiElement.tagName === "DETAILS"
+              ? (tr.uiElement as HTMLDetailsElement).open
+              : false;
           const newUI = createToolExecutionUI(doc, toolCall, result);
+          if (newUI.tagName === "DETAILS") {
+            (newUI as HTMLDetailsElement).open = wasOpen;
+          }
           if (tr.uiElement.parentNode) {
             tr.uiElement.parentNode.replaceChild(newUI, tr.uiElement);
           }
@@ -29075,8 +28993,6 @@ Rules:
           activeSendBtn.title = "Send message";
           setButtonIcon(activeSendBtn, "send", "Send message", 16);
         }
-        if (stopBtn) stopBtn.style.display = "none";
-
         // Clear pasted images after successful send
         clearImages();
       },
@@ -29102,7 +29018,6 @@ Rules:
           activeSendBtn.title = "Send message";
           setButtonIcon(activeSendBtn, "send", "Send message", 16);
         }
-        if (stopBtn) stopBtn.style.display = "none";
       },
     };
 
@@ -30813,7 +30728,6 @@ Note: Context was automatically reduced using stricter semantic search due to si
         activeSendBtn.title = "Send message";
         setButtonIcon(activeSendBtn, "send", "Send message", 16);
       }
-      if (stopBtn) stopBtn.style.display = "none";
     }
   }
 
@@ -31192,7 +31106,6 @@ Note: Context was automatically reduced using stricter semantic search due to si
       );
       const { container: toolContainer, setCompleted } =
         createToolProcessUI(doc);
-      (toolContainer as HTMLDetailsElement).open = true;
       toolContainer.style.marginTop = "8px";
 
       // Restore persisted open state from message
