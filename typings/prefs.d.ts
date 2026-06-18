@@ -45,6 +45,7 @@ declare namespace _ZoteroTypes {
       "agentMaxContentLength": number;
       "agentMaxIterations": number;
       "agentAutoOcr": boolean;
+      "enableExperimentalAgentTools": boolean;
       "selectionMode": string;
       "searchAutoAiInsights": boolean;
       "searchAiInsightsPrompt": string;
@@ -109,6 +110,8 @@ declare namespace _ZoteroTypes {
       "cloud.onedrive.accessToken": string;
       "cloud.onedrive.tokenExpiry": string;
       "cloud.activeProvider": string;
+      "enableTerminalExecution": boolean;
+      "execServerUrl": string;
     };
   }
 }

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**seerai** is an intelligent research assistant plugin for Zotero 8 that integrates AI-powered chat, semantic search, RAG, OCR, and structured data extraction into the research workflow. The repo is a monorepo containing:
+**seerai** is an intelligent research assistant plugin for Zotero 8/9 that integrates AI-powered chat, semantic search, RAG, OCR, systematic review, cloud storage, and structured data extraction into the research workflow. The repo is a monorepo containing:
 
 - **Zotero Plugin** (`src/`, `addon/`) — runs inside Zotero's Firefox-based runtime (NOT Node.js)
 - **MCP Server** (`mcp-server/`) — standalone Node.js server exposing Zotero tools via Model Context Protocol
@@ -11,14 +11,18 @@
 
 ```bash
 npm start              # Dev server with hot reload (zotero-plugin serve)
-npm run build          # Production build: plugin .xpi + MCP bundle + tsc --noEmit
+npm run build          # Production build: plugin .xpi + MCP bundle + tsc --noEmit + copies artifacts to root
 npm run lint:check     # Prettier check + ESLint
 npm run lint:fix       # Prettier write + ESLint fix
 npm run release        # Create GitHub release (zotero-plugin release)
+npm run test           # Run test suite (zotero-plugin test → mocha-based)
+npm run update-deps    # Update all dependencies to latest (npm update --save)
 
 # MCP server (separate package)
-cd mcp-server && npm run bundle   # Bundle MCP server to dist/seerai-mcp.cjs
 cd mcp-server && npm run dev      # Run MCP server with tsx
+cd mcp-server && npm run bundle   # Bundle MCP server to dist/seerai-mcp.cjs
+cd mcp-server && npm run build    # TypeScript compile (tsc)
+cd mcp-server && npm run start    # Run compiled MCP server
 ```
 
 **Always run `npm run lint:check` and `npm run build` after making changes.**
@@ -27,16 +31,19 @@ cd mcp-server && npm run dev      # Run MCP server with tsx
 
 ## Tech Stack
 
-| Layer          | Technology                                           |
-| -------------- | ---------------------------------------------------- |
-| Language       | TypeScript                                           |
-| Build          | esbuild (target: firefox128), zotero-plugin-scaffold |
-| Plugin Runtime | Zotero 8 (Firefox 128-based SpiderMonkey engine)     |
-| Validation     | Zod v4 (plugin), Zod v3 (MCP server)                 |
-| Plugin Toolkit | zotero-plugin-toolkit v5                             |
-| Types          | zotero-types v4                                      |
-| Linting        | @zotero-plugin/eslint-config, Prettier               |
-| MCP Server     | @modelcontextprotocol/sdk, Node.js 18+               |
+| Layer          | Technology                                                   |
+| -------------- | ------------------------------------------------------------ |
+| Language       | TypeScript                                                   |
+| Build          | esbuild (target: firefox128), zotero-plugin-scaffold v0.8    |
+| Plugin Runtime | Zotero 8/9 (Firefox 128-based SpiderMonkey engine)           |
+| Validation     | Zod v4 (plugin), Zod v3 (MCP server)                         |
+| Plugin Toolkit | zotero-plugin-toolkit v5 (^5.1.0-beta.13)                    |
+| Types          | zotero-types v4 (^4.1.0-beta.8)                              |
+| Linting        | @zotero-plugin/eslint-config, Prettier                       |
+| Testing        | Mocha + Chai                                                 |
+| Tokenization   | gpt-tokenizer                                                |
+| DOCX/Markdown  | mammoth, docx-preview, turndown                              |
+| MCP Server     | @modelcontextprotocol/sdk, zod, zod-to-json-schema, Node 18+ |
 
 ## Project Structure
 
@@ -48,30 +55,40 @@ seerai/
 │   │   ├── preferences.xhtml   # Settings panel UI
 │   │   ├── preferences.css
 │   │   ├── detachedPanel.xhtml # Detached window panel
+│   │   ├── zoteroPane.css      # Plugin pane styles
 │   │   └── icons/
 │   ├── locale/                 # Fluent l10n (en-US, zh-CN)
-│   ├── manifest.json           # WebExtension manifest (Zotero 8)
+│   ├── manifest.json           # WebExtension manifest (Zotero 8–9)
 │   └── prefs.js                # Default prefs for dev environment
 ├── src/
 │   ├── index.ts                # Entry point: registers addon on Zotero global
 │   ├── addon.ts                # Addon class with lifecycle state
-│   ├── hooks.ts                # Zotero event handlers (startup, menu items, shortcuts)
+│   ├── hooks.ts                # Zotero event handlers (startup, menus, shortcuts, cloud init)
 │   ├── modules/
-│   │   ├── assistant.ts        # ⚠️ 27K-line monolith: UI, chat, tables, search
+│   │   ├── assistant.ts        # ⚠️ 32K-line monolith: UI, chat, tables, search, workspaces
 │   │   ├── openai.ts           # OpenAI-compatible API client (streaming, tools, vision)
 │   │   ├── ocr.ts              # OCR service (Mistral, DataLab, local Marker)
 │   │   ├── firecrawl.ts        # Firecrawl API client
 │   │   ├── tavily.ts           # Tavily API client
+│   │   ├── youdotcom.ts        # You.com API client (normal + research mode)
 │   │   ├── nanogptWeb.ts       # NanoGPT web search client
-│   │   ├── webSearchProvider.ts # Provider abstraction (Firecrawl/Tavily/NanoGPT)
+│   │   ├── webSearchProvider.ts # Provider abstraction (Firecrawl/Tavily/NanoGPT/You.com)
 │   │   ├── semanticScholar.ts  # Semantic Scholar API client
 │   │   ├── searchUtils.ts      # Boolean search engine for tables
 │   │   ├── preferenceScript.ts # Settings panel logic (model configs, API keys)
 │   │   ├── examples.ts         # Basic example factories
+│   │   ├── fileViewer.ts       # Workspace file preview (SVG/HTML/markdown/images)
+│   │   ├── docxConverter.ts    # DOCX to Markdown conversion (mammoth)
+│   │   ├── setImmediatePolyfill.ts # setImmediate polyfill for mammoth
+│   │   ├── testBooleanSearch.ts # Boolean search test harness
 │   │   ├── chat/
 │   │   │   ├── agenticChat.ts  # Agentic chat loop with tool calling
 │   │   │   ├── stateManager.ts # Chat state (selections, context)
-│   │   │   ├── modelConfig.ts  # Model configuration CRUD (stored in Zotero.Prefs)
+│   │   │   ├── modelConfig.ts  # Model config CRUD (file-based: {DataDir}/seerai/modelConfigs.json)
+│   │   │   ├── modelDiscovery.ts # /models endpoint discovery and connection testing
+│   │   │   ├── providerTypes.ts # Provider config type definitions
+│   │   │   ├── providerRegistry.ts # Provider config CRUD (file-based: {DataDir}/seerai/providerConfigs.json)
+│   │   │   ├── providerPresets.ts # Built-in provider presets (OpenAI, Anthropic, Gemini, etc.)
 │   │   │   ├── types.ts        # Chat/selection type definitions
 │   │   │   ├── tableTypes.ts   # Table/search type definitions
 │   │   │   ├── markdown.ts     # Markdown parsing & rendering
@@ -82,28 +99,46 @@ seerai/
 │   │   │   ├── imageUtils.ts   # Image handling for vision
 │   │   │   ├── syntaxHighlight.ts
 │   │   │   ├── tracer.ts       # Agent execution tracing/observability
+│   │   │   ├── tokenizer.ts    # Token counting via gpt-tokenizer
 │   │   │   ├── placeholders.ts # Placeholder expansion (!, /, ^, ~, @, #)
 │   │   │   ├── rag/            # RAG pipeline
 │   │   │   │   ├── chunker.ts          # Document chunking (recursive split)
 │   │   │   │   ├── embeddingService.ts # OpenAI-compatible embedding client
 │   │   │   │   ├── vectorStore.ts      # File-based vector storage + cosine search
 │   │   │   │   ├── retrievalEngine.ts  # Full RAG pipeline orchestration
-│   │   │   │   └── types.ts            # RAG type definitions
+│   │   │   │   ├── bm25.ts            # BM25 keyword search + hybrid RRF merging
+│   │   │   │   ├── backgroundIndexer.ts # Background RAG indexing worker
+│   │   │   │   ├── citationGraph.ts    # Citation-graph traversal for RAG
+│   │   │   │   ├── evaluator.ts       # RAG evaluation / ground-truth scoring
+│   │   │   │   ├── reranker.ts        # Cross-encoder reranker (Jina / Cohere)
+│   │   │   │   └── types.ts           # RAG type definitions
 │   │   │   ├── tools/          # Agentic tool system
 │   │   │   │   ├── toolDefinitions.ts  # OpenAI function schemas
-│   │   │   │   ├── toolTypes.ts        # Tool types, params, results, TOOL_NAMES
+│   │   │   │   ├── toolTypes.ts        # Tool types, params, results, TOOL_NAMES, ToolSensitivity
 │   │   │   │   ├── toolExecutor.ts     # Central dispatch: parse → validate → execute
 │   │   │   │   ├── schemas.ts          # Zod validation schemas per tool
 │   │   │   │   ├── searchTool.ts       # search_library, search_external, import_paper
 │   │   │   │   ├── readTool.ts         # get_item_metadata, read_item_content
-│   │   │   │   ├── noteTool.ts         # create/edit note (unified)
-│   │   │   │   ├── contextTool.ts      # add/remove/list context (unified)
-│   │   │   │   ├── collectionTool.ts   # find/create/list/move collection (unified)
-│   │   │   │   ├── tableTool.ts        # table CRUD + generate (unified)
-│   │   │   │   ├── webTool.ts          # search_web, read_webpage (unified)
-│   │   │   │   ├── citationTool.ts     # citations, references (unified)
+│   │   │   │   ├── noteTool.ts         # Unified note create/edit
+│   │   │   │   ├── contextTool.ts      # Unified context add/remove/list
+│   │   │   │   ├── collectionTool.ts   # Unified collection find/create/list/add/remove
+│   │   │   │   ├── tableTool.ts        # Unified table CRUD + generate
+│   │   │   │   ├── webTool.ts          # Unified search_web, read_webpage
+│   │   │   │   ├── citationTool.ts     # Unified citations, references
 │   │   │   │   ├── tagTool.ts          # generate_item_tags
+│   │   │   │   ├── ragTool.ts          # semantic_search, keyword_search, read_chunks, search_similar
+│   │   │   │   ├── systematicReviewTool.ts # systematic_review
+│   │   │   │   ├── todoTool.ts         # todowrite, todoread, task_complete
 │   │   │   │   └── index.ts            # Barrel exports
+│   │   │   ├── workspace/      # Per-chat file workspace
+│   │   │   │   ├── index.ts    # Workspace entry
+│   │   │   │   ├── store.ts    # Workspace file persistence
+│   │   │   │   ├── types.ts    # Workspace type definitions
+│   │   │   │   ├── sidebar.ts  # File tree sidebar UI
+│   │   │   │   ├── editor.ts   # Monaco-inspired code editor
+│   │   │   │   ├── diff.ts     # Diff viewer
+│   │   │   │   ├── gitCli.ts   # Native git CLI integration
+│   │   │   │   └── tools.ts    # workspace_* agent tools
 │   │   │   ├── context/        # Chat context management
 │   │   │   │   ├── contextManager.ts
 │   │   │   │   ├── contextTypes.ts
@@ -112,17 +147,51 @@ seerai/
 │   │   │       ├── chatSettings.ts
 │   │   │       ├── messageRenderer.ts
 │   │   │       ├── placeholderDropdown.ts
-│   │   │       └── promptPicker.ts
+│   │   │       ├── promptPicker.ts
+│   │   │       └── icons.ts   # SVG icon registry + factory
+│   │   ├── systematicReview/   # Systematic review module
+│   │   │   ├── systematicReviewTab.ts # Review tab UI (12K lines)
+│   │   │   ├── service.ts      # Review pipeline orchestration
+│   │   │   ├── store.ts        # Project state persistence
+│   │   │   ├── types.ts        # SR type definitions
+│   │   │   ├── protocol.ts     # Review protocol definition & validation
+│   │   │   ├── protocolPresets.ts # Pre-built protocol templates
+│   │   │   ├── paperAnalyzer.ts # AI-driven paper analysis
+│   │   │   ├── documentAnalyzer.ts # Document-level analysis
+│   │   │   ├── extractionWorkflow.ts # Data extraction pipeline
+│   │   │   ├── analysisEngine.ts # Evidence synthesis engine
+│   │   │   ├── extractionHealth.ts # Extraction quality monitoring
+│   │   │   ├── sources.ts      # Review source management
+│   │   │   ├── reviewSourceService.ts # Source sync/import
+│   │   │   ├── scientific.ts   # Scientific notation & stats
+│   │   │   ├── modelOutput.ts  # LLM output parsing & validation
+│   │   │   ├── cancellation.ts # Job cancellation
+│   │   │   └── utils.ts        # SR utilities
 │   │   ├── api/                # HTTP API for MCP integration
 │   │   │   ├── index.ts
 │   │   │   ├── endpoints.ts    # Zotero.Server.Endpoints registration
 │   │   │   └── handlers.ts    # Request handlers → tool executor
+│   │   ├── cloud/              # Cloud storage UI
+│   │   │   └── cloudTab.ts     # Cloud Drive tab (Google Drive, Dropbox, etc.)
+│   │   ├── drive/              # Cloud provider integrations
+│   │   │   ├── index.ts        # CloudProviderManager entry
+│   │   │   ├── driveUI.ts      # Cloud storage UI utilities
+│   │   │   ├── types.ts        # Cloud provider types
+│   │   │   ├── providerManager.ts # Provider lifecycle management
+│   │   │   ├── pkce.ts         # OAuth 2.0 PKCE flow
+│   │   │   ├── oauthServer.ts  # Local OAuth callback server
+│   │   │   ├── cloudContext.ts # Cloud file context in chat
+│   │   │   ├── utils.ts        # Cloud utilities
+│   │   │   └── providers/
+│   │   │       ├── base.ts     # Base provider interface
+│   │   │       ├── google.ts   # Google Drive
+│   │   │       ├── dropbox.ts  # Dropbox
+│   │   │       ├── box.ts      # Box
+│   │   │       ├── onedrive.ts # OneDrive
+│   │   │       └── nextcloud.ts # Nextcloud
 │   │   ├── ui/
 │   │   │   └── windowManager.ts # Detached floating window lifecycle
-│   │   ├── bridge/             # (empty - reserved)
-│   │   ├── search/             # (empty - reserved)
-│   │   ├── services/           # (empty - reserved)
-│   │   └── tables/             # (empty - reserved)
+│   │   └── bridge/             # (empty - reserved)
 │   └── utils/
 │       ├── prefs.ts            # getPref/setPref/clearPref wrappers
 │       ├── locale.ts           # Fluent l10n helpers
@@ -134,7 +203,7 @@ seerai/
 ├── mcp-server/                 # Standalone MCP server package
 │   ├── src/
 │   │   ├── index.ts            # MCP server entry (stdio transport)
-│   │   ├── tools.ts            # Zod tool definitions (mirrors plugin tools)
+│   │   ├── tools.ts            # Zod v3 tool definitions (mirrors plugin tools)
 │   │   └── zoteroClient.ts     # HTTP client to plugin API (localhost:23119)
 │   ├── package.json            # Separate package (@seerai/mcp-server)
 │   └── tsconfig.json
@@ -142,6 +211,10 @@ seerai/
 │   ├── global.d.ts             # Global types (addon, ztoolkit, __env__)
 │   ├── prefs.d.ts              # Auto-generated preference type map
 │   └── i10n.d.ts               # Fluent message IDs
+├── test/                       # Mocha/Chai test files
+│   ├── startup.test.ts
+│   ├── markdown.test.ts
+│   └── systematicReview*.test.ts
 ├── .github/workflows/
 │   ├── ci.yml                  # Lint → Build
 │   └── release.yml             # Build + release on tag push
@@ -191,7 +264,17 @@ const value = getPref("apiURL"); // typed via PluginPrefsMap
 setPref("enable", true);
 ```
 
-All prefs are stored under `extensions.zotero.seerai.*`. See `typings/prefs.d.ts` for the full map.
+All prefs are stored under `extensions.zotero.seerai.*`. See `addon/prefs.js` for defaults and `typings/prefs.d.ts` for the full typed map.
+
+### File-Based Persistence
+
+Some complex configuration is stored as files under `{Zotero.DataDirectory.dir}/seerai/` rather than in Zotero.Prefs:
+
+- **Model configs**: `modelConfigs.json` — managed via `src/modules/chat/modelConfig.ts`
+- **Provider configs**: `providerConfigs.json` — managed via `src/modules/chat/providerRegistry.ts`
+- **Workspace files**: `workspaces/{chatId}/` — managed via `src/modules/chat/workspace/store.ts`
+- **Systematic review state**: `systematicReview.json` — managed via `src/modules/systematicReview/store.ts`
+- **RAG vectors**: `vectors/{itemId}.json` + `_index.json` manifest
 
 ### Singleton Pattern
 
@@ -200,6 +283,7 @@ Many services use `getInstance()`:
 - `VectorStore.getInstance()` — RAG vector storage
 - `EmbeddingService.getInstance()` — embedding API client
 - `RateLimiter.getInstance()` — API rate limiting
+- `CloudProviderManager.getInstance()` — cloud provider lifecycle
 - `OcrService` — instantiated in hooks.ts as module-level constant
 
 ### CSS & Theming
@@ -213,6 +297,10 @@ Many services use `getInstance()`:
 - Use `doc.createElementNS(HTML_NS, tagName)` or `doc.createXULElement(tagName)` when needed directly
 - `HTML_NS = "http://www.w3.org/1999/xhtml"`
 
+### SVG Icons
+
+All icons use SVG via `src/modules/chat/ui/icons.ts` which exports `createSvgIcon(iconName)` and `setButtonIcon(button, iconName)`. The `IconName` union type (~95 names) covers all UI icons. No emoji or unicode icons.
+
 ## Architecture
 
 ### Plugin Lifecycle
@@ -220,10 +308,20 @@ Many services use `getInstance()`:
 1. `src/index.ts` — Creates `Addon` instance, registers it as `Zotero.SeerAI`, defines `ztoolkit` global
 2. `src/addon.ts` — `Addon` class holds state (alive, config, env, ztoolkit, theme) + hooks + api
 3. `src/hooks.ts` — Dispatcher for Zotero events:
-   - `onStartup()` → init locale, register Assistant, API endpoints, detached window
-   - `onMainWindowLoad()` → context menus (OCR, search PDF, tags, table), toolbar buttons, theme observer
-   - `onShutdown()` → cleanup
+   - `onStartup()` → init locale, register Assistant, init model configs, preload systematic review state, register API endpoints, register cloud OAuth callbacks, start background RAG indexer
+   - `onMainWindowLoad()` → context menus (OCR, search PDF, tags, table add/remove, systematic review add/remove), toolbar buttons, theme observer
+   - `onShutdown()` → cleanup (stop background indexer, etc.)
 4. **Keep hooks as dispatchers only** — real work goes in module functions
+
+### Tab System
+
+The main UI has **5 tabs** rendered by `assistant.ts:createTabBar()`:
+
+1. **Chat** — LLM conversation + workspace sidebar + context selection
+2. **Table** — structured data extraction with AI-powered columns
+3. **Review** — systematic review projects (PRISMA, extraction, synthesis)
+4. **Search** — external paper search (Semantic Scholar) + AI insights
+5. **Cloud** — cloud storage integration (Google Drive, Dropbox, Box, OneDrive, Nextcloud)
 
 ### Tool System (Agentic Chat)
 
@@ -237,28 +335,46 @@ toolDefinitions.ts  →  schemas.ts  →  toolExecutor.ts  →  individual tool 
 - **Definitions**: `toolDefinitions.ts` exports `agentTools: ToolDefinition[]` — the OpenAI function schemas sent to the LLM
 - **Validation**: `schemas.ts` has Zod schemas per tool. `safeValidateToolArgs()` returns rich errors for LLM self-correction
 - **Execution**: `toolExecutor.ts` → `parseToolCall()` → `safeValidateToolArgs()` → dispatch to tool file
-- **Consolidated tools**: `context`, `collection`, `table`, `note`, `web`, `related_papers` each have a unified `action` field instead of separate endpoints
+- **Consolidated tools**: `context`, `collection`, `table`, `note`, `web`, `related_papers`, `systematic_review` each have a unified `action` field instead of separate endpoints
 - **Core tools**: `search_library`, `search_external`, `get_item_metadata`, `read_item_content`, `import_paper`, `generate_item_tags`
+- **RAG tools**: `semantic_search`, `keyword_search`, `read_chunks`, `search_similar`
+- **TODO tools**: `todowrite`, `todoread`, `task_complete` — agent task planning and completion signaling
+- **Workspace tools**: `workspace_read_file`, `workspace_write_file`, `workspace_edit_file`, `workspace_glob`, `workspace_grep`, `workspace_bash`, `workspace_diff`, `workspace_log`
 - **Tool names**: Constants in `TOOL_NAMES` (toolTypes.ts), not string literals
+
+#### Tool Sensitivity
+
+`toolTypes.ts` defines `ToolSensitivity` enum for human-in-the-loop gating:
+
+- `READ` — safe read-only operations, auto-execute
+- `WRITE` — modifications that can be undone, warn but allow
+- `DESTRUCTIVE` — irreversible operations, require confirmation
 
 ### RAG Pipeline
 
 ```
 chunker.ts → embeddingService.ts → vectorStore.ts → retrievalEngine.ts
 (split text)  (embed chunks)       (store+search)    (orchestrate pipeline)
+              bm25.ts (lexical) ───────┘
+              reranker.ts (cross-encoder) ─┘
+              citationGraph.ts ────────────┘
+              evaluator.ts ────────────────┘
+              backgroundIndexer.ts ────────┘
 ```
 
-- Storage: `{Zotero.DataDirectory.dir}/seerai/vectors/{itemId}.json`
+- Storage: `{Zotero.DataDirectory.dir}/{addonRef}/vectors/{itemId}.json` + `_index.json` manifest
 - Triggered when context tokens exceed `ragTokenThreshold` pref (default 64K)
-- Configurable via prefs: `ragEnabled`, `ragTopK`, `ragMinScore`, `ragChunkSize`, `ragChunkOverlap`
+- Features: BM25+RRF hybrid retrieval, MMR diversity, query expansion, multi-query, HyDE, contextual retrieval, sentence-window retrieval, query decomposition, citation-graph traversal, cross-encoder reranking (Jina/Cohere), correction loops
+- Configurable via many prefs under `rag*` namespace (see `addon/prefs.js`)
 
 ### Web Search Providers
 
-`webSearchProvider.ts` abstracts three providers behind `WebSearchProvider` interface:
+`webSearchProvider.ts` abstracts four providers behind `WebSearchProvider` interface:
 
-- Firecrawl (default)
-- Tavily
-- NanoGPT (routes through Tavily/other backends)
+- **Firecrawl** (default) — `src/modules/firecrawl.ts`
+- **Tavily** — `src/modules/tavily.ts`
+- **NanoGPT** — `src/modules/nanogptWeb.ts` (routes through Tavily/other backends)
+- **You.com** — `src/modules/youdotcom.ts` (supports `"normal"` and `"research"` modes)
 
 Selection via `extensions.zotero.seerai.webSearchProvider` pref.
 
@@ -268,73 +384,118 @@ Selection via `extensions.zotero.seerai.webSearchProvider` pref.
 - Observable pattern with `subscribe(listener)` for UI reactivity
 - `getMessageStore()` handles conversation persistence per chat ID
 
+### Systematic Review Module
+
+Located in `src/modules/systematicReview/`. Provides an end-to-end systematic review workflow:
+
+- **Protocol**: Structured review protocol with research question, framework (PICO/PICOS/PECO/SPICE), inclusion/exclusion criteria, keyword aids, and extraction templates. Supports revision history and rollback.
+- **Sources**: Define review sources (databases, registers, other) from Zotero collections; automatic total/unique/deduplication tracking.
+- **Screening**: PRISMA flow diagram with title/abstract → full-text → final stages. Screen papers as included/excluded/maybe with reasons.
+- **Data Extraction**: AI-powered structured data extraction with customizable templates, outcomes, effect measures (OR/RR/HR/MD/SMD), CI ranges, and timepoints. Supports verification workflow (proposed → verified → rejected).
+- **Evidence Synthesis**: Forest-plot generation, effect-size extraction, heterogeneity assessment, random-effects meta-analysis, I² statistics. Supports common-effect and random-effects models with narrative fallback.
+- **Gap Analysis**: AI-generated research gap identification with severity scoring.
+- **Analysis Jobs**: Async extraction/analysis with progress tracking, cancellation, retry for failures.
+- **Extraction Health**: Quality monitoring — captures warnings like missing effect sizes, missing CIs, missing timepoints, negative variances, extreme effect sizes, low sample sizes, and potential duplicate extractions.
+
+State persisted to `{Zotero.DataDirectory.dir}/seerai/systematicReview.json`.
+
+### Workspace Module
+
+Located in `src/modules/chat/workspace/`. Provides per-chat file workspace accessible via the Chat tab sidebar:
+
+- **File Tree**: Hierarchical file browser with create/delete/rename — rendered in a resizable sidebar
+- **Code Editor**: Monaco-inspired editor with syntax highlighting, Edit/Preview toggle, and file viewer (SVG/HTML/markdown/images)
+- **Git Integration**: Native git CLI (`gitCli.ts`) for version control — init, stage, commit, diff, log
+- **Diff Viewer**: Side-by-side diff for workspace files
+- **DOCX Support**: DOCX to Markdown conversion via mammoth (`src/modules/docxConverter.ts`)
+- **Agent Tools**: `workspace_read_file`, `workspace_write_file`, `workspace_edit_file`, `workspace_glob`, `workspace_grep`, `workspace_bash`, `workspace_diff`, `workspace_log`
+- **Custom Path**: Configurable via `workspaceCustomPath` pref; defaults to `{DataDirectory}/seerai/workspaces/{chatId}/`
+
+### Cloud Storage Module
+
+Located in `src/modules/drive/` and `src/modules/cloud/`. Provides cloud storage integration:
+
+- **Providers**: Google Drive, Dropbox, Box, OneDrive, Nextcloud
+- **OAuth 2.0**: PKCE flow (`pkce.ts`) with local callback server (`oauthServer.ts`)
+- **Cloud Tab**: File browser/uploader in the Cloud tab (`cloudTab.ts`)
+- **Chat Context**: Cloud file attachment in chat messages (`cloudContext.ts`)
+
 ### API / MCP Integration
 
 - `src/modules/api/endpoints.ts` registers HTTP endpoints at `/seerai/*` via `Zotero.Server`
 - `src/modules/api/handlers.ts` routes requests to `toolExecutor`
 - MCP server (`mcp-server/`) is a separate stdio-based process that calls these HTTP endpoints
 - Default port: 23119
+- The MCP server exposes ~29 tools (mirroring the plugin's tool set including workspace, RAG, and systematic review tools)
 
-## Navigating assistant.ts (27K Lines)
+## Navigating assistant.ts (32K Lines)
 
 `src/modules/assistant.ts` is the monolithic hub containing all UI rendering, event handling, and orchestration. It is the single largest file and requires careful navigation.
 
 ### Section Map (Approximate Line Ranges)
 
-| Lines       | Content                                                                                                                  |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------ |
-| 1–185       | Imports                                                                                                                  |
-| 186–475     | PDF Search State Tracker                                                                                                 |
-| 476–739     | PDF discovery helpers (`findAndAttachPdfForItem`, `getSourceLinkForPaper`)                                               |
-| 740–809     | Filter presets                                                                                                           |
-| 810–927     | Search History (file-based persistence)                                                                                  |
-| 928–983     | Search Column Config persistence                                                                                         |
-| 984–1516    | **`Assistant` class start** — OCR, PDF text, RAG content extraction                                                      |
-| 1517        | **`Assistant.register()`** — Primary entry point, registers with Zotero ItemPaneManager                                  |
-| 1465–1840   | Rendering infrastructure (smartRender, selection area, context estimation)                                               |
-| 1841–2215   | Chat lifecycle (loadHistory, createNewChat, loadChat, deleteChat)                                                        |
-| 2216–2437   | `renderInterface()` — main UI container                                                                                  |
-| 2438–2553   | `createTabBar()` — Chat / Tables / Search tabs                                                                           |
-| 2554–2693   | `createHistorySidebar()`                                                                                                 |
-| 2694–3087   | `createChatTabContent()` — selection area, messages, input                                                               |
-| 3088–3162   | `createTableTabContent()` — papers table                                                                                 |
-| 3163–3504   | `createTableSideStrip()` — column controls                                                                               |
-| 3505–4293   | `createSearchTabContent()` — search UI, results, insights                                                                |
-| 4294–5212   | `createSearchFilters()` — advanced filter panel                                                                          |
-| 5213–5434   | Search filter checkboxes, `performSearch()`                                                                              |
-| 5435–5650   | Search results rendering, duplicate filtering                                                                            |
-| 5651–5896   | AI insights generation + caching                                                                                         |
-| 5897–6091   | Follow-up questions UI                                                                                                   |
-| 6092–6787   | Citations, smart copy, AI insight settings popovers                                                                      |
-| 6788–6851   | Unpaywall batch checking                                                                                                 |
-| 6852–8791   | Search result cards rendering (includes addPaperToZotero, exportResultsAsBibtex)                                         |
-| 8792–13197  | **Table Tab** — toolbar, filters, cell generation, PDF extraction                                                        |
-| 13198–13203 | (transition gap)                                                                                                         |
-| 13204–13997 | **Workspace Management** — saveWorkspaceToHistory, showWorkspacePicker, startFreshWorkspace                              |
-| 13998–14061 | Table empty states, createPapersTable                                                                                    |
-| 14062–15449 | Table data display, inline editing, cell generation                                                                      |
-| 15450–15828 | Table refresh, debounce, pagination                                                                                      |
-| 15829–16467 | Column manager modal                                                                                                     |
-| 16468–16817 | Quick add column dropdown                                                                                                |
-| 16818–17289 | Column edit popovers                                                                                                     |
-| 17290–17886 | Unified search result rows, search column rendering                                                                      |
-| 17887–18157 | Search column editor, settings popover                                                                                   |
-| 18158–19202 | Search column generation, settings                                                                                       |
-| 19203–19498 | Search column dropdown, tags bar, analysis                                                                               |
-| 19499–19655 | CSV export, tables note persistence                                                                                      |
-| 19656–19778 | Save rows as notes                                                                                                       |
-| 19779–20146 | Selection area, tag picker                                                                                               |
-| 20147–20657 | Paper picker, add by tags                                                                                                |
-| 20658–20874 | Collections, chip creation                                                                                               |
-| 20875–21143 | Model selector, Firecrawl settings, chat settings popover                                                                |
-| 21144–21466 | Toggle rows, scope/selection helpers                                                                                     |
-| 21467–23967 | `createInputArea()` — chat input with attachments, placeholders                                                          |
-| 23968–24091 | History popover                                                                                                          |
-| 24092–24239 | Inline permission request handler                                                                                        |
-| 24240–25967 | `handleSendWithStreamingAndImages()` — main chat send logic                                                              |
-| 25968–26177 | `appendMessage()` — message rendering                                                                                    |
-| 26178–26650 | Action buttons, edit, regenerate, save as note                                                                           |
-| 26651–26749 | **Table API methods** — isItemInCurrentTable, addItemsToCurrentTable, removeItemsFromCurrentTable (called from hooks.ts) |
+| Lines       | Content                                                                                                                                                                             |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1–170       | Imports + module-level state variables                                                                                                                                              |
+| 186–472     | Agent session state and tool prompt building                                                                                                                                        |
+| 473–900     | PDF Search State Tracker + related helpers                                                                                                                                          |
+| 901–1060    | PDF discovery helpers (`findAndAttachPdfForItem`, `getSourceLinkForPaper`)                                                                                                          |
+| 997–1100    | Filter presets, search history persistence, search column config persistence                                                                                                        |
+| 1101–1208   | Search history helpers                                                                                                                                                              |
+| 1209        | **`Assistant` class start** — OCR, PDF text, RAG content extraction                                                                                                                 |
+| 1916        | **`Assistant.register()`** — Primary entry point, registers with Zotero ItemPaneManager                                                                                             |
+| 1952–2520   | Rendering infrastructure (smartRender, renderToContainer, renderDetachedPlaceholder, context estimation, item helpers)                                                              |
+| 2549–2725   | Chat lifecycle (loadHistory, createNewChat, loadChat, deleteChat)                                                                                                                   |
+| 2778–3040   | `renderInterface()` — main UI container                                                                                                                                             |
+| 3048–3177   | `createTabBar()` — Chat / Table / Review / Search / Cloud tabs                                                                                                                      |
+| 3179–3969   | `createHistorySidebar()` — conversation history sidebar                                                                                                                             |
+| 3971–4547   | Folder sections, context menus, resize handles                                                                                                                                      |
+| 4727–5497   | `createChatTabContent()` — selection area, messages, prompt banner                                                                                                                  |
+| 5499–6160   | Prompt banner, prompt editor, prompt config modals                                                                                                                                  |
+| 6162–6760   | `createTableTabContent()` — papers table container                                                                                                                                  |
+| 6237–6720   | `createTableSideStrip()` — column controls                                                                                                                                          |
+| 6761–7566   | `createSearchTabContent()` — search UI, results, insights                                                                                                                           |
+| 7568–8495   | `createSearchFilters()` — advanced filter panel                                                                                                                                     |
+| 8497–8717   | Search filter checkboxes, `performSearch()`                                                                                                                                         |
+| 8719–8934   | Search results rendering, duplicate filtering, pagination                                                                                                                           |
+| 8936–9110   | AI insights generation + caching                                                                                                                                                    |
+| 9182–9257   | Follow-up questions UI                                                                                                                                                              |
+| 9378–9704   | Citations, smart copy, AI insight settings popovers                                                                                                                                 |
+| 10076–10138 | Unpaywall batch checking                                                                                                                                                            |
+| 10140–11648 | Search result cards rendering (includes addPaperToZotero, exportResultsAsBibtex)                                                                                                    |
+| 11650–12091 | `addPaperToZoteroWithPdfDiscovery()`, PDF attachment discovery, BibTeX export                                                                                                       |
+| 12093–13190 | **Table Tab** — toolbar, filters, row pickers                                                                                                                                       |
+| 13191–15165 | Table generation pipeline (generateAllEmptyColumns, regenerateSelectedColumns, extractPDFs, generateDataForTable)                                                                   |
+| 15167       | **`generateDataForTable()`** — main entry for table cell content generation                                                                                                         |
+| 15168–16736 | Cell generation, PDF extraction, tag generation, cell detail modals                                                                                                                 |
+| 16789–17516 | Workspace management (saveWorkspaceToHistory, workspace picker, startFreshWorkspace)                                                                                                |
+| 17589–17653 | Table empty states                                                                                                                                                                  |
+| 17654–19072 | Table data display, inline editing, pagination, refresh debounce                                                                                                                    |
+| 19073–19448 | Table refresh, pagination, data loading                                                                                                                                             |
+| 19450–20093 | Column manager modal                                                                                                                                                                |
+| 20095–20496 | Quick add column dropdown, immediate column add                                                                                                                                     |
+| 20498–20918 | Table column edit popovers                                                                                                                                                          |
+| 20920–21522 | Unified search result rows, search column rendering                                                                                                                                 |
+| 21524–21771 | Search column editor, immediate search column add                                                                                                                                   |
+| 21773–22858 | Search column generation, settings popovers                                                                                                                                         |
+| 22860–23062 | Search column dropdown, tags bar                                                                                                                                                    |
+| 23063–23156 | Search column content generation                                                                                                                                                    |
+| 23157–23554 | CSV export, workspace export, Markdown/CSV generation, tables note persistence                                                                                                      |
+| 23596–23675 | Save rows as notes                                                                                                                                                                  |
+| 23676–23718 | Save all rows as notes                                                                                                                                                              |
+| 23719–24548 | Selection area, tag picker, paper picker, add by tags                                                                                                                               |
+| 24549–24844 | Library selection, collections, chip creation                                                                                                                                       |
+| 24846–25136 | Model selector, chat settings popover, scope dropdown                                                                                                                               |
+| 25137–25303 | Toggle rows, scope/selection helpers                                                                                                                                                |
+| 25305–25473 | Scope dropdown                                                                                                                                                                      |
+| 25475–28435 | `createInputArea()` — chat input with attachments, placeholders                                                                                                                     |
+| 28436–28590 | Inline permission request handler                                                                                                                                                   |
+| 28592–30770 | `handleSendWithStreamingAndImages()` — main chat send logic                                                                                                                         |
+| 30771–30930 | RAG indicator, message rendering                                                                                                                                                    |
+| 30932–31220 | `appendMessage()` — message rendering with tool results                                                                                                                             |
+| 31222–31719 | Action buttons, edit, regenerate, save as note, rerender                                                                                                                            |
+| 31720–31783 | **Table API methods** — isItemInCurrentTable, addItemsToCurrentTable, removeItemsFromCurrentTable                                                                                   |
+| 31834–31933 | **Systematic Review API methods** — syncSystematicReviewCache, setSystematicReviewStoreCheck, isItemInSystematicReview, addItemsToSystematicReview, removeItemsFromSystematicReview |
 
 ### Safe Editing Tips
 
@@ -351,15 +512,20 @@ These methods are called from outside `assistant.ts` and should be treated as st
 
 | Method                               | Line  | Called From      | Purpose                                                     |
 | ------------------------------------ | ----- | ---------------- | ----------------------------------------------------------- |
-| `Assistant.register()`               | 1517  | `hooks.ts`       | Registers the Assistant panel with Zotero's ItemPaneManager |
-| `Assistant.renderToContainer()`      | 1653  | `hooks.ts`       | Renders the assistant UI in detached window                 |
-| `isItemInCurrentTable()`             | 26651 | `hooks.ts`       | Context menu check: is item in current table?               |
-| `addItemsToCurrentTable()`           | 26658 | `hooks.ts`       | Context menu action: add selected items to table            |
-| `removeItemsFromCurrentTable()`      | 26705 | `hooks.ts`       | Context menu action: remove items from table                |
-| `resolveContextItemToIds()`          | 2034  | `chat/` modules  | Resolves context selections to item IDs                     |
-| `refreshAllCitations()`              | 6171  | `chat/` modules  | Updates citation formatting                                 |
-| `addPaperToZoteroWithPdfDiscovery()` | 8349  | Search results   | Adds external papers to library with PDF discovery          |
-| `generateDataForTable()`             | 11721 | Table generation | Main entry for table cell content generation                |
+| `Assistant.register()`               | 1916  | `hooks.ts`       | Registers the Assistant panel with Zotero's ItemPaneManager |
+| `Assistant.renderToContainer()`      | 2052  | `hooks.ts`       | Renders the assistant UI in detached window                 |
+| `resolveContextItemToIds()`          | 2474  | `chat/` modules  | Resolves context selections to item IDs                     |
+| `refreshAllCitations()`              | 9457  | `chat/` modules  | Updates citation formatting                                 |
+| `addPaperToZoteroWithPdfDiscovery()` | 11650 | Search results   | Adds external papers to library with PDF discovery          |
+| `generateDataForTable()`             | 15167 | Table generation | Main entry for table cell content generation                |
+| `isItemInCurrentTable()`             | 31720 | `hooks.ts`       | Context menu check: is item in current table?               |
+| `addItemsToCurrentTable()`           | 31727 | `hooks.ts`       | Context menu action: add selected items to table            |
+| `removeItemsFromCurrentTable()`      | 31785 | `hooks.ts`       | Context menu action: remove items from table                |
+| `syncSystematicReviewCache()`        | 31834 | `hooks.ts`       | Sync systematic review paper ID cache                       |
+| `setSystematicReviewStoreCheck()`    | 31838 | `hooks.ts`       | Set fallback SR check function                              |
+| `isItemInSystematicReview()`         | 31842 | `hooks.ts`       | Context menu check: is item in any SR project?              |
+| `addItemsToSystematicReview()`       | 31849 | `hooks.ts`       | Context menu action: add items to SR project                |
+| `removeItemsFromSystematicReview()`  | 31896 | `hooks.ts`       | Context menu action: remove items from SR project           |
 
 ## MCP Server
 
@@ -368,16 +534,19 @@ The MCP server is a **separate package** in `mcp-server/` that allows external L
 ### Key Files
 
 - `mcp-server/src/index.ts` — Server setup, stdio transport, tool call routing
-- `mcp-server/src/tools.ts` — Zod v3 schemas mirroring plugin's tool definitions
+- `mcp-server/src/tools.ts` — Zod v3 schemas mirroring plugin's tool definitions (~29 tools)
 - `mcp-server/src/zoteroClient.ts` — HTTP client to `http://127.0.0.1:23119/seerai/*`
 
 ### Build
 
 ```bash
-cd mcp-server && npm run bundle   # → dist/seerai-mcp.cjs (single CJS file)
+cd mcp-server && npm run bundle   # → dist/seerai-mcp.cjs (single CJS file, target: node18)
+cd mcp-server && npm run build    # → TypeScript compile (tsc)
+cd mcp-server && npm run start    # → Run compiled MCP server
+cd mcp-server && npm run dev      # → Run MCP server with tsx (dev mode)
 ```
 
-The main `npm run build` also runs the MCP bundle and copies the `.cjs` to the root.
+The main `npm run build` also runs the MCP bundle and copies the `.cjs` to the root and `.scaffold/build/`.
 
 ### Connection Flow
 
@@ -390,14 +559,17 @@ External LLM → MCP Server (stdio) → HTTP → Zotero Plugin API (/seerai/*) �
 - MCP server uses **Zod v3** (plugin uses Zod v4) — different API surface
 - MCP server validates with `toolDef.inputSchema.parse(args)` then calls HTTP
 - Plugin validates with `safeValidateToolArgs()` from `schemas.ts` then executes directly
+- **`workspace_bash` behavior differs**: In the plugin, it prompts the user to run the command manually. In the MCP server, it executes real shell commands via `node:child_process` in the workspace directory.
 
 ## Critical Warnings
 
 1. **Runtime is NOT Node.js** — The plugin runs in Zotero's SpiderMonkey engine (Firefox 128). No Node.js APIs (`fs`, `path`, `http`, etc.). Use Zotero APIs and `Zotero.File`/`Zotero.HTTP` instead.
-2. **assistant.ts is 27K lines** — Navigate with search, not scrolling. Prefer adding new modules over extending it.
-3. **Preferences are JSON strings** — Complex data (model configs, etc.) is `JSON.stringify`'d into `Zotero.Prefs`. Always parse/stringify when reading/writing.
+2. **assistant.ts is 32K lines** — Navigate with search, not scrolling. Prefer adding new modules over extending it.
+3. **Preferences are JSON strings** — Complex data stored in `Zotero.Prefs` is `JSON.stringify`'d. Always parse/stringify when reading/writing. However, model and provider configs are now **file-based** (not prefs-based) — see "File-Based Persistence" above.
 4. **Build target is firefox128** — ES features are limited to what Firefox 128 supports. No top-level await, no ES2022+ features beyond what SpiderMonkey 128 implements.
 5. **The `.env` file is gitignored** — Contains API keys and secrets. Never commit it. The `.env.example` is tracked.
-6. **`doc/`, `seerai.xpi`, `seerai-mcp.cjs`, `.scaffold/`, `.agent/` are gitignored** — Build artifacts and agent config are not tracked.
+6. **Build artifacts are gitignored** — `doc/`, `seerai.xpi`, `seerai-mcp.cjs`, `.scaffold/`, `.agent/` are not tracked. However, `seerai.xpi` and `seerai-mcp.cjs` may exist in the working tree.
 7. **Tool schemas must stay in sync** — Plugin tool definitions (`toolDefinitions.ts`, `schemas.ts`) and MCP server tool definitions (`mcp-server/src/tools.ts`) must match. If you change one, update the other.
 8. **`__env__` is injected at build time** — It's defined in `zotero-plugin.config.ts` esbuild options, not a runtime variable.
+9. **`isomorphic-git` alias is dead code** — `zotero-plugin.config.ts` aliases `isomorphic-git` but the workspace uses native git CLI via `gitCli.ts`. The alias should be removed when cleaning up.
+10. **Legacy `modelConfigs` pref is cleared on startup** — `hooks.ts` clears the old pref and loads from file-based storage instead. Do not use `getPref("modelConfigs")` for model config data.

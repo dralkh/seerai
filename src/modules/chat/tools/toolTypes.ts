@@ -172,10 +172,10 @@ export const defaultAgentConfig: AgentConfig = {
   maxSearchResults: 20,
   includeContent: true,
   maxContentLength: 50000,
-  maxAgentIterations: 1000,
+  maxAgentIterations: 50,
   maxToolRetries: 2,
   autoOcr: false,
-  requireApprovalForDestructive: false,
+  requireApprovalForDestructive: true,
 };
 
 // ==================== Tool-Specific Parameter Types ====================
@@ -1030,6 +1030,24 @@ export const TOOL_NAMES = {
   WORKSPACE_BASH: "workspace_bash",
   WORKSPACE_DIFF: "workspace_diff",
   WORKSPACE_LOG: "workspace_log",
+  READ_FILE: "read_file",
+  WRITE_FILE: "write_file",
+  PATCH: "patch",
+  SEARCH_FILES: "search_files",
+
+  SKILLS_LIST: "skills_list",
+  SKILL_VIEW: "skill_view",
+  SKILL_MANAGE: "skill_manage",
+  SKILL_REFERENCE: "skill_reference",
+  SKILL_INFO: "skill_info",
+  TODO: "todo",
+  CLARIFY: "clarify",
+  DELEGATE_TASK: "delegate_task",
+  MIXTURE_OF_AGENTS: "mixture_of_agents",
+  TERMINAL: "terminal",
+  PROCESS: "process",
+  EXECUTE_CODE: "execute_code",
+  CHECK_ENVIRONMENT: "check_environment",
 
   // TODO & Completion
   TODO_WRITE: "todowrite",

@@ -610,6 +610,113 @@ const workspaceLogParams = z.object({
     .describe("Max history entries"),
 });
 
+const workspacePatchParams = z.object({
+  path: z.string().describe("File path relative to workspace root"),
+  oldString: z.string().describe("Target block to replace"),
+  newString: z.string().describe("Replacement block"),
+  message: z.string().optional(),
+  dryRun: z.boolean().default(false).optional(),
+});
+
+const workspaceSearchFilesParams = z.object({
+  query: z.string().describe("Filename fragment or content regex"),
+  mode: z.enum(["content", "name", "both"]).default("both").optional(),
+  include: z.string().optional(),
+  path: z.string().optional(),
+  limit: z.number().int().min(1).max(500).default(100).optional(),
+});
+
+const skillsListParams = z.object({
+  query: z.string().optional().describe("Optional skill search query"),
+});
+
+const skillViewParams = z.object({
+  name: z.string().describe("Skill name or ID"),
+});
+
+const skillManageParams = z.object({
+  action: z.enum([
+    "refresh",
+    "enable",
+    "disable",
+    "trust_source",
+    "untrust_source",
+    "add_source",
+    "remove_source",
+  ]),
+  skill: z.string().optional(),
+  source_path: z.string().optional(),
+});
+
+const skillReferenceParams = z.object({
+  name: z.string().describe("Skill name or ID"),
+  path: z
+    .string()
+    .optional()
+    .describe(
+      "Reference file path relative to skill directory (e.g., 'references/api.md')",
+    ),
+});
+
+const skillInfoParams = z.object({
+  name: z.string().describe("Skill name or ID"),
+});
+
+const todoAdapterParams = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("read") }),
+  z.object({
+    action: z.literal("write"),
+    todos: z.array(
+      z.object({
+        id: z.string(),
+        content: z.string(),
+        status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
+      }),
+    ),
+  }),
+]);
+
+const delegateTaskParams = z.object({
+  task: z.string(),
+  context: z.string().optional(),
+});
+
+const mixtureOfAgentsParams = z.object({
+  task: z.string(),
+  agents: z
+    .array(
+      z.object({
+        name: z.string().optional(),
+        instruction: z.string(),
+      }),
+    )
+    .max(4)
+    .optional(),
+});
+
+const terminalParams = z.object({
+  command: z.string().describe("Command to execute"),
+  workdir: z.string().optional(),
+  timeoutMs: z.number().int().min(1000).max(300000).optional(),
+  maxOutputBytes: z.number().int().min(1024).max(262144).optional(),
+  background: z.boolean().default(false).optional(),
+});
+
+const processParams = z.object({
+  action: z.enum(["list", "poll", "log", "wait", "kill", "write"]),
+  processId: z.string().optional(),
+  input: z.string().optional(),
+  timeoutMs: z.number().int().min(1000).max(300000).optional(),
+});
+
+const executeCodeParams = z.object({
+  language: z.enum(["python", "javascript", "bash"]),
+  code: z.string(),
+  workdir: z.string().optional(),
+  timeoutMs: z.number().int().min(1000).max(300000).optional(),
+  maxOutputBytes: z.number().int().min(1024).max(262144).optional(),
+});
+
 // ==================== TODO Tool Parameter Schemas ====================
 
 const todoWriteParams = z.object({
@@ -659,6 +766,54 @@ export const TOOL_DEFINITIONS = [
       "Signal that the current task is fully complete. Call this ONLY when ALL requested work has been DONE. " +
       "If any work remains, do NOT call this tool. For simple tasks, just provide a text-only answer instead.",
     inputSchema: taskCompleteParams,
+  },
+  {
+    name: "skills_list",
+    description: "List and search SeerAI Agent Skills.",
+    inputSchema: skillsListParams,
+  },
+  {
+    name: "skill_view",
+    description: "View and activate the full instructions for one Agent Skill.",
+    inputSchema: skillViewParams,
+  },
+  {
+    name: "skill_manage",
+    description:
+      "Manage local Agent Skills registry state and trusted sources.",
+    inputSchema: skillManageParams,
+  },
+  {
+    name: "skill_reference",
+    description:
+      "Read a reference or script file from a bundled skill directory. Use this to access API documentation, configuration templates, or utility scripts included with a skill.",
+    inputSchema: skillReferenceParams,
+  },
+  {
+    name: "skill_info",
+    description:
+      "Get filesystem information about a bundled skill: absolute skill directory path, available scripts, references, and assets. Use before executing skill scripts so you know the correct paths.",
+    inputSchema: skillInfoParams,
+  },
+  {
+    name: "todo",
+    description: "PAgent-compatible TODO wrapper over todoread/todowrite.",
+    inputSchema: todoAdapterParams,
+  },
+  {
+    name: "clarify",
+    description: "PAgent-compatible clarification tool.",
+    inputSchema: workspaceQuestionParams,
+  },
+  {
+    name: "delegate_task",
+    description: "Run a bounded non-tool sub-agent task through the plugin.",
+    inputSchema: delegateTaskParams,
+  },
+  {
+    name: "mixture_of_agents",
+    description: "Run bounded non-tool sub-agent perspectives and synthesize.",
+    inputSchema: mixtureOfAgentsParams,
   },
 
   // ==================== Consolidated Tools ====================
@@ -947,7 +1102,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "workspace_bash",
     description:
-      "Request execution of a bash command. In the Zotero context, bash commands cannot be executed directly - this tool records the command and prompts the user to run it manually. Use sparingly and prefer workspace file tools for file operations.",
+      "Execute a bash command within the workspace. The command runs in a shell with full filesystem access confined to the workspace directory. Use for package installation (pip install, npm install), running scripts, git operations, and file processing. Prefer workspace file tools (read_file, write_file, edit_file, glob, grep) for simple file operations.",
     inputSchema: workspaceBashParams,
   },
   {
@@ -960,6 +1115,48 @@ export const TOOL_DEFINITIONS = [
     name: "workspace_log",
     description: "Show version history for a workspace file.",
     inputSchema: workspaceLogParams,
+  },
+  {
+    name: "read_file",
+    description: "Read a workspace text file with pagination.",
+    inputSchema: workspaceReadFileParams,
+  },
+  {
+    name: "write_file",
+    description: "Write or overwrite a workspace file completely.",
+    inputSchema: workspaceWriteFileParams,
+  },
+  {
+    name: "patch",
+    description: "Apply a targeted fuzzy patch to a workspace file.",
+    inputSchema: workspacePatchParams,
+  },
+  {
+    name: "search_files",
+    description: "Search workspace filenames and file contents.",
+    inputSchema: workspaceSearchFilesParams,
+  },
+  {
+    name: "terminal",
+    description:
+      "Execute a shell command in the workspace through guarded MCP execution.",
+    inputSchema: terminalParams,
+  },
+  {
+    name: "process",
+    description: "Manage background terminal processes.",
+    inputSchema: processParams,
+  },
+  {
+    name: "execute_code",
+    description: "Run a temporary Python, JavaScript, or Bash snippet.",
+    inputSchema: executeCodeParams,
+  },
+  {
+    name: "check_environment",
+    description:
+      "Check available runtimes and tools on the host computer. Reports Python, Node, Git, pip/npm versions, and shell availability. Use before installing packages or running skill scripts.",
+    inputSchema: z.object({}),
   },
   {
     name: "search_similar",

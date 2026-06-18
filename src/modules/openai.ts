@@ -65,6 +65,7 @@ export interface ToolResultMessage {
 
 export interface StreamCallbacks {
   onToken?: (token: string) => void;
+  onReasoningContent?: (content: string) => void;
   onComplete?: (fullContent: string) => void;
   onError?: (error: Error) => void;
   /** Called when tool calls are detected in the response */
@@ -92,8 +93,8 @@ export interface QueryInput {
 export type ProviderEvent =
   | { type: "init"; continuation: string }
   | { type: "token"; text: string }
-  | { type: "tool_calls"; toolCalls: ToolCall[] }
-  | { type: "done"; content: string }
+  | { type: "tool_calls"; toolCalls: ToolCall[]; reasoningContent?: string }
+  | { type: "done"; content: string; reasoningContent?: string }
   | { type: "error"; message: string; retryable: boolean };
 
 export interface AgentQuery {
@@ -106,6 +107,41 @@ export interface AgentQuery {
 export interface AgentProvider {
   query(input: QueryInput): AgentQuery;
   isSessionInvalid(err: unknown): boolean;
+}
+
+export interface AgentModelCapabilities {
+  supportsTools: boolean;
+  supportsStreamingTools: boolean;
+  knownIncompatibleReason?: string;
+}
+
+export function getAgentModelCapabilities(
+  apiURL: string,
+  model: string,
+): AgentModelCapabilities {
+  const api = (apiURL || "").toLowerCase();
+  const m = (model || "").toLowerCase();
+  const isDeepSeekProvider = api.includes("deepseek") || m.includes("deepseek");
+  const isDeepSeekReasoner =
+    m.includes("deepseek-reasoner") ||
+    m.includes("deepseek-r1") ||
+    m.includes("/r1") ||
+    m.endsWith(":r1") ||
+    m.includes("reasoner");
+
+  if (isDeepSeekProvider && isDeepSeekReasoner) {
+    return {
+      supportsTools: false,
+      supportsStreamingTools: false,
+      knownIncompatibleReason:
+        "The selected DeepSeek reasoning model does not support function/tool calling. Agent mode requires a tool-capable chat model. Switch this chat to deepseek-chat, a non-thinking DeepSeek model, or another tool-capable model, then retry.",
+    };
+  }
+
+  return {
+    supportsTools: true,
+    supportsStreamingTools: true,
+  };
 }
 
 export interface ChatCompletionOptions {
@@ -429,6 +465,7 @@ export class OpenAIService {
     }
 
     let fullContent = "";
+    let reasoningContent = "";
 
     // Track tool calls being assembled from streaming chunks
     const toolCallsInProgress: Map<
@@ -453,6 +490,10 @@ export class OpenAIService {
       // NOTE: reasoning_effort is incompatible with function tools on some models
       // (e.g. gpt-5.4-nano). Strip it when tools are present.
       if (tools && tools.length > 0) {
+        const capabilities = getAgentModelCapabilities(apiURL, model);
+        if (!capabilities.supportsTools) {
+          throw new Error(capabilities.knownIncompatibleReason);
+        }
         requestBody.tools = tools;
         const activeModel = getActiveModelConfig();
         requestBody.tool_choice = activeModel?.toolChoice || "auto";
@@ -515,6 +556,11 @@ export class OpenAIService {
               if (delta?.content) {
                 fullContent += delta.content;
                 callbacks.onToken?.(delta.content);
+              }
+
+              if (delta?.reasoning_content) {
+                reasoningContent += delta.reasoning_content;
+                callbacks.onReasoningContent?.(delta.reasoning_content);
               }
 
               // Handle tool calls (streamed incrementally)
@@ -1702,6 +1748,7 @@ export class OpenAIProvider implements AgentProvider {
     const runStream = async () => {
       try {
         const allMessages = [...input.messages];
+        let reasoningContent = "";
 
         for (const pushed of pendingPush) {
           allMessages.push({
@@ -1714,8 +1761,21 @@ export class OpenAIProvider implements AgentProvider {
           allMessages,
           {
             onToken: (token) => emit({ type: "token", text: token }),
-            onToolCalls: (toolCalls) => emit({ type: "tool_calls", toolCalls }),
-            onComplete: (content) => emit({ type: "done", content }),
+            onReasoningContent: (content) => {
+              reasoningContent += content;
+            },
+            onToolCalls: (toolCalls) =>
+              emit({
+                type: "tool_calls",
+                toolCalls,
+                reasoningContent: reasoningContent || undefined,
+              }),
+            onComplete: (content) =>
+              emit({
+                type: "done",
+                content,
+                reasoningContent: reasoningContent || undefined,
+              }),
             onError: (error) =>
               emit({
                 type: "error",

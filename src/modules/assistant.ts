@@ -145,6 +145,7 @@ import {
 } from "./chat/workspace";
 import { getWorkspaceStore } from "./chat/workspace/store";
 import { WORKSPACE_SYSTEM_PROMPT } from "./chat/workspace/tools";
+import { buildAgentSkillsCatalog } from "./chat/skills/registry";
 import { createCloudTabContent } from "./cloud/cloudTab";
 import { createSvgIcon, setButtonIcon, type IconName } from "./chat/ui/icons";
 import { createSystematicReviewTabContent } from "./systematicReview/systematicReviewTab";
@@ -285,7 +286,7 @@ function buildToolPromptSections(): string {
       );
     if (has("search_external"))
       lines.push(
-        "2. Use 'search_external' to find new papers on Semantic Scholar.",
+        "2. Use 'search_external' to find new papers on Semantic Scholar. If it fails or returns too little, use the 'web' tool for broader scholarly/web discovery.",
       );
     if (has("import_paper"))
       lines.push(
@@ -304,6 +305,12 @@ function buildToolPromptSections(): string {
         "6. Use 'generate_item_tags' to auto-tag items based on their content.",
       );
     sections.push(lines.join("\n"));
+  }
+
+  if (has("web")) {
+    sections.push(`Web Research (use the 'web' tool with the 'action' parameter):
+- web({ action: "search", query: "..." }) — search the web when library or Semantic Scholar results are insufficient
+- web({ action: "read", url: "..." }) — read a specific webpage from search results`);
   }
 
   return sections.length > 0 ? "\n" + sections.join("\n\n") : "";
@@ -25919,8 +25926,9 @@ ${tableRows}  </tbody>
     const sendBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
       properties: {
-        disabled: this.isStreaming,
-        title: "Send message",
+        id: "seerai-send-btn",
+        disabled: false,
+        title: this.isStreaming ? "Stop generation" : "Send message",
       },
       styles: {
         width: "34px",
@@ -25941,23 +25949,34 @@ ${tableRows}  </tbody>
         {
           type: "click",
           listener: () => {
-            if (!this.isStreaming) {
-              this.handleSendWithStreamingAndImages(
-                input as unknown as HTMLInputElement,
-                messagesArea,
-                stateManager,
-                pastedImages,
-                () => {
-                  pastedImages.length = 0;
-                  updateImagePreview();
-                },
-              );
+            if (this.isStreaming) {
+              openAIService.abortRequest();
+              this.isStreaming = false;
+              activeAgentSession = null;
+              input.disabled = false;
+              setToolbarIcon(sendBtn as HTMLElement, "send", "Send message");
+              (sendBtn as HTMLElement).title = "Send message";
+              return;
             }
+            this.handleSendWithStreamingAndImages(
+              input as unknown as HTMLInputElement,
+              messagesArea,
+              stateManager,
+              pastedImages,
+              () => {
+                pastedImages.length = 0;
+                updateImagePreview();
+              },
+            );
           },
         },
       ],
     });
-    setToolbarIcon(sendBtn as HTMLElement, "send", "Send message");
+    setToolbarIcon(
+      sendBtn as HTMLElement,
+      this.isStreaming ? "stop" : "send",
+      this.isStreaming ? "Stop generation" : "Send message",
+    );
 
     // Initial UI sync for restored drafts
     if (currentPastedImages.length > 0) {
@@ -25998,6 +26017,13 @@ ${tableRows}  </tbody>
             this.isStreaming = false;
             activeAgentSession = null;
             input.disabled = false;
+            const currentSendBtn = doc.getElementById(
+              "seerai-send-btn",
+            ) as HTMLElement | null;
+            if (currentSendBtn) {
+              currentSendBtn.title = "Send message";
+              setButtonIcon(currentSendBtn, "send", "Send message", 16);
+            }
             stopBtn.style.display = "none";
             input.focus();
 
@@ -28659,6 +28685,15 @@ Rules:
     input.disabled = true;
     this.isStreaming = true;
 
+    const activeSendBtn = messagesArea.ownerDocument?.getElementById(
+      "seerai-send-btn",
+    ) as HTMLElement | null;
+    if (activeSendBtn) {
+      activeSendBtn.removeAttribute("disabled");
+      activeSendBtn.title = "Stop generation";
+      setButtonIcon(activeSendBtn, "stop", "Stop generation", 16);
+    }
+
     // Show stop button
     const stopBtn = messagesArea.ownerDocument?.getElementById(
       "stop-btn",
@@ -29036,6 +29071,10 @@ Rules:
         activeAgentSession = null;
         this.isStreaming = false;
         input.disabled = false;
+        if (activeSendBtn) {
+          activeSendBtn.title = "Send message";
+          setButtonIcon(activeSendBtn, "send", "Send message", 16);
+        }
         if (stopBtn) stopBtn.style.display = "none";
 
         // Clear pasted images after successful send
@@ -29059,6 +29098,10 @@ Rules:
         activeAgentSession = null;
         this.isStreaming = false;
         input.disabled = false;
+        if (activeSendBtn) {
+          activeSendBtn.title = "Send message";
+          setButtonIcon(activeSendBtn, "send", "Send message", 16);
+        }
         if (stopBtn) stopBtn.style.display = "none";
       },
     };
@@ -29869,6 +29912,7 @@ Rules:
       }
 
       const workspaceTree = await buildWorkspaceTreePrompt();
+      const skillsCatalog = isAgentic ? await buildAgentSkillsCatalog() : "";
 
       let agentInstructions = "";
       if (willUseTools) {
@@ -29888,6 +29932,7 @@ ${context}${webContext}
 
 ${agentInstructions}
 ${isAgentic ? WORKSPACE_SYSTEM_PROMPT : ""}
+${skillsCatalog ? `\n## Agent Skills\n${skillsCatalog}\n` : ""}
 ${isAgentic ? workspaceTree : ""}`;
 
       // Merge pasted images with Zotero item images
@@ -30764,6 +30809,10 @@ Note: Context was automatically reduced using stricter semantic search due to si
       input.focus();
       this.isStreaming = false;
       activeAgentSession = null; // Ensure session is cleared
+      if (activeSendBtn) {
+        activeSendBtn.title = "Send message";
+        setButtonIcon(activeSendBtn, "send", "Send message", 16);
+      }
       if (stopBtn) stopBtn.style.display = "none";
     }
   }

@@ -291,9 +291,29 @@ export async function executeSearchExternal(
     };
   } catch (error) {
     Zotero.debug(`[seerai] Tool: search_external error: ${error}`);
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      message.includes("403") ||
+      message.toLowerCase().includes("forbidden")
+    ) {
+      return {
+        success: true,
+        data: {
+          total: 0,
+          papers: [],
+          degraded: true,
+          provider: "Semantic Scholar",
+          error: message,
+          fallback:
+            "Semantic Scholar is unavailable. Use the web tool with action='search' for broader scholarly/web discovery.",
+        },
+        summary:
+          "Semantic Scholar search is unavailable (403 Forbidden); no papers returned. Use web search fallback.",
+      };
+    }
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: message,
     };
   }
 }

@@ -164,6 +164,22 @@ export interface WorkspaceEditFileParams {
   message?: string;
 }
 
+export interface WorkspacePatchParams {
+  path: string;
+  oldString: string;
+  newString: string;
+  message?: string;
+  dryRun?: boolean;
+}
+
+export interface WorkspaceSearchFilesParams {
+  query: string;
+  mode?: "content" | "name" | "both";
+  include?: string;
+  path?: string;
+  limit?: number;
+}
+
 /** Result from workspace_edit_file */
 export interface WorkspaceEditFileResult {
   path: string;

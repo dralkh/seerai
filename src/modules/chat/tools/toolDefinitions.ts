@@ -77,6 +77,351 @@ export const agentTools: ToolDefinition[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.SKILLS_LIST,
+      description:
+        "List and search SeerAI Agent Skills. Use this to discover available research workflows before activating one.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "Optional skill search query",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.SKILL_VIEW,
+      description:
+        "View and activate the full instructions for one Agent Skill by name or ID.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Skill name or ID",
+          },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.SKILL_MANAGE,
+      description:
+        "Manage Agent Skills: refresh, enable/disable skills, and add or trust local skill sources.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: [
+              "refresh",
+              "enable",
+              "disable",
+              "trust_source",
+              "untrust_source",
+              "add_source",
+              "remove_source",
+            ],
+            description: "Management action",
+          },
+          skill: {
+            type: "string",
+            description: "Skill name or ID for enable/disable",
+          },
+          source_path: {
+            type: "string",
+            description: "Local skill source path",
+          },
+        },
+        required: ["action"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.SKILL_INFO,
+      description:
+        "Get filesystem information about a bundled skill. Returns the absolute filesystem path to the skill directory and lists available scripts, references, and assets. Use this before executing skill scripts so the agent knows the correct paths.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Skill name or ID",
+          },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.SKILL_REFERENCE,
+      description:
+        "Read a reference, script, or asset file from a bundled skill directory. Use to access API documentation, configuration templates, sample scripts, or reference materials included with a skill. Call after skill_view to inspect skill-specific resources.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "Skill name or ID",
+          },
+          path: {
+            type: "string",
+            description:
+              "File path relative to skill directory (e.g., 'references/api.md', 'scripts/exa_search.py'). Omit to read the main SKILL.md.",
+          },
+        },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.TERMINAL,
+      description:
+        "Execute a shell command on the host machine through the SeerAI MCP execution server. The command runs in the workspace directory (or a specified subdirectory). Use for: installing packages (pip install, npm install), running scripts (python, bash), file operations (git, curl, unzip), system utilities, and any task that requires real terminal access. The MCP execution server must be running with SEERAI_ENABLE_TERMINAL_TOOLS=1.",
+      parameters: {
+        type: "object",
+        properties: {
+          command: {
+            type: "string",
+            description: "Shell command to execute",
+          },
+          workdir: {
+            type: "string",
+            description:
+              "Working directory relative to workspace root (default: workspace root)",
+          },
+          timeoutMs: {
+            type: "integer",
+            description:
+              "Timeout in milliseconds (default: 30000, max: 300000)",
+          },
+          maxOutputBytes: {
+            type: "integer",
+            description: "Max output bytes (default: 65536, max: 262144)",
+          },
+          background: {
+            type: "boolean",
+            description:
+              "Run in background and return immediately with a processId. Use the 'process' tool to manage background processes.",
+          },
+        },
+        required: ["command"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.PROCESS,
+      description:
+        "Manage background terminal processes started via the terminal tool with background=true. List all processes, poll for output, wait for completion, kill processes, or send input to stdin.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: ["list", "poll", "log", "wait", "kill", "write"],
+            description: "Process management action",
+          },
+          processId: {
+            type: "string",
+            description:
+              "Process ID from terminal background call (required for poll/log/wait/kill/write)",
+          },
+          input: {
+            type: "string",
+            description: "Text to write to process stdin",
+          },
+          timeoutMs: {
+            type: "integer",
+            description: "Timeout in milliseconds for wait (default: 30000)",
+          },
+        },
+        required: ["action"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.EXECUTE_CODE,
+      description:
+        "Run a temporary Python, JavaScript, or Bash code snippet. The code is written to a temp file in the workspace and executed. Use for quick calculations, data processing, testing logic, or running code from skill instructions without creating permanent files.",
+      parameters: {
+        type: "object",
+        properties: {
+          language: {
+            type: "string",
+            enum: ["python", "javascript", "bash"],
+            description: "Programming language",
+          },
+          code: {
+            type: "string",
+            description: "Source code to execute",
+          },
+          workdir: {
+            type: "string",
+            description:
+              "Working directory relative to workspace root (default: workspace root)",
+          },
+          timeoutMs: {
+            type: "integer",
+            description:
+              "Timeout in milliseconds (default: 30000, max: 300000)",
+          },
+          maxOutputBytes: {
+            type: "integer",
+            description: "Max output bytes (default: 65536, max: 262144)",
+          },
+        },
+        required: ["language", "code"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.CHECK_ENVIRONMENT,
+      description:
+        "Check which runtimes and tools are available on this computer. Reports Python, Node, Git, pip/npm versions, and whether the shell is accessible. Use this at the start of a session to determine what commands the agent can run, or before installing packages required by a skill.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.TODO,
+      description:
+        "PAgent-compatible TODO wrapper. Use action='read' to inspect tasks or action='write' to replace the task list.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: ["read", "write"],
+            description: "Read or write TODO state",
+          },
+          todos: {
+            type: "array",
+            description: "Full TODO list when action is write",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                content: { type: "string" },
+                status: {
+                  type: "string",
+                  enum: ["pending", "in_progress", "completed", "cancelled"],
+                },
+              },
+              required: ["id", "content", "status"],
+            },
+          },
+        },
+        required: ["action"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.CLARIFY,
+      description:
+        "PAgent-compatible clarification tool. Ask the user one or more interactive questions.",
+      parameters: {
+        type: "object",
+        properties: {
+          questions: {
+            type: "array",
+            description: "Questions to ask the user",
+            items: {
+              type: "object",
+              properties: {
+                question: { type: "string" },
+                header: { type: "string" },
+                options: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      label: { type: "string" },
+                      description: { type: "string" },
+                    },
+                    required: ["label", "description"],
+                  },
+                },
+                multiple: { type: "boolean" },
+              },
+              required: ["question", "header", "options"],
+            },
+          },
+        },
+        required: ["questions"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.DELEGATE_TASK,
+      description:
+        "Run a bounded non-tool sub-agent call for a focused research or writing subtask. The sub-agent cannot access tools or files.",
+      parameters: {
+        type: "object",
+        properties: {
+          task: { type: "string", description: "Subtask prompt" },
+          context: { type: "string", description: "Optional context" },
+        },
+        required: ["task"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: TOOL_NAMES.MIXTURE_OF_AGENTS,
+      description:
+        "Run up to four bounded non-tool sub-agent perspectives and synthesize their outputs.",
+      parameters: {
+        type: "object",
+        properties: {
+          task: { type: "string", description: "Task to analyze" },
+          agents: {
+            type: "array",
+            description: "Optional agent instructions, max 4",
+            items: {
+              type: "object",
+              properties: {
+                name: { type: "string" },
+                instruction: { type: "string" },
+              },
+              required: ["instruction"],
+            },
+          },
+        },
+        required: ["task"],
+      },
+    },
+  },
 
   ...workspaceToolDefinitions,
 
@@ -1060,6 +1405,7 @@ export function getToolByName(name: string): ToolDefinition | undefined {
  */
 export function getFilteredAgentTools(): ToolDefinition[] {
   let permissions: Record<string, string> = {};
+  let enableExperimentalAgentTools = false;
   try {
     const prefStr = Zotero.Prefs.get(
       "extensions.seerai.tool_permissions",
@@ -1067,12 +1413,25 @@ export function getFilteredAgentTools(): ToolDefinition[] {
     if (prefStr) {
       permissions = JSON.parse(prefStr);
     }
+    enableExperimentalAgentTools =
+      Zotero.Prefs.get("extensions.seerai.enableExperimentalAgentTools") ===
+      true;
   } catch {
     // If prefs can't be read, allow all
   }
 
+  const experimentalTools = new Set<string>([
+    TOOL_NAMES.TODO,
+    TOOL_NAMES.CLARIFY,
+    TOOL_NAMES.DELEGATE_TASK,
+    TOOL_NAMES.MIXTURE_OF_AGENTS,
+  ]);
+
   return agentTools.filter((tool) => {
     const name = tool.function.name;
+    if (!enableExperimentalAgentTools && experimentalTools.has(name)) {
+      return false;
+    }
     const perm = permissions[name] || permissions["*"] || "allow";
     return perm !== "deny";
   });

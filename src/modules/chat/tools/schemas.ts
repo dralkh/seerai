@@ -642,6 +642,130 @@ export const WorkspaceBashParamsSchema = z.object({
     .describe("Clear, concise description of what this command does"),
 });
 
+export const WorkspacePatchParamsSchema = z.object({
+  path: z.string().describe("File path relative to workspace root"),
+  oldString: z.string().describe("Target block to replace"),
+  newString: z.string().describe("Replacement block"),
+  message: z.string().optional().describe("Description of the change"),
+  dryRun: z.boolean().default(false).optional(),
+});
+
+export const WorkspaceSearchFilesParamsSchema = z.object({
+  query: z.string().min(1).describe("Filename fragment or content regex"),
+  mode: z.enum(["content", "name", "both"]).default("both").optional(),
+  include: z.string().optional().describe("Glob include pattern"),
+  path: z.string().optional().describe("Directory to search within"),
+  limit: z.number().int().min(1).max(500).default(100).optional(),
+});
+
+export const SkillsListParamsSchema = z.object({
+  query: z.string().optional().describe("Optional search query"),
+});
+
+export const SkillViewParamsSchema = z.object({
+  name: z.string().min(1).describe("Skill name or ID"),
+});
+
+export const SkillManageParamsSchema = z.object({
+  action: z.enum([
+    "refresh",
+    "enable",
+    "disable",
+    "trust_source",
+    "untrust_source",
+    "add_source",
+    "remove_source",
+  ]),
+  skill: z.string().optional(),
+  source_path: z.string().optional(),
+});
+
+export const TerminalParamsSchema = z.object({
+  command: z.string().min(1).describe("Command to execute"),
+  workdir: z
+    .string()
+    .optional()
+    .describe("Working directory relative to workspace root"),
+  timeoutMs: z.number().int().min(1000).max(300000).optional(),
+  maxOutputBytes: z.number().int().min(1024).max(262144).optional(),
+  background: z.boolean().default(false).optional(),
+});
+
+export const ProcessParamsSchema = z.object({
+  action: z
+    .enum(["list", "poll", "log", "wait", "kill", "write"])
+    .describe("Process management action"),
+  processId: z
+    .string()
+    .optional()
+    .describe("Process ID from prior terminal background call"),
+  input: z.string().optional().describe("Input to write to process stdin"),
+  timeoutMs: z.number().int().min(1000).max(300000).optional(),
+});
+
+export const ExecuteCodeParamsSchema = z.object({
+  language: z
+    .enum(["python", "javascript", "bash"])
+    .describe("Programming language"),
+  code: z.string().min(1).describe("Source code to execute"),
+  workdir: z
+    .string()
+    .optional()
+    .describe("Working directory relative to workspace root"),
+  timeoutMs: z.number().int().min(1000).max(300000).optional(),
+  maxOutputBytes: z.number().int().min(1024).max(262144).optional(),
+});
+
+export const SkillReferenceParamsSchema = z.object({
+  name: z.string().min(1).describe("Skill name or ID"),
+  path: z
+    .string()
+    .optional()
+    .describe(
+      "Reference file path relative to skill directory (e.g., 'references/api.md')",
+    ),
+});
+
+export const SkillInfoParamsSchema = z.object({
+  name: z.string().min(1).describe("Skill name or ID"),
+});
+
+export const CheckEnvironmentParamsSchema = z.object({});
+
+export const TodoAdapterParamsSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("read") }),
+  z.object({
+    action: z.literal("write"),
+    todos: z.array(
+      z.object({
+        id: z.string(),
+        content: z.string(),
+        status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
+      }),
+    ),
+  }),
+]);
+
+export const ClarifyParamsSchema = WorkspaceQuestionParamsSchema;
+
+export const DelegateTaskParamsSchema = z.object({
+  task: z.string().min(1),
+  context: z.string().optional(),
+});
+
+export const MixtureOfAgentsParamsSchema = z.object({
+  task: z.string().min(1),
+  agents: z
+    .array(
+      z.object({
+        name: z.string().optional(),
+        instruction: z.string().min(1),
+      }),
+    )
+    .max(4)
+    .optional(),
+});
+
 export const WorkspaceDiffParamsSchema = z.object({
   path: z.string().describe("File path relative to workspace root"),
   previous: z
@@ -851,6 +975,23 @@ const schemaRegistry: Partial<Record<ToolName, z.ZodSchema>> = {
   [TOOL_NAMES.WORKSPACE_BASH]: WorkspaceBashParamsSchema,
   [TOOL_NAMES.WORKSPACE_DIFF]: WorkspaceDiffParamsSchema,
   [TOOL_NAMES.WORKSPACE_LOG]: WorkspaceLogParamsSchema,
+  [TOOL_NAMES.READ_FILE]: WorkspaceReadFileParamsSchema,
+  [TOOL_NAMES.WRITE_FILE]: WorkspaceWriteFileParamsSchema,
+  [TOOL_NAMES.PATCH]: WorkspacePatchParamsSchema,
+  [TOOL_NAMES.SEARCH_FILES]: WorkspaceSearchFilesParamsSchema,
+  [TOOL_NAMES.SKILLS_LIST]: SkillsListParamsSchema,
+  [TOOL_NAMES.SKILL_VIEW]: SkillViewParamsSchema,
+  [TOOL_NAMES.SKILL_MANAGE]: SkillManageParamsSchema,
+  [TOOL_NAMES.SKILL_REFERENCE]: SkillReferenceParamsSchema,
+  [TOOL_NAMES.SKILL_INFO]: SkillInfoParamsSchema,
+  [TOOL_NAMES.TERMINAL]: TerminalParamsSchema,
+  [TOOL_NAMES.PROCESS]: ProcessParamsSchema,
+  [TOOL_NAMES.EXECUTE_CODE]: ExecuteCodeParamsSchema,
+  [TOOL_NAMES.CHECK_ENVIRONMENT]: CheckEnvironmentParamsSchema,
+  [TOOL_NAMES.TODO]: TodoAdapterParamsSchema,
+  [TOOL_NAMES.CLARIFY]: ClarifyParamsSchema,
+  [TOOL_NAMES.DELEGATE_TASK]: DelegateTaskParamsSchema,
+  [TOOL_NAMES.MIXTURE_OF_AGENTS]: MixtureOfAgentsParamsSchema,
   [TOOL_NAMES.SEMANTIC_SEARCH]: SemanticSearchParamsSchema,
   [TOOL_NAMES.KEYWORD_SEARCH]: KeywordSearchParamsSchema,
   [TOOL_NAMES.READ_CHUNKS]: ReadChunksParamsSchema,
@@ -884,6 +1025,23 @@ const sensitivityRegistry: Record<ToolName, SensitivityLevel> = {
   [TOOL_NAMES.WORKSPACE_BASH]: "write",
   [TOOL_NAMES.WORKSPACE_DIFF]: "read",
   [TOOL_NAMES.WORKSPACE_LOG]: "read",
+  [TOOL_NAMES.READ_FILE]: "read",
+  [TOOL_NAMES.WRITE_FILE]: "write",
+  [TOOL_NAMES.PATCH]: "write",
+  [TOOL_NAMES.SEARCH_FILES]: "read",
+  [TOOL_NAMES.SKILLS_LIST]: "read",
+  [TOOL_NAMES.SKILL_VIEW]: "read",
+  [TOOL_NAMES.SKILL_MANAGE]: "write",
+  [TOOL_NAMES.SKILL_REFERENCE]: "read",
+  [TOOL_NAMES.SKILL_INFO]: "read",
+  [TOOL_NAMES.TERMINAL]: "destructive",
+  [TOOL_NAMES.PROCESS]: "destructive",
+  [TOOL_NAMES.EXECUTE_CODE]: "destructive",
+  [TOOL_NAMES.CHECK_ENVIRONMENT]: "read",
+  [TOOL_NAMES.TODO]: "write",
+  [TOOL_NAMES.CLARIFY]: "read",
+  [TOOL_NAMES.DELEGATE_TASK]: "read",
+  [TOOL_NAMES.MIXTURE_OF_AGENTS]: "read",
   [TOOL_NAMES.TODO_WRITE]: "write",
   [TOOL_NAMES.TODO_READ]: "read",
   [TOOL_NAMES.TASK_COMPLETE]: "write",

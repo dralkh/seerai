@@ -17,6 +17,7 @@ import {
   ToolDefinition,
   openAIService,
   createProvider,
+  getAgentModelCapabilities,
   type AgentQuery,
   type ProviderEvent,
 } from "../openai";
@@ -28,6 +29,7 @@ import {
   AgentConfig,
   ToolResult,
   TOOL_NAMES,
+  getToolSensitivity,
 } from "./tools";
 import { ChatMessage } from "./types";
 import { parseMarkdown } from "./markdown";
@@ -1112,6 +1114,63 @@ export interface AgentUIObserver {
   onPreApiCall?: (estimatedInputTokens: number) => void;
 }
 
+export interface ToolCallIntakeResult {
+  ok: boolean;
+  validToolCalls: ToolCall[];
+  error?: string;
+}
+
+export function validateToolCallIntake(
+  toolCalls: ToolCall[],
+  availableToolNames: Iterable<string>,
+): ToolCallIntakeResult {
+  const available = new Set(availableToolNames);
+  const validToolCalls: ToolCall[] = [];
+
+  for (const toolCall of toolCalls) {
+    const name = toolCall.function?.name || "";
+    if (!name) {
+      return {
+        ok: false,
+        validToolCalls: [],
+        error:
+          "A tool call was returned without a function name. Retry with a valid tool name from the provided tool list.",
+      };
+    }
+    if (!available.has(name)) {
+      return {
+        ok: false,
+        validToolCalls: [],
+        error: `Unknown tool "${name}". Retry with one of the available tools only.`,
+      };
+    }
+
+    const rawArguments = toolCall.function.arguments || "{}";
+    try {
+      JSON.parse(rawArguments.trim() ? rawArguments : "{}");
+    } catch (e) {
+      return {
+        ok: false,
+        validToolCalls: [],
+        error:
+          `Tool "${name}" returned invalid JSON arguments: ` +
+          `${e instanceof Error ? e.message : String(e)}. ` +
+          "Retry the tool call with exactly one valid JSON object as arguments. Do not include trailing text, markdown fences, or multiple JSON objects.",
+      };
+    }
+
+    validToolCalls.push({
+      ...toolCall,
+      function: {
+        ...toolCall.function,
+        arguments: rawArguments.trim() ? rawArguments : "{}",
+      },
+    });
+  }
+
+  return { ok: true, validToolCalls };
+}
+
 /**
  * Agentic chat handler with tool calling loop
  */
@@ -1139,6 +1198,20 @@ export async function handleAgenticChat(
   const tools: ToolDefinition[] | undefined = options.enableTools
     ? allFilteredTools
     : undefined;
+
+  if (tools && tools.length > 0) {
+    const activeConfig = getActiveModelConfig();
+    const apiURL = activeConfig?.apiURL || "";
+    const model = activeConfig?.model || "";
+    const capabilities = getAgentModelCapabilities(apiURL, model);
+    if (!capabilities.supportsTools) {
+      const message =
+        capabilities.knownIncompatibleReason ||
+        "The selected model does not support function/tool calling. Agent mode requires a tool-capable chat model.";
+      observer.onError(new Error(message));
+      throw new Error(message);
+    }
+  }
 
   // Clear stale TODOs from previous crashed session on fresh start
   if (!options.continuation) {
@@ -1204,8 +1277,16 @@ export async function handleAgenticChat(
 
   // Track recent tool calls for loop detection
   const recentToolCalls: { name: string; args: string }[] = [];
+  const executedToolSummaries: Array<{
+    name: string;
+    success: boolean;
+    summary?: string;
+    error?: string;
+  }> = [];
   const LOOP_DETECTION_WINDOW = 5;
   const MAX_ITERATIONS = agentConfig.maxAgentIterations;
+  const MAX_TOOL_CALL_REPAIR_ATTEMPTS = 2;
+  let toolCallRepairAttempts = 0;
 
   const compactionState: CompactionState = { count: 0, lastCompactAt: 0 };
   const modelContextLength = activeModel?.contextLength || 128000;
@@ -1323,21 +1404,46 @@ export async function handleAgenticChat(
         break;
       }
 
+      const intake = validateToolCallIntake(
+        toolCallsReceived,
+        tools?.map((tool) => tool.function.name) || [],
+      );
+      if (!intake.ok) {
+        toolCallRepairAttempts++;
+        Zotero.debug(
+          `[seerai] Invalid tool-call payload: ${intake.error} (repair ${toolCallRepairAttempts}/${MAX_TOOL_CALL_REPAIR_ATTEMPTS})`,
+        );
+        if (toolCallRepairAttempts > MAX_TOOL_CALL_REPAIR_ATTEMPTS) {
+          const stopMessage =
+            "\n\nAgent stopped because the selected model repeatedly returned malformed tool calls. " +
+            `${intake.error || "Malformed tool-call arguments."} ` +
+            "Switch to a tool-capable model with reliable function calling and retry.";
+          fullResponse += stopMessage;
+          observer.onMessageUpdate(fullResponse);
+          break;
+        }
+
+        if (iterationContent.trim()) {
+          messages.push({ role: "assistant", content: iterationContent });
+        }
+        messages.push({
+          role: "system",
+          content:
+            "Your previous response contained an invalid tool call, so no tool was executed. " +
+            `${intake.error || "Retry with valid tool-call JSON."} ` +
+            "Continue by retrying the intended tool call with valid JSON only, or provide a final text answer if tools are no longer needed.",
+        });
+        agentTracer.endIteration(sessionId);
+        continue;
+      }
+      toolCallRepairAttempts = 0;
+
+      const validToolCalls = intake.validToolCalls;
+
       // If task_complete was called explicitly, stop after this turn
-      const hasTaskComplete = toolCallsReceived.some(
+      const hasTaskComplete = validToolCalls.some(
         (tc) => tc.function.name === "task_complete",
       );
-
-      // Filter out invalid tool calls
-      const validToolCalls = toolCallsReceived.filter(
-        (tc) => tc.function.name && tc.function.name.length > 0,
-      );
-      const invalidCount = toolCallsReceived.length - validToolCalls.length;
-      if (invalidCount > 0) {
-        Zotero.debug(
-          `[seerai] Filtered ${invalidCount} invalid tool call(s) with empty name`,
-        );
-      }
 
       // Filter out task_complete from execution — it's a no-execute signal tool
       const executableToolCalls = hasTaskComplete
@@ -1378,36 +1484,46 @@ export async function handleAgenticChat(
       // Execute each tool call
       const toolResults: { toolCall: ToolCall; result: ToolResult }[] = [];
 
-      await Promise.all(
-        executableToolCalls.map(async (toolCall) => {
-          observer.onToolCallStarted(toolCall);
+      const executeOneToolCall = async (toolCall: ToolCall) => {
+        observer.onToolCallStarted(toolCall);
 
-          let parsedArgs: Record<string, unknown> = {};
-          try {
-            parsedArgs = JSON.parse(toolCall.function.arguments || "{}");
-          } catch {
-            // Malformed JSON — executeToolCall will return a proper error
-          }
-          agentTracer.startToolSpan(
-            sessionId,
-            toolCall.id,
-            toolCall.function.name,
-            parsedArgs,
-          );
+        let parsedArgs: Record<string, unknown> = {};
+        try {
+          parsedArgs = JSON.parse(toolCall.function.arguments || "{}");
+        } catch {
+          // Malformed JSON — executeToolCall will return a proper error
+        }
+        agentTracer.startToolSpan(
+          sessionId,
+          toolCall.id,
+          toolCall.function.name,
+          parsedArgs,
+        );
 
-          const result = await executeToolCall(toolCall, agentConfig);
+        const result = await executeToolCall(toolCall, agentConfig);
 
-          agentTracer.endToolSpan(sessionId, toolCall.id, {
-            success: result.success,
-            error: result.error,
-            dataSummary: result.summary,
-          });
+        agentTracer.endToolSpan(sessionId, toolCall.id, {
+          success: result.success,
+          error: result.error,
+          dataSummary: result.summary,
+        });
 
-          observer.onToolCallCompleted(toolCall, result);
+        observer.onToolCallCompleted(toolCall, result);
 
-          toolResults.push({ toolCall, result });
-        }),
+        toolResults.push({ toolCall, result });
+      };
+
+      const readOnlyToolCalls = executableToolCalls.filter(
+        (toolCall) => getToolSensitivity(toolCall.function.name) === "read",
       );
+      const mutatingToolCalls = executableToolCalls.filter(
+        (toolCall) => getToolSensitivity(toolCall.function.name) !== "read",
+      );
+
+      await Promise.all(readOnlyToolCalls.map(executeOneToolCall));
+      for (const toolCall of mutatingToolCalls) {
+        await executeOneToolCall(toolCall);
+      }
 
       // Check for abortion after all tool executions
       if (openAIService.isAbortedState()) {
@@ -1443,6 +1559,12 @@ export async function handleAgenticChat(
           content: resultContent,
         };
         messages.push(toolResultMessage);
+        executedToolSummaries.push({
+          name: toolCall.function.name,
+          success: result.success,
+          summary: result.summary,
+          error: result.error,
+        });
       }
 
       // End iteration for tracing
@@ -1455,6 +1577,44 @@ export async function handleAgenticChat(
       }
     } catch (error) {
       agentTracer.endSession(sessionId, false);
+      if (
+        executedToolSummaries.length > 0 &&
+        error instanceof Error &&
+        !error.message.includes("cancelled") &&
+        !error.message.includes("abort")
+      ) {
+        const successes = executedToolSummaries.filter((tool) => tool.success);
+        const failures = executedToolSummaries.filter((tool) => !tool.success);
+        const lines = [
+          "Agent stopped after a provider error while continuing from tool results.",
+          "",
+          `Provider error: ${error.message}`,
+          "",
+          `Tools completed before stop: ${successes.length}/${executedToolSummaries.length}.`,
+        ];
+        if (successes.length > 0) {
+          lines.push("", "Successful actions:");
+          for (const tool of successes.slice(0, 12)) {
+            lines.push(`- ${tool.name}: ${tool.summary || "completed"}`);
+          }
+        }
+        if (failures.length > 0) {
+          lines.push("", "Failed actions:");
+          for (const tool of failures.slice(0, 8)) {
+            lines.push(`- ${tool.name}: ${tool.error || "failed"}`);
+          }
+        }
+        lines.push(
+          "",
+          "Next step: switch to a tool-capable non-reasoning model and retry from this conversation.",
+        );
+        fullResponse = fullResponse.trim()
+          ? `${fullResponse}\n\n${lines.join("\n")}`
+          : lines.join("\n");
+        observer.onMessageUpdate(fullResponse);
+        observer.onComplete(fullResponse, iteration);
+        return;
+      }
       observer.onError(error as Error);
       throw error;
     }
@@ -1483,6 +1643,30 @@ export async function handleAgenticChat(
     await getMessageStore().setContinuation(continuationToken || undefined);
   } catch (e) {
     Zotero.debug(`[seerai] Error saving continuation: ${e}`);
+  }
+
+  if (!fullResponse.trim() && executedToolSummaries.length > 0) {
+    const successes = executedToolSummaries.filter((tool) => tool.success);
+    const failures = executedToolSummaries.filter((tool) => !tool.success);
+    const lines = [
+      "Agent task completed. No final narrative was returned by the model, so this is an execution summary from the completed tool calls.",
+      "",
+      `Tools completed: ${successes.length}/${executedToolSummaries.length}.`,
+    ];
+    if (successes.length > 0) {
+      lines.push("", "Successful actions:");
+      for (const tool of successes.slice(0, 12)) {
+        lines.push(`- ${tool.name}: ${tool.summary || "completed"}`);
+      }
+    }
+    if (failures.length > 0) {
+      lines.push("", "Failed actions:");
+      for (const tool of failures.slice(0, 8)) {
+        lines.push(`- ${tool.name}: ${tool.error || "failed"}`);
+      }
+    }
+    fullResponse = lines.join("\n");
+    observer.onMessageUpdate(fullResponse);
   }
 
   observer.onComplete(fullResponse, iteration);

@@ -29,7 +29,7 @@ export default defineConfig({
   },
 
   build: {
-    assets: ["addon/**/*.*"],
+    assets: ["addon/**/*.*", "skills/**/*.*"],
     define: {
       ...pkg.config,
       author: pkg.author,

@@ -42,8 +42,9 @@ pref("agenticMode", false);
 pref("libraryScope", "all"); // "user", "all", "group:ID", or "collection:libID:colID"
 pref("agentMaxResults", 20);
 pref("agentMaxContentLength", 50000);
-pref("agentMaxIterations", 100);
+pref("agentMaxIterations", 50);
 pref("agentAutoOcr", false);
+pref("enableExperimentalAgentTools", false);
 pref("selectionMode", "default"); // "lock", "default", or "explore"
 pref("searchAutoAiInsights", true); // Automatically generate AI insights after search
 pref(
@@ -133,3 +134,5 @@ pref("cloud.onedrive.tokenExpiry", "0");
 
 // Cloud provider selection
 pref("cloud.activeProvider", "google");
+pref("enableTerminalExecution", false);
+pref("execServerUrl", "http://127.0.0.1:23120");

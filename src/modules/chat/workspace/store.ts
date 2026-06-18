@@ -195,6 +195,186 @@ function findBestMatch(fileContent: string, target: string): string | null {
   return null;
 }
 
+interface PatchMatch {
+  start: number;
+  end: number;
+  strategy: string;
+  ambiguous?: boolean;
+}
+
+function findPatchMatch(
+  fileContent: string,
+  target: string,
+): PatchMatch | null {
+  const exact = collectOccurrences(fileContent, target);
+  if (exact.length === 1) {
+    return { ...exact[0], strategy: "exact" };
+  }
+  if (exact.length > 1) {
+    return { ...exact[0], strategy: "exact", ambiguous: true };
+  }
+
+  const normalizedTarget = target.replace(/\r\n/g, "\n");
+  const normalizedContent = fileContent.replace(/\r\n/g, "\n");
+  if (normalizedTarget !== target || normalizedContent !== fileContent) {
+    const matches = collectLineWindowMatches(
+      fileContent,
+      normalizedTarget,
+      (s) => s.replace(/\r\n/g, "\n"),
+    );
+    if (matches.length === 1)
+      return { ...matches[0], strategy: "line-endings" };
+    if (matches.length > 1) {
+      return { ...matches[0], strategy: "line-endings", ambiguous: true };
+    }
+  }
+
+  const strategies: Array<{
+    name: string;
+    normalize: (value: string) => string;
+  }> = [
+    {
+      name: "trailing-whitespace",
+      normalize: (value) =>
+        value
+          .split("\n")
+          .map((line) => line.replace(/[ \t]+$/g, ""))
+          .join("\n"),
+    },
+    {
+      name: "indentation",
+      normalize: (value) =>
+        value
+          .split("\n")
+          .map((line) => line.trimStart())
+          .join("\n"),
+    },
+    {
+      name: "collapsed-whitespace",
+      normalize: (value) => value.replace(/\s+/g, " ").trim(),
+    },
+  ];
+
+  for (const strategy of strategies) {
+    const matches = collectLineWindowMatches(
+      fileContent,
+      target,
+      strategy.normalize,
+    );
+    if (matches.length === 1) return { ...matches[0], strategy: strategy.name };
+    if (matches.length > 1) {
+      return { ...matches[0], strategy: strategy.name, ambiguous: true };
+    }
+  }
+
+  const targetLines = target.split("\n").filter((line) => line.trim());
+  const first = targetLines[0]?.trim();
+  const last = targetLines[targetLines.length - 1]?.trim();
+  if (first && last) {
+    const matches = collectAnchorMatches(fileContent, first, last);
+    if (matches.length === 1) return { ...matches[0], strategy: "anchors" };
+    if (matches.length > 1) {
+      return { ...matches[0], strategy: "anchors", ambiguous: true };
+    }
+  }
+
+  const fuzzy = collectFuzzyLineWindowMatches(fileContent, target);
+  if (fuzzy.length === 1) return { ...fuzzy[0], strategy: "fuzzy-window" };
+  if (fuzzy.length > 1) {
+    return { ...fuzzy[0], strategy: "fuzzy-window", ambiguous: true };
+  }
+
+  return null;
+}
+
+function collectOccurrences(
+  content: string,
+  needle: string,
+): Array<{ start: number; end: number }> {
+  if (!needle) return [];
+  const matches: Array<{ start: number; end: number }> = [];
+  let index = content.indexOf(needle);
+  while (index >= 0) {
+    matches.push({ start: index, end: index + needle.length });
+    index = content.indexOf(needle, index + Math.max(1, needle.length));
+  }
+  return matches;
+}
+
+function collectLineWindowMatches(
+  content: string,
+  target: string,
+  normalize: (value: string) => string,
+): Array<{ start: number; end: number }> {
+  const targetLines = target.split("\n");
+  const lineCount = targetLines.length;
+  const lines = splitWithOffsets(content);
+  const normalizedTarget = normalize(target);
+  const matches: Array<{ start: number; end: number }> = [];
+  for (let i = 0; i <= lines.length - lineCount; i++) {
+    const start = lines[i].start;
+    const end = lines[i + lineCount - 1].end;
+    const candidate = content.slice(start, end);
+    if (normalize(candidate) === normalizedTarget) {
+      matches.push({ start, end });
+    }
+  }
+  return matches;
+}
+
+function collectAnchorMatches(
+  content: string,
+  first: string,
+  last: string,
+): Array<{ start: number; end: number }> {
+  const lines = splitWithOffsets(content);
+  const matches: Array<{ start: number; end: number }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].text.includes(first)) continue;
+    for (let j = i; j < Math.min(lines.length, i + 80); j++) {
+      if (lines[j].text.includes(last)) {
+        matches.push({ start: lines[i].start, end: lines[j].end });
+        break;
+      }
+    }
+  }
+  return matches;
+}
+
+function collectFuzzyLineWindowMatches(
+  content: string,
+  target: string,
+): Array<{ start: number; end: number }> {
+  const targetLines = target.split("\n");
+  const lineCount = targetLines.length;
+  const lines = splitWithOffsets(content);
+  const normalizedTarget = target.replace(/\s+/g, " ").trim();
+  const matches: Array<{ start: number; end: number }> = [];
+  for (let i = 0; i <= lines.length - lineCount; i++) {
+    const start = lines[i].start;
+    const end = lines[i + lineCount - 1].end;
+    const candidate = content.slice(start, end).replace(/\s+/g, " ").trim();
+    const distance = levenshtein(candidate, normalizedTarget);
+    if (distance <= Math.max(5, Math.floor(normalizedTarget.length * 0.18))) {
+      matches.push({ start, end });
+    }
+  }
+  return matches;
+}
+
+function splitWithOffsets(
+  content: string,
+): Array<{ text: string; start: number; end: number }> {
+  const lines: Array<{ text: string; start: number; end: number }> = [];
+  let start = 0;
+  for (const part of content.split("\n")) {
+    const end = start + part.length;
+    lines.push({ text: part, start, end });
+    start = end + 1;
+  }
+  return lines;
+}
+
 function levenshtein(a: string, b: string): number {
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
@@ -744,10 +924,22 @@ export class WorkspaceStore {
   }
 
   normalizePath(filePath: string): string {
-    let normalized = filePath.replace(/\\/g, "/");
-    if (normalized.startsWith("/")) {
-      normalized = normalized.slice(1);
+    if (!filePath || filePath.includes("\0")) {
+      throw new Error("Invalid workspace path");
     }
+    if (
+      filePath.startsWith("/") ||
+      filePath.startsWith("~") ||
+      /^[A-Za-z]:[\\/]/.test(filePath)
+    ) {
+      throw new Error("Workspace paths must be relative");
+    }
+    let normalized = filePath.replace(/\\/g, "/");
+    const parts = normalized.split("/").filter((p) => p.length > 0);
+    if (parts.some((p) => p === "..")) {
+      throw new Error("Workspace paths cannot contain '..'");
+    }
+    normalized = parts.join("/");
     return normalized || ".";
   }
 
@@ -979,6 +1171,84 @@ export class WorkspaceStore {
       author,
     );
     return { versionId: result.versionId, replacements, success: true };
+  }
+
+  async patchFile(
+    filePath: string,
+    oldString: string,
+    newString: string,
+    message?: string,
+    dryRun: boolean = false,
+    author: string = "assistant",
+  ): Promise<{
+    versionId: string;
+    replacements: number;
+    strategy: string;
+    success: boolean;
+    error?: string;
+    preview?: string;
+  }> {
+    const normalized = this.normalizePath(filePath);
+    const file = await this.readFile(normalized);
+    if (!file) {
+      return {
+        versionId: "",
+        replacements: 0,
+        strategy: "none",
+        success: false,
+        error: `File not found: ${normalized}`,
+      };
+    }
+
+    const match = findPatchMatch(file.content, oldString);
+    if (!match) {
+      return {
+        versionId: "",
+        replacements: 0,
+        strategy: "none",
+        success: false,
+        error: `No unique patch target found in ${normalized}`,
+      };
+    }
+    if (match.ambiguous) {
+      return {
+        versionId: "",
+        replacements: 0,
+        strategy: match.strategy,
+        success: false,
+        error: `Patch target is ambiguous in ${normalized}`,
+      };
+    }
+
+    const nextContent =
+      file.content.slice(0, match.start) +
+      newString +
+      file.content.slice(match.end);
+    if (dryRun) {
+      return {
+        versionId: "",
+        replacements: 1,
+        strategy: match.strategy,
+        success: true,
+        preview: createDiffResult(normalized, file.content, nextContent)
+          .hunks.map((h) =>
+            h.lines.map((l) => `${l.type}${l.content}`).join("\n"),
+          )
+          .join("\n"),
+      };
+    }
+    const result = await this.writeFile(
+      normalized,
+      nextContent,
+      message,
+      author,
+    );
+    return {
+      versionId: result.versionId,
+      replacements: 1,
+      strategy: match.strategy,
+      success: true,
+    };
   }
 
   async listFiles(): Promise<WorkspaceFileEntry[]> {

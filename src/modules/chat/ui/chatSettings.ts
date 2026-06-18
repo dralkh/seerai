@@ -509,7 +509,7 @@ export function showChatSettings(
   iterInput.min = "1";
   iterInput.max = "50";
   const currentMaxIter =
-    Zotero.Prefs.get("extensions.seerai.agentMaxIterations") || 10;
+    Zotero.Prefs.get("extensions.seerai.agentMaxIterations") || 50;
   iterInput.value = String(currentMaxIter);
   Object.assign(iterInput.style, {
     width: "40px",
@@ -667,6 +667,49 @@ export function showChatSettings(
   }
 
   body.appendChild(configSection);
+
+  const terminalSection = doc.createElement("div");
+  terminalSection.style.borderTop = "1px solid var(--border-primary)";
+  terminalSection.style.paddingTop = "8px";
+
+  const terminalHeader = doc.createElement("div");
+  Object.assign(terminalHeader.style, {
+    fontSize: "11px",
+    fontWeight: "600",
+    color: "var(--text-secondary, #666)",
+    marginBottom: "6px",
+  });
+  terminalHeader.innerText = "Execution";
+  terminalSection.appendChild(terminalHeader);
+
+  const terminalRow = doc.createElement("div");
+  Object.assign(terminalRow.style, {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    fontSize: "12px",
+    marginBottom: "4px",
+  });
+
+  const terminalLabel = doc.createElement("div");
+  terminalLabel.innerText = "Terminal execution";
+  terminalLabel.title =
+    "Allow agent tools to run shell commands inside the active workspace.";
+
+  const terminalEnabled =
+    Zotero.Prefs.get("extensions.seerai.enableTerminalExecution") === true;
+  const terminalToggle = createToggleSwitch(
+    doc,
+    terminalEnabled,
+    (newState) => {
+      Zotero.Prefs.set("extensions.seerai.enableTerminalExecution", newState);
+      Zotero.debug(`[seerai] enableTerminalExecution set to ${newState}`);
+    },
+  );
+  terminalRow.appendChild(terminalLabel);
+  terminalRow.appendChild(terminalToggle);
+  terminalSection.appendChild(terminalRow);
+  body.appendChild(terminalSection);
 
   /**
    * Helper to create a toggle switch
@@ -1084,6 +1127,23 @@ export function showChatSettings(
     [TOOL_NAMES.NOTE]: "Zotero Notes",
     [TOOL_NAMES.RELATED_PAPERS]: "Related Papers",
     [TOOL_NAMES.WEB]: "Web Tools",
+    [TOOL_NAMES.SKILLS_LIST]: "List Agent Skills",
+    [TOOL_NAMES.SKILL_VIEW]: "View Agent Skill",
+    [TOOL_NAMES.SKILL_MANAGE]: "Manage Agent Skills",
+    [TOOL_NAMES.SKILL_REFERENCE]: "Read Skill Reference",
+    [TOOL_NAMES.SKILL_INFO]: "Skill Info",
+    [TOOL_NAMES.TERMINAL]: "Terminal",
+    [TOOL_NAMES.PROCESS]: "Process Manager",
+    [TOOL_NAMES.EXECUTE_CODE]: "Execute Code",
+    [TOOL_NAMES.CHECK_ENVIRONMENT]: "Check Environment",
+    [TOOL_NAMES.TODO]: "TODO Adapter",
+    [TOOL_NAMES.CLARIFY]: "Clarify",
+    [TOOL_NAMES.DELEGATE_TASK]: "Delegate Task",
+    [TOOL_NAMES.MIXTURE_OF_AGENTS]: "Mixture of Agents",
+    [TOOL_NAMES.READ_FILE]: "Read File",
+    [TOOL_NAMES.WRITE_FILE]: "Write File",
+    [TOOL_NAMES.PATCH]: "Patch File",
+    [TOOL_NAMES.SEARCH_FILES]: "Search Files",
   };
 
   // --- BULK ACTIONS ---
@@ -1134,6 +1194,12 @@ export function showChatSettings(
         "extensions.seerai.tool_permissions",
         JSON.stringify(perms),
       );
+      if (mode === "allow") {
+        Zotero.Prefs.set("extensions.seerai.enableTerminalExecution", true);
+        terminalToggle.style.backgroundColor = "#4cd964";
+        const knob = terminalToggle.firstElementChild as HTMLElement | null;
+        if (knob) knob.style.left = "14px";
+      }
       // Update UI
       renderToolList(perms);
       Zotero.debug(`[seerai] Bulk set all tools to: ${mode}`);
@@ -1262,8 +1328,6 @@ export function showChatSettings(
   renderToolList(currentPerms);
 
   permSection.appendChild(permList);
-  body.appendChild(permSection);
-
   body.appendChild(permSection);
 
   container.appendChild(body);

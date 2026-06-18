@@ -13,11 +13,13 @@ import {
   addPrompt,
   updatePrompt,
   deletePrompt,
+  getPromptLibraryDirPath,
   getCategoryIcon,
   getCategoryLabel,
   CATEGORY_LABELS,
 } from "../promptLibrary";
 import { createSvgIcon, setButtonIcon, type IconName } from "./icons";
+import { ALL_ICON_NAMES } from "./icons";
 
 // ==================== Types ====================
 
@@ -163,10 +165,16 @@ export async function showPromptPicker(
   const categoryTabs: Map<PromptCategory | null, HTMLElement> = new Map();
   categoryTabs.set(null, allTab);
 
-  for (const [cat, info] of Object.entries(CATEGORY_LABELS) as [
-    PromptCategory,
-    { label: string; icon: IconName },
-  ][]) {
+  const categoryOrder: PromptCategory[] = [
+    "skills",
+    "analysis",
+    "comparative",
+    "writing",
+    "summary",
+    "custom",
+  ];
+  for (const cat of categoryOrder) {
+    const info = CATEGORY_LABELS[cat];
     const tab = createCategoryTab(
       doc,
       info.label,
@@ -257,13 +265,11 @@ export async function showPromptPicker(
             options.onSelect(prompt);
             close();
           },
-          prompt.isBuiltIn
-            ? undefined
-            : () => {
-                showPromptEditor(doc, container, prompt, async () => {
-                  await renderPromptList();
-                });
-              },
+          () => {
+            showPromptEditor(doc, container, prompt, async () => {
+              await renderPromptList();
+            });
+          },
           prompt.isBuiltIn
             ? undefined
             : () => {
@@ -320,6 +326,42 @@ export async function showPromptPicker(
     });
   });
 
+  const openFolderBtn = doc.createElementNS(
+    HTML_NS,
+    "button",
+  ) as HTMLButtonElement;
+  openFolderBtn.style.cssText = `
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px;
+        border: 1px solid var(--border-primary);
+        border-radius: 6px;
+        background: var(--background-primary);
+        color: var(--text-secondary);
+        font-size: 12px;
+        cursor: pointer;
+    `;
+  openFolderBtn.appendChild(
+    createSvgIcon(doc, "folder", { size: 14, strokeWidth: 1.8 }),
+  );
+  const openFolderLbl = doc.createElement("span");
+  openFolderLbl.textContent = "Open Folder";
+  openFolderBtn.appendChild(openFolderLbl);
+  openFolderBtn.title =
+    "Open the Prompt Library folder containing prompts.json and editable skills/";
+  openFolderBtn.addEventListener("click", async () => {
+    const dir = getPromptLibraryDirPath();
+    if (!(await IOUtils.exists(dir))) {
+      await IOUtils.makeDirectory(dir, { createAncestors: true });
+    }
+    const file = (Components.classes as any)[
+      "@mozilla.org/file/local;1"
+    ].createInstance((Components.interfaces as any).nsIFile);
+    file.initWithPath(dir);
+    file.reveal();
+  });
+
   const insertBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
   insertBtn.style.cssText = `
         display: inline-flex;
@@ -357,7 +399,12 @@ export async function showPromptPicker(
     insertBtn.style.opacity = selectedPrompt ? "1" : "0.5";
   };
 
-  footer.appendChild(newBtn);
+  const leftActions = doc.createElement("div");
+  leftActions.style.cssText = "display: flex; gap: 8px;";
+  leftActions.appendChild(newBtn);
+  leftActions.appendChild(openFolderBtn);
+
+  footer.appendChild(leftActions);
   footer.appendChild(insertBtn);
   container.appendChild(footer);
 
@@ -467,7 +514,7 @@ function createPromptCard(
   const icon = doc.createElement("span");
   icon.style.cssText = "display: inline-flex; align-items: center;";
   icon.appendChild(
-    createSvgIcon(doc, getCategoryIcon(prompt.category), {
+    createSvgIcon(doc, prompt.icon || getCategoryIcon(prompt.category), {
       size: 14,
       strokeWidth: 1.7,
     }),
@@ -498,7 +545,7 @@ function createPromptCard(
   header.appendChild(name);
   header.appendChild(badges);
 
-  if (!prompt.isBuiltIn && (onEdit || onDelete)) {
+  if (onEdit || onDelete) {
     const actions = doc.createElement("div");
     actions.style.cssText =
       "display: flex; gap: 2px; margin-left: auto; opacity: 0; transition: opacity 0.15s ease;";
@@ -509,6 +556,9 @@ function createPromptCard(
         "button",
       ) as HTMLButtonElement;
       editBtn.title = "Edit";
+      if (prompt.isBuiltIn) {
+        editBtn.title = "View and customize";
+      }
       setButtonIcon(editBtn, "edit", "Edit", 12);
       editBtn.style.cssText = `
             background: none;
@@ -685,7 +735,11 @@ async function showPromptEditor(
   const editorTitle = doc.createElement("span");
   editorTitle.style.cssText =
     "flex: 1; text-align: center; font-weight: 600; font-size: 14px;";
-  editorTitle.textContent = existingPrompt ? "Edit Prompt" : "New Prompt";
+  editorTitle.textContent = existingPrompt?.isBuiltIn
+    ? "Customize Built-in Prompt"
+    : existingPrompt
+      ? "Edit Prompt"
+      : "New Prompt";
 
   header.appendChild(backBtn);
   header.appendChild(editorTitle);
@@ -705,7 +759,48 @@ async function showPromptEditor(
     existingPrompt?.name || "",
     'e.g., "Summarize Paper"',
   );
-  form.appendChild(nameGroup.container);
+  const selectedIcon: { value: IconName } = {
+    value:
+      existingPrompt?.icon ||
+      getCategoryIcon(existingPrompt?.category || "custom"),
+  };
+  const nameIconRow = doc.createElement("div");
+  nameIconRow.style.cssText =
+    "display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end;";
+  nameIconRow.appendChild(nameGroup.container);
+  const iconGroup = doc.createElement("div");
+  iconGroup.innerHTML =
+    '<label style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: block;">Icon</label>';
+  const iconBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+  iconBtn.type = "button";
+  iconBtn.style.cssText = `
+        width: 42px;
+        height: 34px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px solid var(--border-primary);
+        border-radius: 6px;
+        background: var(--background-primary);
+        color: var(--text-primary);
+        cursor: pointer;
+    `;
+  const renderIconButton = () => {
+    iconBtn.replaceChildren(
+      createSvgIcon(doc, selectedIcon.value, { size: 16, strokeWidth: 1.8 }),
+    );
+    iconBtn.title = `Icon: ${selectedIcon.value}`;
+  };
+  renderIconButton();
+  iconBtn.addEventListener("click", () => {
+    showIconPicker(doc, editorOverlay, iconBtn, selectedIcon.value, (icon) => {
+      selectedIcon.value = icon;
+      renderIconButton();
+    });
+  });
+  iconGroup.appendChild(iconBtn);
+  nameIconRow.appendChild(iconGroup);
+  form.appendChild(nameIconRow);
 
   // Category select
   const categoryGroup = doc.createElement("div");
@@ -806,7 +901,11 @@ async function showPromptEditor(
   cancelBtn.addEventListener("click", () => editorOverlay.remove());
 
   const saveBtn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
-  saveBtn.textContent = existingPrompt ? "Save Changes" : "Create Prompt";
+  saveBtn.textContent = existingPrompt?.isBuiltIn
+    ? "Save Copy"
+    : existingPrompt
+      ? "Save Changes"
+      : "Create Prompt";
   saveBtn.style.cssText = `
         padding: 8px 16px;
         border: none;
@@ -838,13 +937,14 @@ async function showPromptEditor(
 
     try {
       let saved: PromptTemplate;
-      if (existingPrompt) {
+      if (existingPrompt && !existingPrompt.isBuiltIn) {
         saved = await updatePrompt(existingPrompt.id, {
           name,
           description: descGroup.input.value.trim() || undefined,
           template,
           category: categorySelect.value as PromptCategory,
           tags,
+          icon: selectedIcon.value,
         });
       } else {
         saved = await addPrompt({
@@ -853,6 +953,7 @@ async function showPromptEditor(
           template,
           category: categorySelect.value as PromptCategory,
           tags,
+          icon: selectedIcon.value,
         });
       }
 
@@ -864,7 +965,11 @@ async function showPromptEditor(
       saveBtn.textContent = "Failed";
       saveBtn.style.background = "#e53935";
       setTimeout(() => {
-        saveBtn.textContent = existingPrompt ? "Save Changes" : "Create Prompt";
+        saveBtn.textContent = existingPrompt?.isBuiltIn
+          ? "Save Copy"
+          : existingPrompt
+            ? "Save Changes"
+            : "Create Prompt";
         saveBtn.style.background = "var(--highlight-primary)";
       }, 2000);
     }
@@ -876,6 +981,100 @@ async function showPromptEditor(
 
   parent.appendChild(editorOverlay);
   nameGroup.input.focus();
+}
+
+function showIconPicker(
+  doc: Document,
+  parent: HTMLElement,
+  anchor: HTMLElement,
+  currentIcon: IconName,
+  onSelect: (icon: IconName) => void,
+): void {
+  const existing = parent.querySelector(".prompt-icon-picker");
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  const picker = doc.createElement("div");
+  picker.className = "prompt-icon-picker";
+  picker.style.cssText = `
+        position: absolute;
+        top: 70px;
+        right: 16px;
+        width: 292px;
+        max-height: 330px;
+        background: var(--background-primary);
+        border: 1px solid var(--border-primary);
+        border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+        z-index: 20;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    `;
+
+  const search = doc.createElement("input");
+  search.type = "text";
+  search.placeholder = "Search icons...";
+  search.style.cssText = `
+        margin: 10px;
+        padding: 7px 9px;
+        border: 1px solid var(--border-primary);
+        border-radius: 6px;
+        background: var(--background-primary);
+        color: var(--text-primary);
+        font-size: 12px;
+        box-sizing: border-box;
+    `;
+  picker.appendChild(search);
+
+  const grid = doc.createElement("div");
+  grid.style.cssText = `
+        padding: 0 10px 10px;
+        display: grid;
+        grid-template-columns: repeat(7, 32px);
+        gap: 6px;
+        overflow-y: auto;
+    `;
+  picker.appendChild(grid);
+
+  const render = () => {
+    const query = search.value.trim().toLowerCase();
+    grid.innerHTML = "";
+    const icons = ALL_ICON_NAMES.filter((icon) =>
+      icon.toLowerCase().includes(query),
+    );
+    for (const icon of icons) {
+      const btn = doc.createElementNS(HTML_NS, "button") as HTMLButtonElement;
+      btn.type = "button";
+      btn.title = icon;
+      btn.style.cssText = `
+            width: 32px;
+            height: 32px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid ${icon === currentIcon ? "var(--highlight-primary)" : "var(--border-primary)"};
+            border-radius: 6px;
+            background: ${icon === currentIcon ? "var(--paper-checked-background)" : "var(--background-primary)"};
+            color: var(--text-primary);
+            cursor: pointer;
+        `;
+      btn.appendChild(createSvgIcon(doc, icon, { size: 15, strokeWidth: 1.8 }));
+      btn.addEventListener("click", () => {
+        onSelect(icon);
+        picker.remove();
+        anchor.focus();
+      });
+      grid.appendChild(btn);
+    }
+  };
+
+  search.addEventListener("input", render);
+  parent.appendChild(picker);
+  render();
+  setTimeout(() => search.focus(), 0);
 }
 
 function createFormGroup(

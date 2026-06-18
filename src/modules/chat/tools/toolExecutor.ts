@@ -33,7 +33,11 @@ import {
   SystematicReviewParams,
 } from "./toolTypes";
 
-import { safeValidateToolArgs, formatZodError } from "./schemas";
+import {
+  safeValidateToolArgs,
+  formatZodError,
+  getToolSensitivity,
+} from "./schemas";
 
 import {
   executeSearchLibrary,
@@ -61,6 +65,23 @@ import {
 } from "./ragTool";
 import { executeWorkspaceTool } from "../workspace/tools";
 import { executeSystematicReview } from "./systematicReviewTool";
+import {
+  executeClarify,
+  executeDelegateTask,
+  executeMixtureOfAgents,
+  executeSkillManage,
+  executeSkillsList,
+  executeSkillView,
+  executeTodoAdapter,
+  executeSkillReference,
+  executeSkillInfo,
+} from "./skillsTool";
+import {
+  executeTerminal,
+  executeProcess,
+  executeCode,
+  checkEnvironment,
+} from "./executionTool";
 
 /**
  * Parse a tool call from API format to typed format
@@ -70,7 +91,8 @@ export function parseToolCall<T = Record<string, unknown>>(
 ): ParsedToolCall<T> {
   let args: T;
   try {
-    args = JSON.parse(toolCall.function.arguments);
+    const rawArguments = toolCall.function.arguments || "{}";
+    args = JSON.parse(rawArguments.trim() ? rawArguments : "{}");
   } catch (e) {
     throw new Error(
       `Failed to parse tool arguments: ${e instanceof Error ? e.message : String(e)}`,
@@ -243,6 +265,104 @@ export async function executeToolCall(
         };
       }
 
+      case TOOL_NAMES.SKILLS_LIST:
+        return await executeSkillsList(validatedArgs as { query?: string });
+
+      case TOOL_NAMES.SKILL_VIEW:
+        return await executeSkillView(validatedArgs as { name: string });
+
+      case TOOL_NAMES.SKILL_MANAGE:
+        return await executeSkillManage(
+          validatedArgs as {
+            action:
+              | "refresh"
+              | "enable"
+              | "disable"
+              | "trust_source"
+              | "untrust_source"
+              | "add_source"
+              | "remove_source";
+            skill?: string;
+            source_path?: string;
+          },
+        );
+
+      case TOOL_NAMES.SKILL_REFERENCE:
+        return await executeSkillReference(
+          validatedArgs as { name: string; path?: string },
+        );
+
+      case TOOL_NAMES.SKILL_INFO:
+        return await executeSkillInfo(validatedArgs as { name: string });
+
+      case TOOL_NAMES.TERMINAL:
+        return await executeTerminal(
+          validatedArgs as {
+            command: string;
+            workdir?: string;
+            timeoutMs?: number;
+            maxOutputBytes?: number;
+            background?: boolean;
+          },
+        );
+
+      case TOOL_NAMES.PROCESS:
+        return await executeProcess(
+          validatedArgs as {
+            action: "list" | "poll" | "log" | "wait" | "kill" | "write";
+            processId?: string;
+            input?: string;
+            timeoutMs?: number;
+          },
+        );
+
+      case TOOL_NAMES.EXECUTE_CODE:
+        return await executeCode(
+          validatedArgs as {
+            language: "python" | "javascript" | "bash";
+            code: string;
+            workdir?: string;
+            timeoutMs?: number;
+            maxOutputBytes?: number;
+          },
+        );
+
+      case TOOL_NAMES.CHECK_ENVIRONMENT:
+        return await checkEnvironment();
+
+      case TOOL_NAMES.TODO:
+        return await executeTodoAdapter(
+          validatedArgs as {
+            action: "read" | "write";
+            todos?: import("./toolTypes").TodoItem[];
+          },
+        );
+
+      case TOOL_NAMES.CLARIFY:
+        return await executeClarify(
+          validatedArgs as {
+            questions: Array<{
+              question: string;
+              header: string;
+              options: Array<{ label: string; description: string }>;
+              multiple?: boolean;
+            }>;
+          },
+        );
+
+      case TOOL_NAMES.DELEGATE_TASK:
+        return await executeDelegateTask(
+          validatedArgs as { task: string; context?: string },
+        );
+
+      case TOOL_NAMES.MIXTURE_OF_AGENTS:
+        return await executeMixtureOfAgents(
+          validatedArgs as {
+            task: string;
+            agents?: Array<{ name?: string; instruction: string }>;
+          },
+        );
+
       // ==================== Workspace Tools ====================
       case TOOL_NAMES.WORKSPACE_READ_FILE:
       case TOOL_NAMES.WORKSPACE_WRITE_FILE:
@@ -253,6 +373,10 @@ export async function executeToolCall(
       case TOOL_NAMES.WORKSPACE_BASH:
       case TOOL_NAMES.WORKSPACE_DIFF:
       case TOOL_NAMES.WORKSPACE_LOG:
+      case TOOL_NAMES.READ_FILE:
+      case TOOL_NAMES.WRITE_FILE:
+      case TOOL_NAMES.PATCH:
+      case TOOL_NAMES.SEARCH_FILES:
         return await executeWorkspaceTool(
           parsed.name,
           validatedArgs as Record<string, unknown>,
@@ -266,9 +390,18 @@ export async function executeToolCall(
     }
   } catch (error) {
     Zotero.debug(`[seerai] Tool execution error: ${error}`);
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith("Failed to parse tool arguments:")) {
+      return {
+        success: false,
+        error:
+          `${message}. Retry this tool call with exactly one valid JSON object as arguments. ` +
+          `Do not include trailing text, markdown fences, or multiple JSON objects.`,
+      };
+    }
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: message,
     };
   }
 }
@@ -411,8 +544,15 @@ async function checkToolPermission(
       permissions = JSON.parse(prefStr);
     }
 
-    // Check specific permission first, then valid fallback to wildcard
-    const permission = permissions[toolName] || permissions["*"] || "allow";
+    const specificPermission = permissions[toolName];
+    const wildcardPermission = permissions["*"];
+    const permission =
+      specificPermission ||
+      wildcardPermission ||
+      (config.requireApprovalForDestructive &&
+      getToolSensitivity(toolName) === "destructive"
+        ? "ask"
+        : "allow");
 
     if (permission === "allow") {
       Zotero.debug(`[seerai] Permission 'allow' for tool '${toolName}'.`);

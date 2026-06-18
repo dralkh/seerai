@@ -11,6 +11,7 @@ import { handleApiRequest, ApiRequest } from "./handlers";
 import { TOOL_NAMES } from "../chat/tools/toolTypes";
 import { getWorkspaceStore } from "../chat/workspace/store";
 import { getMessageStore } from "../chat/messageStore";
+import { getSkillsFilesystemDir } from "../chat/skills/registry";
 
 registerWorkspaceInfoEndpoint();
 
@@ -29,6 +30,7 @@ function registerWorkspaceInfoEndpoint(): void {
             JSON.stringify({
               workspaceDir: store.workspaceDir,
               conversationId: getMessageStore().getConversationId(),
+              skillsDir: getSkillsFilesystemDir(),
             }),
           ];
         } catch (e: any) {
@@ -68,6 +70,19 @@ const ENDPOINTS = [
 
   // Completion signal
   TOOL_NAMES.TASK_COMPLETE,
+  TOOL_NAMES.SKILLS_LIST,
+  TOOL_NAMES.SKILL_VIEW,
+  TOOL_NAMES.SKILL_MANAGE,
+  TOOL_NAMES.SKILL_REFERENCE,
+  TOOL_NAMES.SKILL_INFO,
+  TOOL_NAMES.TERMINAL,
+  TOOL_NAMES.PROCESS,
+  TOOL_NAMES.EXECUTE_CODE,
+  TOOL_NAMES.CHECK_ENVIRONMENT,
+  TOOL_NAMES.TODO,
+  TOOL_NAMES.CLARIFY,
+  TOOL_NAMES.DELEGATE_TASK,
+  TOOL_NAMES.MIXTURE_OF_AGENTS,
 
   // Semantic & keyword search tools
   TOOL_NAMES.SEMANTIC_SEARCH,
@@ -84,6 +99,10 @@ const ENDPOINTS = [
   TOOL_NAMES.WORKSPACE_BASH,
   TOOL_NAMES.WORKSPACE_DIFF,
   TOOL_NAMES.WORKSPACE_LOG,
+  TOOL_NAMES.READ_FILE,
+  TOOL_NAMES.WRITE_FILE,
+  TOOL_NAMES.PATCH,
+  TOOL_NAMES.SEARCH_FILES,
 ] as const;
 
 /**
