@@ -168,7 +168,7 @@ class AgentTracer {
       this.activeSpans.delete(toolCallId);
 
       // Log individual span
-      const status = result?.success ? "✓" : "✗";
+      const status = result?.success ? "ok" : "fail";
       Zotero.debug(
         `[seerai][trace] ${status} ${span.toolName} (${span.durationMs.toFixed(0)}ms)`,
       );

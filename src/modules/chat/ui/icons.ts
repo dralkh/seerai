@@ -92,6 +92,7 @@ export type IconName =
   | "zap"
   | "cpu"
   | "message"
+  | "bomb"
   | "sparkles";
 
 const ICON_PATHS: Record<IconName, string> = {
@@ -205,6 +206,7 @@ const ICON_PATHS: Record<IconName, string> = {
   zap: "M13 2 4 14h6l-1 8 9-12h-6l1-8Z",
   cpu: "M5 8h14v8H5V8Zm3 0V5h2v3m4-3v3h2V5h-2m-2 14v-3h2v3m-4 0v-3h2v3M5 8h3M5 16h3m13-8h-3m3 8h-3",
   message: "M5 5h14v10H9l-4 4V5Z",
+  bomb: "M10 21a7 7 0 1 0 0-14 7 7 0 0 0 0 14ZM15.5 8.5 18 6m0 0h2m-2 0V4",
   sparkles:
     "M12 3l1 4 4 1-4 1-1 4-1-4-4-1 4-1 1-4ZM5 13l1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2Zm12 2 1 2 2 1-2 1-1 2-1-2-2-1 2-1 1-2Z",
 };
@@ -307,6 +309,33 @@ export function createIconButton(
 
 export function getIconPath(name: IconName): string {
   return ICON_PATHS[name];
+}
+
+export interface IconMarkupOptions {
+  size?: number;
+  strokeWidth?: number;
+  /** Extra inline CSS appended to the svg style attribute. */
+  style?: string;
+}
+
+/**
+ * Returns an inline SVG markup string for use in `innerHTML`/template literals
+ * (where a DOM element from `createSvgIcon` can't be used directly).
+ * The icon inherits color via `currentColor` and aligns to surrounding text.
+ */
+export function iconMarkup(
+  name: IconName,
+  options: IconMarkupOptions = {},
+): string {
+  const { size = 14, strokeWidth = 1.7, style = "" } = options;
+  const path = ICON_PATHS[name];
+  if (!path) return "";
+  return (
+    `<svg xmlns="${SVG_NS}" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" ` +
+    `aria-hidden="true" style="vertical-align: text-bottom; flex-shrink: 0; pointer-events: none;${style ? " " + style : ""}">` +
+    `<path d="${path}" stroke="currentColor" stroke-width="${strokeWidth}" ` +
+    `stroke-linecap="round" stroke-linejoin="round"/></svg>`
+  );
 }
 
 export const ALL_ICON_NAMES: IconName[] = Object.keys(ICON_PATHS) as IconName[];

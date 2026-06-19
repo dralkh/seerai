@@ -229,9 +229,9 @@ function backBtn(doc: Document, handler: () => void): HTMLElement {
     doc,
     "cursor: pointer; display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; margin-right: 8px; transition: background 0.2s;",
   );
-  b.textContent = "←";
-  b.style.fontSize = "18px";
-  b.style.fontWeight = "bold";
+  b.appendChild(
+    createSvgIcon(doc, "chevron-left", { size: 18, strokeWidth: 2 }),
+  );
   b.addEventListener("click", (e) => {
     e.stopPropagation();
     handler();
@@ -408,8 +408,13 @@ function renderConnectView(
 
     const arrow = span(
       doc,
-      `color: ${COLORS.textSecondary}; font-size: 16px;`,
-      isConnected ? "✓" : "→",
+      `color: ${COLORS.textSecondary}; display: inline-flex; align-items: center;`,
+    );
+    arrow.appendChild(
+      createSvgIcon(doc, isConnected ? "check" : "chevron-right", {
+        size: 16,
+        strokeWidth: 1.8,
+      }),
     );
 
     row.appendChild(icon);
@@ -1069,9 +1074,14 @@ async function renderBrowse(
     if (history.length > 0) {
       const backRow = div(doc, STYLES.row);
       backRow.style.padding = "8px 12px";
-      backRow.appendChild(
-        span(doc, "margin-right: 12px; font-size: 16px;", "↩️"),
+      const backIcon = span(
+        doc,
+        "margin-right: 12px; display: inline-flex; align-items: center;",
       );
+      backIcon.appendChild(
+        createSvgIcon(doc, "chevron-left", { size: 16, strokeWidth: 1.8 }),
+      );
+      backRow.appendChild(backIcon);
       backRow.appendChild(span(doc, "font-weight: 700;", "..."));
       backRow.addEventListener("click", () => {
         const prevId = history.pop();
@@ -1255,7 +1265,7 @@ function createFileRow(
       loadBtn.textContent = "...";
       try {
         await loadFileToContext(node, chatId, loadBtn, provider);
-        loadBtn.textContent = "✓";
+        loadBtn.replaceChildren(createSvgIcon(doc, "check", { size: 14 }));
         loadBtn.style.background = COLORS.success;
       } catch (err) {
         Zotero.debug(`[seerai] Load file error: ${err}`);
@@ -1279,7 +1289,7 @@ function createFileRow(
       importBtn.textContent = "...";
       try {
         await importFileToWorkspace(node, importBtn, provider);
-        importBtn.textContent = "✓";
+        importBtn.replaceChildren(createSvgIcon(doc, "check", { size: 14 }));
       } catch (err) {
         Zotero.debug(`[seerai] Import file error: ${err}`);
         importBtn.textContent = "!";

@@ -148,7 +148,12 @@ import { getWorkspaceStore } from "./chat/workspace/store";
 import { WORKSPACE_SYSTEM_PROMPT } from "./chat/workspace/tools";
 import { buildAgentSkillsCatalog } from "./chat/skills/registry";
 import { createCloudTabContent } from "./cloud/cloudTab";
-import { createSvgIcon, setButtonIcon, type IconName } from "./chat/ui/icons";
+import {
+  createSvgIcon,
+  setButtonIcon,
+  iconMarkup,
+  type IconName,
+} from "./chat/ui/icons";
 import { createSystematicReviewTabContent } from "./systematicReview/systematicReviewTab";
 import { getSRService } from "./systematicReview/service";
 import { getActiveProtocolRevision } from "./systematicReview/protocol";
@@ -1974,10 +1979,12 @@ export class Assistant {
     });
 
     const icon = ztoolkit.UI.createElement(doc, "div", {
-      properties: { innerText: "🪟" },
+      properties: { innerHTML: iconMarkup("focus", { size: 48 }) },
       styles: {
-        fontSize: "48px",
+        display: "flex",
+        justifyContent: "center",
         marginBottom: "8px",
+        opacity: "0.6",
       },
     });
 
@@ -3616,10 +3623,10 @@ export class Assistant {
 
         if (isSelected) {
           const check = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-          check.textContent = "\u2713";
+          check.appendChild(createSvgIcon(doc, "check", { size: 12 }));
           check.style.cssText = `
-            font-size: 12px;
-            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
             flex-shrink: 0;
             width: 14px;
             text-align: center;
@@ -3914,7 +3921,7 @@ export class Assistant {
         HTML_NS,
         "button",
       ) as HTMLButtonElement;
-      cancelBtn.textContent = "\u2715";
+      cancelBtn.appendChild(createSvgIcon(doc, "close", { size: 12 }));
       cancelBtn.title = "Cancel selection";
       cancelBtn.style.cssText = `
         padding: 3px 6px;
@@ -4055,7 +4062,7 @@ export class Assistant {
       header.appendChild(newChatInFolderBtn);
 
       const renameFolderBtn = doc.createElement("span");
-      renameFolderBtn.textContent = "\u270E";
+      renameFolderBtn.appendChild(createSvgIcon(doc, "edit", { size: 12 }));
       renameFolderBtn.title = `Rename folder "${folderName}"`;
       renameFolderBtn.style.cssText =
         "font-size: 12px; cursor: pointer; opacity: 0.5; padding: 0 4px;";
@@ -4212,10 +4219,10 @@ export class Assistant {
 
       if (isSelected) {
         const check = doc.createElementNS(HTML_NS, "span") as HTMLElement;
-        check.textContent = "\u2713";
+        check.appendChild(createSvgIcon(doc, "check", { size: 12 }));
         check.style.cssText = `
-          font-size: 12px;
-          font-weight: 700;
+          display: inline-flex;
+          align-items: center;
           flex-shrink: 0;
           width: 14px;
           text-align: center;
@@ -4489,7 +4496,7 @@ export class Assistant {
 
     // Move to folder sub-items
     if (conv.folder) {
-      addItem(`\u21A9 Remove from "${conv.folder}"`, async () => {
+      addItem(`Remove from "${conv.folder}"`, async () => {
         await store.removeConversationFromFolder(conv.id);
         await refreshHistory();
       });
@@ -5761,7 +5768,9 @@ export class Assistant {
           });
           newSkillInput.value = "";
           selectedSkills.add(name.toLowerCase().replace(/\s+/g, "-"));
-          newSkillBtn.textContent = "\u2713";
+          newSkillBtn.replaceChildren(
+            createSvgIcon(newSkillBtn.ownerDocument!, "check", { size: 12 }),
+          );
           setTimeout(() => {
             newSkillBtn.textContent = "+";
           }, 1000);
@@ -5902,7 +5911,7 @@ export class Assistant {
     titleText.textContent = "Configure Prompt & Skills";
     titleText.style.cssText = "font-weight: 600; font-size: 14px;";
     const closeBtn = doc.createElement("span");
-    closeBtn.textContent = "\u2715";
+    closeBtn.appendChild(createSvgIcon(doc, "close", { size: 14 }));
     closeBtn.style.cssText =
       "cursor: pointer; font-size: 16px; color: var(--text-secondary); padding: 0 4px;";
     closeBtn.addEventListener("click", () => overlay.remove());
@@ -6044,7 +6053,9 @@ export class Assistant {
           newCb.type = "checkbox";
           newCb.checked = true;
           selectedSkills.add(name.toLowerCase().replace(/\s+/g, "-"));
-          newSkillBtn.textContent = "\u2713";
+          newSkillBtn.replaceChildren(
+            createSvgIcon(newSkillBtn.ownerDocument!, "check", { size: 12 }),
+          );
           setTimeout(() => {
             newSkillBtn.textContent = "+";
           }, 1000);
@@ -6267,16 +6278,16 @@ export class Assistant {
     const isDetachedWindow = !!doc.getElementById("seerai-detached-window");
     const sideStrip = ztoolkit.UI.createElement(doc, "div", {
       styles: {
-        width: "48px",
-        minWidth: "48px",
+        width: "52px",
+        minWidth: "52px",
         display: "flex",
         flexDirection: "column",
         height: "100%",
         position: "relative",
         backgroundColor: "var(--background-secondary)",
         borderLeft: "1px solid var(--border-primary)",
-        paddingTop: isDetachedWindow ? "20px" : "120px",
-        paddingBottom: isDetachedWindow ? "20px" : "300px",
+        paddingTop: isDetachedWindow ? "16px" : "96px",
+        paddingBottom: isDetachedWindow ? "16px" : "240px",
         boxSizing: "border-box",
         transition: "background-color 0.2s ease",
       },
@@ -6298,8 +6309,8 @@ export class Assistant {
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "center",
-        gap: "12px",
-        padding: "16px 0",
+        gap: "7px",
+        padding: "10px 0",
         width: "100%",
         alignSelf: "center",
         zIndex: "100",
@@ -6307,7 +6318,24 @@ export class Assistant {
     });
     sideStrip.appendChild(stickyContainer);
 
-    // Helper for side buttons (same pattern as search tab)
+    const createSectionLabel = (text: string): HTMLElement =>
+      ztoolkit.UI.createElement(doc, "div", {
+        properties: { innerText: text },
+        styles: {
+          width: "30px",
+          marginTop: text === "Columns" ? "0" : "6px",
+          paddingTop: text === "Columns" ? "0" : "6px",
+          borderTop:
+            text === "Columns" ? "none" : "1px solid var(--border-primary)",
+          fontSize: "8px",
+          fontWeight: "700",
+          color: "var(--text-tertiary)",
+          textAlign: "center",
+          textTransform: "uppercase",
+          letterSpacing: "0",
+        },
+      });
+
     const createSideBtn = (
       icon: string | IconName,
       title: string,
@@ -6317,8 +6345,9 @@ export class Assistant {
         namespace: "html",
         attributes: { title: title },
         styles: {
-          width: "24px",
-          height: "24px",
+          width: "30px",
+          height: "30px",
+          padding: "0",
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
@@ -6429,6 +6458,7 @@ export class Assistant {
         "zap",
         "cpu",
         "message",
+        "bomb",
         "sparkles",
       ] as IconName[]);
       if (typeof icon === "string" && knownIcons.has(icon as IconName)) {
@@ -6439,7 +6469,6 @@ export class Assistant {
         btn.textContent = icon as string;
       }
 
-      // Hover effects
       btn.addEventListener("mouseenter", () => {
         btn.style.backgroundColor = "var(--highlight-primary)";
         btn.style.color = "var(--highlight-text)";
@@ -6454,7 +6483,8 @@ export class Assistant {
       return btn;
     };
 
-    // 1. (+) Add Column - immediately adds a new column with inline editing
+    stickyContainer.appendChild(createSectionLabel("Columns"));
+
     const addColumnBtn = createSideBtn(
       "add",
       "Add Analysis Column",
@@ -6465,7 +6495,7 @@ export class Assistant {
     );
     stickyContainer.appendChild(addColumnBtn);
 
-    // 2. (⚡) Generate All
+    // 2. Generate All
     const generateAllBtn = createSideBtn(
       "lightning",
       "Generate All Analysis",
@@ -6476,7 +6506,7 @@ export class Assistant {
     );
     stickyContainer.appendChild(generateAllBtn);
 
-    // 3. (⚙️) Settings
+    // 3. Settings
     const settingsBtn = createSideBtn(
       "settings",
       "Manage Columns & Settings",
@@ -6492,22 +6522,20 @@ export class Assistant {
     );
     stickyContainer.appendChild(settingsBtn);
 
-    // === BULK ACTIONS (Hidden by default) ===
     const bulkActionsContainer = ztoolkit.UI.createElement(doc, "div", {
       properties: { id: "table-bulk-actions" },
       styles: {
-        display: "none", // Hidden by default
+        display: "none",
         flexDirection: "column",
         gap: "8px",
-        marginTop: "16px",
-        paddingTop: "16px",
-        borderTop: "1px solid var(--border-primary)",
+        marginTop: "4px",
         width: "100%",
         alignItems: "center",
       },
     });
 
-    // 3b. (📋) Copy Selected
+    bulkActionsContainer.appendChild(createSectionLabel("Rows"));
+
     const copySelectedBtn = createSideBtn(
       "copy",
       "Copy Selected to Clipboard",
@@ -6581,7 +6609,7 @@ export class Assistant {
     );
     bulkActionsContainer.appendChild(copySelectedBtn);
 
-    // 4. (💾) Save Selected
+    // 4. Save Selected
     const saveSelectedBtn = createSideBtn(
       "save",
       "Save Selected as Notes",
@@ -6621,8 +6649,10 @@ export class Assistant {
           currentTableData!.selectedRowIds.has(r.paperId),
         );
         const btn = e.currentTarget as HTMLElement;
-        const originalText = btn.innerText;
-        btn.innerText = "";
+        const originalHTML = btn.innerHTML;
+        btn.replaceChildren(
+          createSvgIcon(doc, "hourglass", { size: 14, strokeWidth: 1.7 }),
+        );
         btn.style.cursor = "wait";
 
         let successCount = 0;
@@ -6640,14 +6670,13 @@ export class Assistant {
           }
         }
 
-        btn.innerText = "";
-        btn.style.color = "#4CAF50";
-        btn.appendChild(
+        btn.replaceChildren(
           createSvgIcon(doc, "check", { size: 14, strokeWidth: 1.7 }),
         );
+        btn.style.color = "#4CAF50";
         btn.title = `Tagged ${successCount} items${errorCount > 0 ? `, ${errorCount} errors` : ""}`;
         setTimeout(() => {
-          btn.innerText = originalText;
+          btn.innerHTML = originalHTML;
           btn.style.color = "";
           btn.title = "Generate Tags for Selected";
         }, 3000);
@@ -6656,7 +6685,7 @@ export class Assistant {
     );
     bulkActionsContainer.appendChild(tagSelectedBtn);
 
-    // 5. (⚡) Generate/Regenerate Selected
+    // 5. Generate/Regenerate Selected
     const genSelectedBtn = createSideBtn(
       "lightning",
       "Generate/Regenerate Selected",
@@ -6670,7 +6699,7 @@ export class Assistant {
     );
     bulkActionsContainer.appendChild(genSelectedBtn);
 
-    // 5b. (🔄) Regenerate Previously Generated
+    // 5b. Regenerate Previously Generated
     const regenSelectedBtn = createSideBtn(
       "refresh",
       "Regenerate Previously Generated",
@@ -6683,7 +6712,7 @@ export class Assistant {
     );
     bulkActionsContainer.appendChild(regenSelectedBtn);
 
-    // 5c. (📁) Add to Folder
+    // 5c. Add to Folder
     const addToFolderBtn = createSideBtn(
       "folder",
       "Add Selected to Folder",
@@ -6696,7 +6725,8 @@ export class Assistant {
     );
     bulkActionsContainer.appendChild(addToFolderBtn);
 
-    // 6. (🗑️) Trash (Remove from Table)
+    bulkActionsContainer.appendChild(createSectionLabel("Del"));
+
     const trashSelectedBtn = createSideBtn(
       "trash",
       "Remove Selected from Table",
@@ -6731,9 +6761,9 @@ export class Assistant {
     );
     bulkActionsContainer.appendChild(trashSelectedBtn);
 
-    // 7. (💣) Bomb (Delete from Zotero)
+    // 7. Bomb (Delete from Zotero)
     const bombSelectedBtn = createSideBtn(
-      "💣",
+      "bomb",
       "Delete Selected from Zotero",
       async (e) => {
         e.stopPropagation();
@@ -6821,7 +6851,7 @@ export class Assistant {
     const searchInput = ztoolkit.UI.createElement(doc, "input", {
       attributes: {
         type: "text",
-        placeholder: "🔍 Search Semantic Scholar...",
+        placeholder: "Search Semantic Scholar...",
         value: currentSearchState.query || "",
       },
       properties: { id: "semantic-scholar-search-input" },
@@ -6879,13 +6909,13 @@ export class Assistant {
 
     // Query syntax help tooltip
     const syntaxHelp = ztoolkit.UI.createElement(doc, "span", {
-      properties: { innerText: "❓" },
+      properties: { innerHTML: iconMarkup("help", { size: 15 }) },
       attributes: {
         title:
           'Syntax: "phrase" | word1+word2 | word1|word2 | -exclude | word* | word~3',
       },
       styles: {
-        fontSize: "14px",
+        display: "inline-flex",
         cursor: "help",
         opacity: "0.6",
         flexShrink: "0",
@@ -6895,14 +6925,18 @@ export class Assistant {
     // Suggestions button (replaces auto-dropdown with user-triggered action)
     const suggestionsBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "💡", title: "Get suggestions" },
+      properties: {
+        innerHTML: iconMarkup("idea", { size: 15 }),
+        title: "Get suggestions",
+      },
       styles: {
+        display: "inline-flex",
+        alignItems: "center",
         padding: "8px 10px",
         backgroundColor: "var(--background-secondary)",
         color: "var(--text-primary)",
         border: "1px solid var(--border-primary)",
         borderRadius: "6px",
-        fontSize: "14px",
         cursor: "pointer",
         marginLeft: "4px",
         flexShrink: "0",
@@ -7003,7 +7037,7 @@ export class Assistant {
             backgroundColor: "var(--background-secondary)",
           },
         });
-        header.innerHTML = `💡 ${suggestions.length} suggestion${suggestions.length > 1 ? "s" : ""} for "${query}"`;
+        header.innerHTML = `${iconMarkup("idea", { size: 12 })} ${suggestions.length} suggestion${suggestions.length > 1 ? "s" : ""} for "${query}"`;
         suggestionsDropdown.appendChild(header);
 
         suggestions.slice(0, 8).forEach((sugg) => {
@@ -7050,7 +7084,7 @@ export class Assistant {
       }
     });
 
-    // AI Query Refiner button (🤖)
+    // AI Query Refiner button
     const aiRefineBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
       properties: {
@@ -7252,7 +7286,10 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
               const useBtn = ztoolkit.UI.createElement(doc, "button", {
                 namespace: "html",
-                properties: { innerText: "✓ Use & Search" },
+                properties: {
+                  innerHTML:
+                    iconMarkup("check", { size: 12 }) + " Use & Search",
+                },
                 styles: {
                   flex: "1",
                   padding: "8px 12px",
@@ -7289,7 +7326,8 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
                 new ztoolkit.Clipboard()
                   .addText(refinedQuery, "text/unicode")
                   .copy();
-                copyBtn.innerText = "✓ Copied!";
+                copyBtn.innerHTML =
+                  iconMarkup("check", { size: 12 }) + " Copied!";
                 setTimeout(() => {
                   copyBtn.innerText = "Copy";
                 }, 1500);
@@ -7339,14 +7377,18 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     // === PAST SEARCHES BUTTON AND DROPDOWN ===
     const pastSearchesBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "📜", title: "Past Searches" },
+      properties: {
+        innerHTML: iconMarkup("list", { size: 15 }),
+        title: "Past Searches",
+      },
       styles: {
+        display: "inline-flex",
+        alignItems: "center",
         padding: "8px 10px",
         backgroundColor: "var(--background-secondary)",
         color: "var(--text-primary)",
         border: "1px solid var(--border-primary)",
         borderRadius: "6px",
-        fontSize: "14px",
         cursor: "pointer",
         marginLeft: "4px",
         flexShrink: "0",
@@ -7401,7 +7443,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
             fontSize: "12px",
           },
         });
-        emptyMsg.textContent = "📭 No past searches yet";
+        emptyMsg.textContent = "No past searches yet";
         const br1 = doc.createElementNS(HTML_NS, "br");
         const br2 = doc.createElementNS(HTML_NS, "br");
         emptyMsg.appendChild(br1);
@@ -7424,7 +7466,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
             backgroundColor: "var(--background-secondary)",
           },
         });
-        header.innerHTML = `📜 ${history.length} Past Searches`;
+        header.innerHTML = `${iconMarkup("list", { size: 12 })} ${history.length} Past Searches`;
         pastSearchesDropdown.appendChild(header);
 
         // History entries
@@ -7480,14 +7522,17 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
           // Delete button
           const deleteBtn = ztoolkit.UI.createElement(doc, "button", {
             namespace: "html",
-            properties: { innerText: "🗑️", title: "Delete this search" },
+            properties: {
+              innerHTML: iconMarkup("trash", { size: 13 }),
+              title: "Delete this search",
+            },
             styles: {
+              display: "inline-flex",
               padding: "4px 6px",
               backgroundColor: "transparent",
               color: "var(--text-secondary)",
               border: "none",
               borderRadius: "4px",
-              fontSize: "12px",
               cursor: "pointer",
               opacity: "0.6",
             },
@@ -7516,13 +7561,13 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
                   fontSize: "12px",
                 },
               });
-              emptyMsg.innerHTML = "📭 No past searches";
+              emptyMsg.innerHTML = "No past searches";
               pastSearchesDropdown.appendChild(emptyMsg);
             } else {
               const headerEl =
                 pastSearchesDropdown.querySelector("div:first-child");
               if (headerEl)
-                headerEl.innerHTML = `📜 ${newHistory.length} Past Searches`;
+                headerEl.innerHTML = `${iconMarkup("list", { size: 12 })} ${newHistory.length} Past Searches`;
             }
           });
           item.appendChild(deleteBtn);
@@ -7733,8 +7778,11 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     // Save button
     const saveBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "💾 Save" },
+      properties: { innerHTML: iconMarkup("save", { size: 12 }) + " Save" },
       styles: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
         padding: "4px 10px",
         border: "1px solid var(--border-primary)",
         borderRadius: "4px",
@@ -7769,9 +7817,10 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     // Rename button
     const renameBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "✏️" },
+      properties: { innerHTML: iconMarkup("edit", { size: 13 }) },
       attributes: { title: "Rename preset" },
       styles: {
+        display: "inline-flex",
         padding: "4px 8px",
         border: "1px solid var(--border-primary)",
         borderRadius: "4px",
@@ -7823,9 +7872,10 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     // Delete button
     const deleteBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "🗑️" },
+      properties: { innerHTML: iconMarkup("trash", { size: 13 }) },
       attributes: { title: "Delete preset" },
       styles: {
+        display: "inline-flex",
         padding: "4px 8px",
         border: "1px solid var(--border-primary)",
         borderRadius: "4px",
@@ -7860,7 +7910,9 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     // Toggle button for advanced filters
     const toggleBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "⚙️ Advanced" },
+      properties: {
+        innerHTML: iconMarkup("settings", { size: 12 }) + " Advanced",
+      },
       attributes: { title: "Show/hide advanced filters" },
       styles: {
         padding: "4px 10px",
@@ -8038,7 +8090,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
     const hideDupsCheck = this.createFilterCheckbox(
       doc,
-      "🚫 Hide Library Duplicates",
+      "Hide Library Duplicates",
       currentSearchState.hideLibraryDuplicates,
       (val) => {
         currentSearchState.hideLibraryDuplicates = val;
@@ -8287,7 +8339,10 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
       },
     });
     const saveLocationLabel = ztoolkit.UI.createElement(doc, "label", {
-      properties: { innerText: "📥 Save imported papers to:" },
+      properties: {
+        innerHTML:
+          iconMarkup("download", { size: 12 }) + " Save imported papers to:",
+      },
       styles: { ...labelStyle, fontWeight: "600" },
     });
     const saveLocationSelect = ztoolkit.UI.createElement(doc, "select", {
@@ -8335,7 +8390,8 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
       },
     });
     insightsHeader.innerHTML =
-      "<span>💡</span><span>AI Insights Configuration</span>";
+      iconMarkup("idea", { size: 14 }) +
+      "<span>AI Insights Configuration</span>";
     advancedFiltersContainer.appendChild(insightsHeader);
 
     const insightsSection = ztoolkit.UI.createElement(doc, "div", {
@@ -8819,7 +8875,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
         },
       });
       emptyState.innerHTML = `
-                <div style="font-size: 48px; margin-bottom: 16px;">🔍</div>
+                <div style="margin-bottom: 16px; opacity: 0.6;">${iconMarkup("search", { size: 48 })}</div>
                 <div style="font-size: 14px; font-weight: 500; margin-bottom: 8px;">Search Semantic Scholar</div>
                 <div style="font-size: 12px;">Enter a query to find relevant papers</div>
             `;
@@ -8837,7 +8893,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
         },
       });
       noResults.innerHTML = `
-                <div style="font-size: 32px; margin-bottom: 8px;">📭</div>
+                <div style="margin-bottom: 8px; opacity: 0.6;">${iconMarkup("x-circle", { size: 32 })}</div>
                 <div>No papers found for "${currentSearchState.query}"</div>
             `;
       container.appendChild(noResults);
@@ -8863,7 +8919,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     const filterNote = currentSearchState.hideLibraryDuplicates
       ? " (hiding library duplicates)"
       : "";
-    countText.innerHTML = `📊 Found <strong>${totalSearchResults.toLocaleString()}</strong> papers • Showing ${currentSearchResults.length}${filterNote}`;
+    countText.innerHTML = `${iconMarkup("list", { size: 12 })} Found <strong>${totalSearchResults.toLocaleString()}</strong> papers • Showing ${currentSearchResults.length}${filterNote}`;
     countHeader.appendChild(countText);
 
     const headerButtons = ztoolkit.UI.createElement(doc, "div", {
@@ -8873,8 +8929,13 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     // Export BibTeX button (Keep only this button in header)
     const exportBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "📥 Export BibTeX" },
+      properties: {
+        innerHTML: iconMarkup("download", { size: 12 }) + " Export BibTeX",
+      },
       styles: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
         padding: "4px 10px",
         fontSize: "11px",
         border: "1px solid var(--border-primary)",
@@ -8889,20 +8950,20 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
           listener: async (e: Event) => {
             e.stopPropagation();
             const btn = e.target as HTMLButtonElement;
-            const originalText = btn.textContent;
+            const originalHTML = btn.innerHTML;
             btn.textContent = "Exporting...";
             btn.disabled = true;
             try {
               await this.exportResultsAsBibtex();
-              btn.textContent = "✓ Exported!";
+              btn.innerHTML = iconMarkup("check", { size: 12 }) + " Exported!";
               setTimeout(() => {
-                btn.textContent = originalText;
+                btn.innerHTML = originalHTML;
                 btn.disabled = false;
               }, 2000);
             } catch (err) {
               btn.textContent = "Failed";
               setTimeout(() => {
-                btn.textContent = originalText;
+                btn.innerHTML = originalHTML;
                 btn.disabled = false;
               }, 2000);
             }
@@ -9031,7 +9092,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             summaryContainer.innerHTML = `
                         <div style="font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-primary); padding-bottom: 8px;">
                             <div style="display: flex; align-items: center; gap: 6px;">
-                                <span style="font-size: 16px;">💡</span>
+                                ${iconMarkup("idea", { size: 16 })}
                                 <span>AI Insights Summary</span>
                             </div>
                             <span style="font-size: 11px; font-weight: 400; opacity: 0.6; font-style: italic;">AI is thinking...</span>
@@ -9053,13 +9114,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             summaryContainer.innerHTML = `
                         <div style="font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-primary); padding-bottom: 8px;">
                             <div style="display: flex; align-items: center; gap: 6px;">
-                                <span style="font-size: 16px;">💡</span>
+                                ${iconMarkup("idea", { size: 16 })}
                                 <span>AI Insights Summary</span>
                             </div>
                             <div style="display: flex; gap: 6px;">
-                                <button id="settings-summary-btn" style="padding: 4px 8px; font-size: 14px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;" title="AI Settings">⚙️</button>
+                                <button id="settings-summary-btn" style="padding: 4px 8px; font-size: 14px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;" title="AI Settings">${iconMarkup("settings", { size: 14 })}</button>
                                 <button id="copy-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;">Copy</button>
-                                <button id="close-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;">✕ Close</button>
+                                <button id="close-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s; display: inline-flex; align-items: center; gap: 4px;">${iconMarkup("close", { size: 11 })} Close</button>
                             </div>
                         </div>
                         <div class="markdown-content" style="font-size: 13px; line-height: 1.6; color: var(--text-primary);">${parseMarkdown(fullSummary)}</div>
@@ -9091,7 +9152,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                 const btn = doc.getElementById(
                   "copy-summary-btn",
                 ) as HTMLButtonElement;
-                btn.innerText = "✓ Copied!";
+                btn.innerHTML = iconMarkup("check", { size: 12 }) + " Copied!";
                 setTimeout(() => (btn.innerText = "Copy"), 2000);
               });
 
@@ -9147,13 +9208,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     summaryContainer.innerHTML = `
       <div style="font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-primary); padding-bottom: 8px;">
         <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="font-size: 16px;">💡</span>
+          ${iconMarkup("idea", { size: 16 })}
           <span>AI Insights Summary</span>
         </div>
         <div style="display: flex; gap: 6px;">
-          <button id="settings-summary-btn" style="padding: 4px 8px; font-size: 14px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;" title="AI Settings">⚙️</button>
+          <button id="settings-summary-btn" style="padding: 4px 8px; font-size: 14px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;" title="AI Settings">${iconMarkup("settings", { size: 14 })}</button>
           <button id="copy-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;">Copy</button>
-          <button id="close-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s;">✕ Close</button>
+          <button id="close-summary-btn" style="padding: 4px 10px; font-size: 11px; cursor: pointer; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--background-primary); color: var(--text-primary); transition: all 0.2s; display: inline-flex; align-items: center; gap: 4px;">${iconMarkup("close", { size: 11 })} Close</button>
         </div>
       </div>
       <div class="markdown-content" style="font-size: 13px; line-height: 1.6; color: var(--text-primary);">${parseMarkdown(cachedContent)}</div>
@@ -9179,7 +9240,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     doc.getElementById("copy-summary-btn")?.addEventListener("click", () => {
       new ztoolkit.Clipboard().addText(cachedContent, "text/unicode").copy();
       const btn = doc.getElementById("copy-summary-btn") as HTMLButtonElement;
-      btn.innerText = "✓ Copied!";
+      btn.innerHTML = iconMarkup("check", { size: 12 }) + " Copied!";
       setTimeout(() => (btn.innerText = "Copy"), 2000);
     });
 
@@ -9239,8 +9300,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     const sendBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "➤" },
+      properties: { innerHTML: iconMarkup("send", { size: 14 }) },
       styles: {
+        display: "inline-flex",
+        alignItems: "center",
         padding: "8px 12px",
         borderRadius: "4px",
         border: "none",
@@ -10138,7 +10201,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           const badge = card.querySelector('span[style*="Checking"]');
           if (badge && badge instanceof HTMLElement) {
             if (pdfUrl) {
-              badge.innerText = "🔗 PDF (Unpaywall)";
+              badge.innerHTML =
+                iconMarkup("open-link", { size: 11 }) + " PDF (Unpaywall)";
               badge.style.backgroundColor = "#e3f2fd";
               badge.style.color = "#1976d2";
               badge.style.cursor = "pointer";
@@ -10148,7 +10212,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                 Zotero.launchURL(pdfUrl);
               };
             } else {
-              badge.innerText = "📭 No PDF";
+              badge.innerText = "No PDF";
               badge.style.backgroundColor = "#fafafa";
               badge.style.color = "#9e9e9e";
             }
@@ -10197,7 +10261,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       // Create new Show More button
       const showMoreBtn = ztoolkit.UI.createElement(doc, "button", {
         namespace: "html",
-        properties: { innerText: "📥 Show More", id: "show-more-btn" },
+        properties: {
+          innerHTML: iconMarkup("download", { size: 13 }) + " Show More",
+          id: "show-more-btn",
+        },
         styles: {
           display: "block",
           width: "calc(100% - 24px)",
@@ -10369,7 +10436,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         marginBottom: "6px",
       },
     });
-    citationBadge.innerHTML = `📈 <strong>${paper.citationCount.toLocaleString()}</strong> citations`;
+    citationBadge.innerHTML = `<strong>${paper.citationCount.toLocaleString()}</strong> citations`;
     card.appendChild(citationBadge);
 
     // Abstract preview (TLDR or truncated abstract)
@@ -10404,6 +10471,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     });
 
     const actionBtnStyle = {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "4px",
       padding: "6px 10px",
       fontSize: "11px",
       border: "1px solid var(--border-primary)",
@@ -10416,7 +10486,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // Add to Zotero button with full PDF discovery integration
     const addToZoteroBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "➕ Add to Zotero" },
+      properties: {
+        innerHTML: iconMarkup("add", { size: 12 }) + " Add to Zotero",
+      },
       styles: {
         ...actionBtnStyle,
         backgroundColor: "var(--highlight-primary)",
@@ -10429,10 +10501,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           listener: async (e: Event) => {
             e.stopPropagation();
             const btn = e.target as HTMLButtonElement;
-            const originalText = btn.textContent;
 
             // Show importing status
-            btn.textContent = "⬇️ Importing...";
+            btn.innerHTML =
+              iconMarkup("download", { size: 12 }) + " Importing...";
             btn.disabled = true;
             btn.style.backgroundColor = "#e3f2fd";
             btn.style.color = "#1976d2";
@@ -10452,7 +10524,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                   btn.style.color = "#2e7d32";
                 } else if (result.sourceUrl) {
                   // No PDF but item created - show Source-Link option
-                  btn.textContent = "🔗 Source-Link";
+                  btn.innerHTML =
+                    iconMarkup("open-link", { size: 12 }) + " Source-Link";
                   btn.style.backgroundColor = "#e8eaf6";
                   btn.style.color = "#3f51b5";
                   btn.disabled = false;
@@ -10468,7 +10541,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                     // Attach button
                     const attachBtn = ztoolkit.UI.createElement(doc, "button", {
                       namespace: "html",
-                      properties: { innerText: "⬇️ Attach" },
+                      properties: {
+                        innerHTML:
+                          iconMarkup("download", { size: 11 }) + " Attach",
+                      },
                       styles: {
                         padding: "4px 8px",
                         fontSize: "10px",
@@ -10485,7 +10561,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                             attachEvent.stopPropagation();
                             (
                               attachEvent.target as HTMLButtonElement
-                            ).textContent = "📥 Attaching...";
+                            ).innerHTML =
+                              iconMarkup("download", { size: 11 }) +
+                              " Attaching...";
                             (attachEvent.target as HTMLButtonElement).disabled =
                               true;
                             try {
@@ -10509,7 +10587,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                               } else {
                                 (
                                   attachEvent.target as HTMLButtonElement
-                                ).textContent = "⬇️ Attach";
+                                ).innerHTML =
+                                  iconMarkup("download", { size: 11 }) +
+                                  " Attach";
                                 (
                                   attachEvent.target as HTMLButtonElement
                                 ).disabled = false;
@@ -10518,7 +10598,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                               Zotero.debug(`[seerai] Attach error: ${err}`);
                               (
                                 attachEvent.target as HTMLButtonElement
-                              ).textContent = "⬇️ Attach";
+                              ).innerHTML =
+                                iconMarkup("download", { size: 11 }) +
+                                " Attach";
                               (
                                 attachEvent.target as HTMLButtonElement
                               ).disabled = false;
@@ -10531,7 +10613,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                     // Retry button
                     const retryBtn = ztoolkit.UI.createElement(doc, "button", {
                       namespace: "html",
-                      properties: { innerText: "🔁 Retry" },
+                      properties: {
+                        innerHTML:
+                          iconMarkup("refresh", { size: 11 }) + " Retry",
+                      },
                       styles: {
                         padding: "4px 8px",
                         fontSize: "10px",
@@ -10576,7 +10661,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                               } else {
                                 (
                                   retryEvent.target as HTMLButtonElement
-                                ).textContent = "🔁 Retry";
+                                ).innerHTML =
+                                  iconMarkup("refresh", { size: 11 }) +
+                                  " Retry";
                                 (
                                   retryEvent.target as HTMLButtonElement
                                 ).disabled = false;
@@ -10584,7 +10671,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                             } catch (err) {
                               (
                                 retryEvent.target as HTMLButtonElement
-                              ).textContent = "🔁 Retry";
+                              ).innerHTML =
+                                iconMarkup("refresh", { size: 11 }) + " Retry";
                               (
                                 retryEvent.target as HTMLButtonElement
                               ).disabled = false;
@@ -10600,7 +10688,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                   };
                 } else {
                   // No PDF and no source URL - show retry
-                  btn.textContent = "🔁 Retry";
+                  btn.innerHTML =
+                    iconMarkup("refresh", { size: 12 }) + " Retry";
                   btn.style.backgroundColor = "#fafafa";
                   btn.style.color = "#757575";
                   btn.disabled = false;
@@ -10610,7 +10699,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                 btn.style.backgroundColor = "#ffebee";
                 btn.style.color = "#c62828";
                 setTimeout(() => {
-                  btn.textContent = originalText || "➕ Add to Zotero";
+                  btn.innerHTML =
+                    iconMarkup("add", { size: 12 }) + " Add to Zotero";
                   btn.style.backgroundColor = "var(--highlight-primary)";
                   btn.style.color = "var(--highlight-text)";
                   btn.disabled = false;
@@ -10622,7 +10712,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               btn.style.backgroundColor = "#ffebee";
               btn.style.color = "#c62828";
               setTimeout(() => {
-                btn.textContent = originalText || "➕ Add to Zotero";
+                btn.innerHTML =
+                  iconMarkup("add", { size: 12 }) + " Add to Zotero";
                 btn.style.backgroundColor = "var(--highlight-primary)";
                 btn.style.color = "var(--highlight-text)";
                 btn.disabled = false;
@@ -10637,7 +10728,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // Add to Table button with full PDF discovery integration
     const addToTableBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "📊 Add to Table" },
+      properties: {
+        innerHTML: iconMarkup("table", { size: 12 }) + " Add to Table",
+      },
       styles: actionBtnStyle,
       listeners: [
         {
@@ -10645,10 +10738,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           listener: async (e: Event) => {
             e.stopPropagation();
             const btn = e.target as HTMLButtonElement;
-            const originalText = btn.textContent;
 
             // Show importing status immediately
-            btn.textContent = "⬇️ Importing...";
+            btn.innerHTML =
+              iconMarkup("download", { size: 12 }) + " Importing...";
             btn.disabled = true;
             btn.style.backgroundColor = "#e3f2fd";
             btn.style.color = "#1976d2";
@@ -10676,7 +10769,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                   btn.style.color = "#2e7d32";
                 } else if (result.sourceUrl) {
                   // No PDF but item created - show Source-Link option
-                  btn.textContent = "🔗 Source-Link";
+                  btn.innerHTML =
+                    iconMarkup("open-link", { size: 12 }) + " Source-Link";
                   btn.style.backgroundColor = "#e8eaf6";
                   btn.style.color = "#3f51b5";
                   btn.disabled = false;
@@ -10692,7 +10786,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                     // Attach button
                     const attachBtn = ztoolkit.UI.createElement(doc, "button", {
                       namespace: "html",
-                      properties: { innerText: "⬇️ Attach" },
+                      properties: {
+                        innerHTML:
+                          iconMarkup("download", { size: 11 }) + " Attach",
+                      },
                       styles: {
                         padding: "4px 8px",
                         fontSize: "10px",
@@ -10709,7 +10806,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                             attachEvent.stopPropagation();
                             (
                               attachEvent.target as HTMLButtonElement
-                            ).textContent = "📥 Attaching...";
+                            ).innerHTML =
+                              iconMarkup("download", { size: 11 }) +
+                              " Attaching...";
                             (attachEvent.target as HTMLButtonElement).disabled =
                               true;
                             try {
@@ -10732,7 +10831,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                               } else {
                                 (
                                   attachEvent.target as HTMLButtonElement
-                                ).textContent = "⬇️ Attach";
+                                ).innerHTML =
+                                  iconMarkup("download", { size: 11 }) +
+                                  " Attach";
                                 (
                                   attachEvent.target as HTMLButtonElement
                                 ).disabled = false;
@@ -10741,7 +10842,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                               Zotero.debug(`[seerai] Attach error: ${err}`);
                               (
                                 attachEvent.target as HTMLButtonElement
-                              ).textContent = "⬇️ Attach";
+                              ).innerHTML =
+                                iconMarkup("download", { size: 11 }) +
+                                " Attach";
                               (
                                 attachEvent.target as HTMLButtonElement
                               ).disabled = false;
@@ -10754,7 +10857,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                     // Retry button
                     const retryBtn = ztoolkit.UI.createElement(doc, "button", {
                       namespace: "html",
-                      properties: { innerText: "🔁 Retry" },
+                      properties: {
+                        innerHTML:
+                          iconMarkup("refresh", { size: 11 }) + " Retry",
+                      },
                       styles: {
                         padding: "4px 8px",
                         fontSize: "10px",
@@ -10797,7 +10903,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                               } else {
                                 (
                                   retryEvent.target as HTMLButtonElement
-                                ).textContent = "🔁 Retry";
+                                ).innerHTML =
+                                  iconMarkup("refresh", { size: 11 }) +
+                                  " Retry";
                                 (
                                   retryEvent.target as HTMLButtonElement
                                 ).disabled = false;
@@ -10805,7 +10913,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                             } catch (err) {
                               (
                                 retryEvent.target as HTMLButtonElement
-                              ).textContent = "🔁 Retry";
+                              ).innerHTML =
+                                iconMarkup("refresh", { size: 11 }) + " Retry";
                               (
                                 retryEvent.target as HTMLButtonElement
                               ).disabled = false;
@@ -10821,7 +10930,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                   };
                 } else {
                   // No PDF and no source URL - show retry
-                  btn.textContent = "🔁 Retry";
+                  btn.innerHTML =
+                    iconMarkup("refresh", { size: 12 }) + " Retry";
                   btn.style.backgroundColor = "#fafafa";
                   btn.style.color = "#757575";
                   btn.disabled = false;
@@ -10831,7 +10941,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                 btn.style.backgroundColor = "#ffebee";
                 btn.style.color = "#c62828";
                 setTimeout(() => {
-                  btn.textContent = originalText || "📊 Add to Table";
+                  btn.innerHTML =
+                    iconMarkup("table", { size: 12 }) + " Add to Table";
                   btn.style.backgroundColor = "var(--background-secondary)";
                   btn.style.color = "var(--text-primary)";
                   btn.disabled = false;
@@ -10843,7 +10954,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               btn.style.backgroundColor = "#ffebee";
               btn.style.color = "#c62828";
               setTimeout(() => {
-                btn.textContent = originalText || "📊 Add to Table";
+                btn.innerHTML =
+                  iconMarkup("table", { size: 12 }) + " Add to Table";
                 btn.style.backgroundColor = "var(--background-secondary)";
                 btn.style.color = "var(--text-primary)";
                 btn.disabled = false;
@@ -10858,7 +10970,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // Open in browser button
     const openBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "🔗 Open" },
+      properties: {
+        innerHTML: iconMarkup("open-link", { size: 12 }) + " Open",
+      },
       styles: actionBtnStyle,
       listeners: [
         {
@@ -10876,7 +10990,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     if (paper.openAccessPdf?.url) {
       const pdfBtn = ztoolkit.UI.createElement(doc, "button", {
         namespace: "html",
-        properties: { innerText: "🔗 PDF" },
+        properties: {
+          innerHTML: iconMarkup("open-link", { size: 12 }) + " PDF",
+        },
         styles: {
           ...actionBtnStyle,
           backgroundColor: "#e3f2fd",
@@ -10914,7 +11030,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
       const pdfDiscoveryBtn = ztoolkit.UI.createElement(doc, "button", {
         namespace: "html",
-        properties: { innerText: "🔍 Find PDF" },
+        properties: {
+          innerHTML: iconMarkup("search", { size: 12 }) + " Find PDF",
+        },
         styles: {
           ...actionBtnStyle,
           backgroundColor: "#e3f2fd",
@@ -10939,7 +11057,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                 Zotero.launchURL(sourceUrl);
                 // Change to retry state after opening
                 buttonState = "retry";
-                pdfDiscoveryBtn.textContent = "🔁 Retry";
+                pdfDiscoveryBtn.innerHTML =
+                  iconMarkup("refresh", { size: 12 }) + " Retry";
                 pdfDiscoveryBtn.style.backgroundColor = "#fafafa";
                 pdfDiscoveryBtn.style.color = "#757575";
                 pdfDiscoveryBtn.style.border = "1px solid #e0e0e0";
@@ -11024,13 +11143,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
           // Step 3: Try PubMed Central if PMID available
           if (paper.externalIds?.PMID) {
-            pdfDiscoveryBtn.textContent = "🏥 PMC...";
+            pdfDiscoveryBtn.textContent = "PMC...";
             const pmcResult = await findPdfViaPmc(paper.externalIds.PMID);
             if (pmcResult) {
               Zotero.debug(`[seerai] PMC found PDF: ${pmcResult}`);
               buttonState = "pdf";
               pdfUrl = pmcResult;
-              pdfDiscoveryBtn.textContent = "🏥 PMC PDF";
+              pdfDiscoveryBtn.textContent = "PMC PDF";
               pdfDiscoveryBtn.style.backgroundColor = "#e8f5e9";
               pdfDiscoveryBtn.style.color = "#2e7d32";
               pdfDiscoveryBtn.style.border = "1px solid #a5d6a7";
@@ -11041,7 +11160,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
           // Step 4: Try bioRxiv/medRxiv if DOI starts with 10.1101
           if (paper.externalIds?.DOI?.startsWith("10.1101/")) {
-            pdfDiscoveryBtn.textContent = "🧬 bioRxiv...";
+            pdfDiscoveryBtn.textContent = "bioRxiv...";
             const biorxivResult = await findPdfViaBiorxiv(
               paper.externalIds.DOI,
             );
@@ -11049,7 +11168,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               Zotero.debug(`[seerai] bioRxiv found PDF: ${biorxivResult}`);
               buttonState = "pdf";
               pdfUrl = biorxivResult;
-              pdfDiscoveryBtn.textContent = "🧬 bioRxiv PDF";
+              pdfDiscoveryBtn.textContent = "bioRxiv PDF";
               pdfDiscoveryBtn.style.backgroundColor = "#e8f5e9";
               pdfDiscoveryBtn.style.color = "#2e7d32";
               pdfDiscoveryBtn.style.border = "1px solid #a5d6a7";
@@ -11060,7 +11179,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
           // Step 5: Try Unpaywall if DOI available
           if (paper.externalIds?.DOI) {
-            pdfDiscoveryBtn.textContent = "🔍 Unpaywall...";
+            pdfDiscoveryBtn.textContent = "Unpaywall...";
             Zotero.debug(
               `[seerai] Trying Unpaywall for DOI: ${paper.externalIds.DOI}`,
             );
@@ -11082,7 +11201,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           }
 
           // Step 6: Try Europe PMC as final fallback
-          pdfDiscoveryBtn.textContent = "🇪🇺 EuropePMC...";
+          pdfDiscoveryBtn.textContent = "EuropePMC...";
           const epmcResult = await findPdfViaEuropePmc(
             paper.externalIds?.DOI,
             paper.externalIds?.PMID,
@@ -11091,7 +11210,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             Zotero.debug(`[seerai] EuropePMC found PDF: ${epmcResult}`);
             buttonState = "pdf";
             pdfUrl = epmcResult;
-            pdfDiscoveryBtn.textContent = "🇪🇺 EuropePMC PDF";
+            pdfDiscoveryBtn.textContent = "EuropePMC PDF";
             pdfDiscoveryBtn.style.backgroundColor = "#e8f5e9";
             pdfDiscoveryBtn.style.color = "#2e7d32";
             pdfDiscoveryBtn.style.border = "1px solid #a5d6a7";
@@ -11103,7 +11222,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           /*
                               if (firecrawlService.isConfigured()) {
                                   Zotero.debug(`[seerai] Trying Firecrawl for: ${paper.title.slice(0, 50)}...`);
-                                  pdfDiscoveryBtn.textContent = "🔥 Searching...";
+                                  pdfDiscoveryBtn.textContent = "Searching...";
                                   pdfDiscoveryBtn.style.backgroundColor = "#fff8e1";
                                   pdfDiscoveryBtn.style.color = "#ff8f00";
                                   pdfDiscoveryBtn.style.border = "1px solid #ffcc80";
@@ -11120,7 +11239,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                                       firecrawlPdfCache.set(paper.paperId, firecrawlResult);
                                       buttonState = 'pdf';
                                       pdfUrl = firecrawlResult.pdfUrl;
-                                      pdfDiscoveryBtn.textContent = "🔥 Fire PDF";
+                                      pdfDiscoveryBtn.textContent = "Fire PDF";
                                       pdfDiscoveryBtn.style.backgroundColor = "#fff3e0";
                                       pdfDiscoveryBtn.style.color = "#e65100";
                                       pdfDiscoveryBtn.style.border = "1px solid #ffcc80";
@@ -11130,7 +11249,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                                       firecrawlPdfCache.set(paper.paperId, firecrawlResult);
                                       buttonState = 'page';
                                       pageUrl = firecrawlResult.pageUrl;
-                                      pdfDiscoveryBtn.textContent = "🔗 Fire-page";
+                                      pdfDiscoveryBtn.textContent = "Fire-page";
                                       pdfDiscoveryBtn.style.backgroundColor = "#e8eaf6";
                                       pdfDiscoveryBtn.style.color = "#3f51b5";
                                       pdfDiscoveryBtn.style.border = "1px solid #9fa8da";
@@ -11153,14 +11272,16 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           if (sourceLink) {
             buttonState = "source";
             sourceUrl = sourceLink;
-            pdfDiscoveryBtn.textContent = "🔗 Source-Link";
+            pdfDiscoveryBtn.innerHTML =
+              iconMarkup("open-link", { size: 12 }) + " Source-Link";
             pdfDiscoveryBtn.style.backgroundColor = "#e8eaf6";
             pdfDiscoveryBtn.style.color = "#3f51b5";
             pdfDiscoveryBtn.style.border = "1px solid #9fa8da";
             pdfDiscoveryBtn.disabled = false;
           } else {
             buttonState = "retry";
-            pdfDiscoveryBtn.textContent = "🔁 Retry";
+            pdfDiscoveryBtn.innerHTML =
+              iconMarkup("refresh", { size: 12 }) + " Retry";
             pdfDiscoveryBtn.style.backgroundColor = "#fafafa";
             pdfDiscoveryBtn.style.color = "#757575";
             pdfDiscoveryBtn.style.border = "1px solid #e0e0e0";
@@ -11171,7 +11292,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             `[seerai] PDF discovery error for ${paper.paperId}: ${error}`,
           );
           buttonState = "retry";
-          pdfDiscoveryBtn.textContent = "🔁 Retry";
+          pdfDiscoveryBtn.innerHTML =
+            iconMarkup("refresh", { size: 12 }) + " Retry";
           pdfDiscoveryBtn.style.backgroundColor = "#fafafa";
           pdfDiscoveryBtn.style.color = "#757575";
           pdfDiscoveryBtn.style.border = "1px solid #e0e0e0";
@@ -11187,7 +11309,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     const similarBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "🔮 Similar" },
+      properties: {
+        innerHTML: iconMarkup("sparkle", { size: 12 }) + " Similar",
+      },
       styles: actionBtnStyle,
       listeners: [
         {
@@ -11293,12 +11417,21 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       },
     });
     const title = ztoolkit.UI.createElement(doc, "h3", {
-      properties: { innerText: `👤 ${authorName}` },
-      styles: { margin: "0", fontSize: "14px", fontWeight: "600" },
+      properties: {
+        innerHTML: iconMarkup("user", { size: 14 }) + ` ${authorName}`,
+      },
+      styles: {
+        margin: "0",
+        fontSize: "14px",
+        fontWeight: "600",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+      },
     });
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "✕" },
+      properties: { innerHTML: iconMarkup("close", { size: 14 }) },
       styles: {
         border: "none",
         background: "transparent",
@@ -11374,8 +11507,17 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       // Recent papers
       if (author.papers && author.papers.length > 0) {
         const papersLabel = ztoolkit.UI.createElement(doc, "div", {
-          properties: { innerText: "📑 Recent Papers" },
-          styles: { fontSize: "12px", fontWeight: "500", marginBottom: "8px" },
+          properties: {
+            innerHTML: iconMarkup("paper", { size: 12 }) + " Recent Papers",
+          },
+          styles: {
+            fontSize: "12px",
+            fontWeight: "500",
+            marginBottom: "8px",
+            display: "flex",
+            alignItems: "center",
+            gap: "4px",
+          },
         });
         modal.appendChild(papersLabel);
 
@@ -11411,11 +11553,19 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       if (author.url) {
         const linkBtn = ztoolkit.UI.createElement(doc, "button", {
           namespace: "html",
-          properties: { innerText: "🔗 View on Semantic Scholar" },
+          properties: {
+            innerHTML:
+              iconMarkup("open-link", { size: 13 }) +
+              " View on Semantic Scholar",
+          },
           styles: {
             width: "100%",
             marginTop: "12px",
             padding: "8px",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: "6px",
             backgroundColor: "var(--highlight-primary)",
             color: "var(--highlight-text)",
             border: "none",
@@ -11808,7 +11958,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
         // If Semantic Scholar open access PDF is available, use it directly
         if (paper.openAccessPdf?.url) {
-          updateStatus("📥 Attaching PDF...");
+          updateStatus("Attaching PDF...");
           try {
             await Zotero.Attachments.importFromURL({
               url: paper.openAccessPdf.url,
@@ -12115,6 +12265,98 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   /**
    * Create the table toolbar with filter, add papers, generate, export buttons
    */
+  private static setTableButtonContent(
+    doc: Document | null,
+    button: HTMLElement,
+    icon: IconName,
+    label?: string,
+    size = 13,
+  ): void {
+    const ownerDoc = doc || button.ownerDocument;
+    if (!ownerDoc) return;
+    button.replaceChildren(
+      createSvgIcon(ownerDoc, icon, { size, strokeWidth: 1.8 }),
+    );
+    if (label) {
+      const text = ownerDoc.createElement("span");
+      text.className = "table-btn-label";
+      text.textContent = label;
+      button.appendChild(text);
+    }
+  }
+
+  private static setTableCellStatus(
+    td: HTMLElement,
+    icon: IconName,
+    text: string,
+    color: string,
+  ): void {
+    const doc = td.ownerDocument!;
+    const status = doc.createElement("span");
+    status.className = "table-cell-status-chip";
+    status.style.cssText =
+      "display: inline-flex; align-items: center; gap: 4px; font-size: 11px; max-width: 100%; white-space: nowrap; word-break: normal; overflow: hidden; text-overflow: ellipsis;";
+    status.style.color = color;
+    status.appendChild(
+      createSvgIcon(doc, icon, { size: 11, strokeWidth: 1.8 }),
+    );
+    const label = doc.createElement("span");
+    label.className = "table-cell-chip-label";
+    label.textContent = text;
+    status.appendChild(label);
+    td.replaceChildren(status);
+  }
+
+  private static setTableCellAction(
+    td: HTMLElement,
+    icon: IconName,
+    text: string,
+    className: string,
+    data: Record<string, string> = {},
+  ): void {
+    const doc = td.ownerDocument!;
+    const action = doc.createElement("span");
+    action.className = `${className} table-cell-action-chip`;
+    action.style.cssText =
+      "display: inline-flex; align-items: center; gap: 4px; color: var(--highlight-primary); font-size: 11px; cursor: pointer; max-width: 100%; white-space: nowrap; word-break: normal; overflow: hidden; text-overflow: ellipsis;";
+    for (const [key, value] of Object.entries(data)) {
+      action.setAttribute(key, value);
+    }
+    action.appendChild(
+      createSvgIcon(doc, icon, { size: 11, strokeWidth: 1.8 }),
+    );
+    const label = doc.createElement("span");
+    label.className = "table-cell-chip-label";
+    label.textContent = text;
+    action.appendChild(label);
+    td.replaceChildren(action);
+  }
+
+  private static appendTableCellAction(
+    container: HTMLElement,
+    icon: IconName,
+    text: string,
+    className: string,
+    data: Record<string, string> = {},
+  ): void {
+    const doc = container.ownerDocument!;
+    const action = doc.createElement("span");
+    action.className = `${className} table-cell-action-chip`;
+    action.style.cssText =
+      "display: inline-flex; align-items: center; gap: 4px; color: var(--highlight-primary); cursor: pointer; margin-right: 8px; max-width: 100%; white-space: nowrap; word-break: normal; overflow: hidden; text-overflow: ellipsis;";
+    for (const [key, value] of Object.entries(data)) {
+      action.setAttribute(key, value);
+    }
+    action.appendChild(
+      createSvgIcon(doc, icon, { size: 11, strokeWidth: 1.8 }),
+    );
+    const label = doc.createElement("span");
+    label.className = "table-cell-chip-label";
+    label.textContent = text;
+    action.appendChild(label);
+    container.appendChild(action);
+  }
+
   private static createTableToolbar(
     doc: Document,
     item: Zotero.Item,
@@ -12123,12 +12365,12 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       properties: { className: "table-toolbar" },
       styles: {
         display: "flex",
-        gap: "8px",
+        flexDirection: "column",
+        gap: "6px",
         padding: "8px",
         backgroundColor: "var(--background-secondary)",
         borderBottom: "1px solid var(--border-primary)",
-        alignItems: "center",
-        flexWrap: "wrap",
+        alignItems: "stretch",
         flexShrink: "0",
         width: "100%",
         minWidth: "0",
@@ -12136,8 +12378,127 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       },
     });
 
+    const makeRow = (className: string): HTMLElement =>
+      ztoolkit.UI.createElement(doc, "div", {
+        properties: { className },
+        styles: {
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          flexWrap: "wrap",
+          minWidth: "0",
+        },
+      });
+    const makeGroup = (
+      label: string,
+      className: string,
+      flex = "0 1 auto",
+    ): HTMLElement => {
+      const group = ztoolkit.UI.createElement(doc, "div", {
+        properties: { className: `table-toolbar-group ${className}` },
+        styles: {
+          display: "flex",
+          alignItems: "center",
+          gap: "6px",
+          padding: "4px 6px",
+          border: "1px solid var(--border-primary)",
+          borderRadius: "5px",
+          backgroundColor: "var(--background-primary)",
+          flex,
+          minWidth: "0",
+        },
+      });
+      group.appendChild(
+        ztoolkit.UI.createElement(doc, "span", {
+          properties: {
+            className: "table-toolbar-group-label",
+            innerText: label,
+          },
+          styles: {
+            fontSize: "10px",
+            fontWeight: "700",
+            color: "var(--text-tertiary)",
+            textTransform: "uppercase",
+            letterSpacing: "0",
+            whiteSpace: "nowrap",
+          },
+        }),
+      );
+      return group;
+    };
+    const primaryRow = makeRow("table-toolbar-row table-toolbar-row-primary");
+    const secondaryRow = makeRow(
+      "table-toolbar-row table-toolbar-row-secondary",
+    );
+    const workspaceGroup = makeGroup(
+      "Workspace",
+      "table-workspace-group",
+      "1 1 250px",
+    );
+    const filterGroup = makeGroup("Filter", "table-filter-group", "2 1 340px");
+    const paperGroup = makeGroup("Papers", "table-paper-actions-group");
+    const exportGroup = makeGroup("Output", "table-output-actions-group");
+    const paginationGroup = makeGroup(
+      "Rows",
+      "table-pagination-group",
+      "0 0 auto",
+    );
+    const makeToolButtonStyle = (
+      primary = false,
+      danger = false,
+    ): Record<string, string> => ({
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: "4px",
+      padding: "6px 10px",
+      fontSize: "11px",
+      border: primary
+        ? "none"
+        : `1px solid ${danger ? "#cc6666" : "var(--border-primary)"}`,
+      borderRadius: "4px",
+      backgroundColor: primary
+        ? "var(--highlight-primary)"
+        : "var(--background-secondary)",
+      color: primary
+        ? "var(--highlight-text)"
+        : danger
+          ? "#cc6666"
+          : "var(--text-primary)",
+      cursor: "pointer",
+      whiteSpace: "nowrap",
+      minWidth: "0",
+    });
+    const makeIconOnlyStyle = (): Record<string, string> => ({
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      width: "28px",
+      height: "28px",
+      padding: "0",
+      border: "1px solid var(--border-primary)",
+      borderRadius: "4px",
+      backgroundColor: "var(--background-secondary)",
+      color: "var(--text-primary)",
+      cursor: "pointer",
+    });
+    const makeHelpIcon = (title: string): HTMLElement => {
+      const help = ztoolkit.UI.createElement(doc, "span", {
+        attributes: { title },
+        styles: {
+          display: "inline-flex",
+          cursor: "help",
+          opacity: "0.7",
+          color: "var(--text-secondary)",
+        },
+      });
+      help.appendChild(createSvgIcon(doc, "info", { size: 14 }));
+      return help;
+    };
+
     // Workspace Title (Persistent & Editable)
     const titleContainer = ztoolkit.UI.createElement(doc, "div", {
+      properties: { className: "table-workspace-title" },
       styles: {
         display: "flex",
         alignItems: "center",
@@ -12148,6 +12509,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         border: "1px solid transparent",
         cursor: "pointer",
         transition: "all 0.2s",
+        minWidth: "0",
+        maxWidth: "100%",
       },
       listeners: [
         {
@@ -12230,7 +12593,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     const renderTitle = () => {
       titleContainer.innerHTML = "";
       const prefix = ztoolkit.UI.createElement(doc, "span", {
-        properties: { innerText: "WORKSPACE:" },
+        properties: {
+          className: "table-workspace-prefix",
+          innerText: "WORKSPACE:",
+        },
         styles: {
           fontSize: "10px",
           color: "var(--text-secondary)",
@@ -12244,21 +12610,28 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           className: "workspace-name-label",
           innerText: currentTableConfig?.name || "Untitled Workspace",
         },
+        attributes: {
+          title: currentTableConfig?.name || "Untitled Workspace",
+        },
         styles: {
           fontSize: "12px",
           fontWeight: "600",
           color: "var(--text-primary)",
+          minWidth: "0",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
         },
       });
 
       const editIcon = ztoolkit.UI.createElement(doc, "span", {
-        properties: { innerText: "✎" },
         styles: {
-          fontSize: "10px",
+          display: "inline-flex",
           color: "var(--text-tertiary)",
           opacity: "0.5",
         },
       });
+      editIcon.appendChild(createSvgIcon(doc, "edit", { size: 11 }));
 
       titleContainer.appendChild(prefix);
       titleContainer.appendChild(name);
@@ -12266,14 +12639,17 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     };
 
     renderTitle();
-    toolbar.appendChild(titleContainer);
+    workspaceGroup.appendChild(titleContainer);
 
     // Library/Collection filter dropdown
     const filterContainer = ztoolkit.UI.createElement(doc, "div", {
+      properties: { className: "table-filter-controls" },
       styles: {
         display: "flex",
         alignItems: "center",
         gap: "4px",
+        flex: "1 1 auto",
+        minWidth: "0",
       },
     });
 
@@ -12292,6 +12668,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     filterContainer.appendChild(filterLabel);
 
     const filterSelect = ztoolkit.UI.createElement(doc, "select", {
+      properties: { className: "table-library-select" },
       styles: {
         padding: "6px 8px",
         border: "1px solid var(--border-primary)",
@@ -12300,6 +12677,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         backgroundColor: "var(--background-primary)",
         color: "var(--text-primary)",
         minWidth: "120px",
+        maxWidth: "220px",
       },
       listeners: [
         {
@@ -12334,15 +12712,15 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // Populate filter options
     this.populateFilterSelect(filterSelect);
     filterContainer.appendChild(filterSelect);
-    toolbar.appendChild(filterContainer);
+    filterGroup.appendChild(filterContainer);
 
     // Search input
     const searchInput = ztoolkit.UI.createElement(doc, "input", {
-      attributes: { type: "text", placeholder: "🔍 Filter table..." },
+      attributes: { type: "text", placeholder: "Filter table..." },
       properties: { className: "table-search-input" },
       styles: {
         flex: "1",
-        minWidth: "60px",
+        minWidth: "140px",
         padding: "6px 10px",
         border: "1px solid var(--border-primary)",
         borderRadius: "4px",
@@ -12371,44 +12749,19 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     if (currentTableConfig?.filterQuery) {
       searchInput.value = currentTableConfig.filterQuery;
     }
-    toolbar.appendChild(searchInput);
+    filterGroup.appendChild(searchInput);
 
-    // Search Help Icon
-    const searchHelp = ztoolkit.UI.createElement(doc, "span", {
-      properties: { innerText: "❗" },
-      attributes: {
-        title:
-          'Search Logic Supported:\n• AND, OR, NOT\n• ( ) Grouping\n• "Exact Phrase"\nExample: "Climate Change" AND (Policy OR Mitigation)',
-      },
-      styles: {
-        fontSize: "14px",
-        cursor: "help",
-        marginLeft: "4px",
-        marginRight: "4px",
-        opacity: "0.7",
-      },
-    });
-    toolbar.appendChild(searchHelp);
+    const searchHelp = makeHelpIcon(
+      'Search Logic Supported:\nAND, OR, NOT\n( ) Grouping\n"Exact Phrase"\nExample: "Climate Change" AND (Policy OR Mitigation)',
+    );
+    filterGroup.appendChild(searchHelp);
 
-    // Add Papers button
     const addPapersBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
       properties: {
         className: "table-btn table-btn-primary",
-        innerText: "➕ Add Papers",
       },
-      styles: {
-        padding: "6px 12px",
-        fontSize: "11px",
-        border: "none",
-        borderRadius: "4px",
-        backgroundColor: "var(--highlight-primary)",
-        color: "var(--highlight-text)",
-        cursor: "pointer",
-        display: "flex",
-        alignItems: "center",
-        gap: "4px",
-      },
+      styles: makeToolButtonStyle(true),
       listeners: [
         {
           type: "click",
@@ -12418,25 +12771,16 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
-    toolbar.appendChild(addPapersBtn);
+    this.setTableButtonContent(doc, addPapersBtn, "add", "Add Papers");
+    paperGroup.appendChild(addPapersBtn);
 
-    // Extract All button (for OCR)
     const extractBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
       properties: {
         className: "table-btn extract-all-btn",
-        innerText: "Extract All",
       },
       attributes: { id: "extract-all-btn" },
-      styles: {
-        padding: "6px 12px",
-        fontSize: "11px",
-        border: "1px solid var(--border-primary)",
-        borderRadius: "4px",
-        backgroundColor: "var(--background-primary)",
-        color: "var(--text-primary)",
-        cursor: "pointer",
-      },
+      styles: makeToolButtonStyle(),
       listeners: [
         {
           type: "click",
@@ -12446,27 +12790,17 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
-    toolbar.appendChild(extractBtn);
+    this.setTableButtonContent(doc, extractBtn, "review", "Extract All");
+    paperGroup.appendChild(extractBtn);
 
-    // Search all PDF button (find PDFs for items without attachments)
-    // Show progress if batch is active
-    const searchPdfBtnText = pdfSearchBatchActive
-      ? `🔍 ${pdfSearchBatchStats.completed}/${pdfSearchBatchStats.total}`
-      : "🔍 Search all PDF";
     const searchPdfBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
       properties: {
         className: "table-btn search-pdf-all-btn",
-        innerText: searchPdfBtnText,
       },
       attributes: { id: "search-pdf-all-btn" },
       styles: {
-        padding: "6px 12px",
-        fontSize: "11px",
-        border: "1px solid var(--border-primary)",
-        borderRadius: "4px",
-        backgroundColor: "var(--background-primary)",
-        color: "var(--text-primary)",
+        ...makeToolButtonStyle(),
         cursor: pdfSearchBatchActive ? "wait" : "pointer",
       },
       listeners: [
@@ -12479,25 +12813,27 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
+    this.setTableButtonContent(
+      doc,
+      searchPdfBtn,
+      "search",
+      pdfSearchBatchActive
+        ? `${pdfSearchBatchStats.completed}/${pdfSearchBatchStats.total}`
+        : "Find PDFs",
+      12,
+    );
     if (pdfSearchBatchActive) {
       (searchPdfBtn as HTMLButtonElement).disabled = true;
     }
-    toolbar.appendChild(searchPdfBtn);
+    paperGroup.appendChild(searchPdfBtn);
 
-    // Export button
     const exportBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { className: "table-btn", innerText: "📤" },
-      attributes: { title: "Export to CSV" },
-      styles: {
-        padding: "6px 10px",
-        fontSize: "11px",
-        border: "1px solid var(--border-primary)",
-        borderRadius: "4px",
-        backgroundColor: "var(--background-primary)",
-        color: "var(--text-primary)",
-        cursor: "pointer",
+      properties: {
+        className: "table-btn",
       },
+      attributes: { title: "Export to CSV" },
+      styles: makeIconOnlyStyle(),
       listeners: [
         {
           type: "click",
@@ -12507,22 +12843,17 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
-    toolbar.appendChild(exportBtn);
+    this.setTableButtonContent(doc, exportBtn, "download", undefined, 14);
+    exportGroup.appendChild(exportBtn);
 
     // Save as Notes button (Data Traceability)
     const saveAsNotesBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { className: "table-btn", innerText: "Notes" },
-      attributes: { title: "Save table data as notes attached to each paper" },
-      styles: {
-        padding: "6px 12px",
-        fontSize: "11px",
-        border: "1px solid var(--border-primary)",
-        borderRadius: "4px",
-        backgroundColor: "var(--background-primary)",
-        color: "var(--text-primary)",
-        cursor: "pointer",
+      properties: {
+        className: "table-btn",
       },
+      attributes: { title: "Save table data as notes attached to each paper" },
+      styles: makeToolButtonStyle(),
       listeners: [
         {
           type: "click",
@@ -12533,7 +12864,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               return;
             }
             const confirmed = doc.defaultView?.confirm(
-              `Save table data for ${rowCount} paper(s) as notes?\n\nThis will create/update a "📊 Tables" note attached to each paper.`,
+              `Save table data for ${rowCount} paper(s) as notes?\n\nThis will create/update a "Tables" note attached to each paper.`,
             );
             if (confirmed) {
               await this.saveAllRowsAsNotes(doc);
@@ -12542,22 +12873,16 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
-    toolbar.appendChild(saveAsNotesBtn);
+    this.setTableButtonContent(doc, saveAsNotesBtn, "paper", "Notes");
+    exportGroup.appendChild(saveAsNotesBtn);
 
-    // Save button
     const saveBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { className: "table-btn", innerText: "💾" },
-      attributes: { title: "Save workspace to history" },
-      styles: {
-        padding: "6px 10px",
-        fontSize: "11px",
-        border: "1px solid var(--border-primary)",
-        borderRadius: "4px",
-        backgroundColor: "var(--background-primary)",
-        color: "var(--text-primary)",
-        cursor: "pointer",
+      properties: {
+        className: "table-btn",
       },
+      attributes: { title: "Save workspace to history" },
+      styles: makeIconOnlyStyle(),
       listeners: [
         {
           type: "click",
@@ -12567,22 +12892,16 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
-    toolbar.appendChild(saveBtn);
+    this.setTableButtonContent(doc, saveBtn, "save", undefined, 14);
+    exportGroup.appendChild(saveBtn);
 
-    // Copy All Data button
     const copyAllBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { className: "table-btn", innerText: "Notes" },
-      attributes: { title: "Copy all table data to clipboard" },
-      styles: {
-        padding: "6px 10px",
-        fontSize: "11px",
-        border: "1px solid var(--border-primary)",
-        borderRadius: "4px",
-        backgroundColor: "var(--background-primary)",
-        color: "var(--text-primary)",
-        cursor: "pointer",
+      properties: {
+        className: "table-btn",
       },
+      attributes: { title: "Copy all table data to clipboard" },
+      styles: makeIconOnlyStyle(),
       listeners: [
         {
           type: "click",
@@ -12592,25 +12911,14 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
-    toolbar.appendChild(copyAllBtn);
+    this.setTableButtonContent(doc, copyAllBtn, "copy", undefined, 14);
+    exportGroup.appendChild(copyAllBtn);
 
-    // Export to Workspace button
     const exportWsBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
       properties: { className: "table-btn" },
       attributes: { title: "Export table to workspace" },
-      styles: {
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "4px",
-        padding: "6px 10px",
-        fontSize: "11px",
-        border: "1px solid var(--border-primary)",
-        borderRadius: "4px",
-        backgroundColor: "var(--background-primary)",
-        color: "var(--text-primary)",
-        cursor: "pointer",
-      },
+      styles: makeToolButtonStyle(),
       listeners: [
         {
           type: "click",
@@ -12620,31 +12928,14 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
-    exportWsBtn.appendChild(
-      createSvgIcon(doc, "folder", { size: 11, strokeWidth: 1.7 }),
-    );
-    const exportWsLbl = doc.createElement("span");
-    exportWsLbl.textContent = "Workspace";
-    exportWsBtn.appendChild(exportWsLbl);
-    toolbar.appendChild(exportWsBtn);
+    this.setTableButtonContent(doc, exportWsBtn, "folder", "Workspace", 11);
+    exportGroup.appendChild(exportWsBtn);
 
-    // History button
     const historyBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
       properties: { className: "table-btn" },
       attributes: { title: "Load from history" },
-      styles: {
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "4px",
-        padding: "6px 10px",
-        fontSize: "11px",
-        border: "1px solid var(--border-primary)",
-        borderRadius: "4px",
-        backgroundColor: "var(--background-primary)",
-        color: "var(--text-primary)",
-        cursor: "pointer",
-      },
+      styles: makeToolButtonStyle(),
       listeners: [
         {
           type: "click",
@@ -12654,28 +12945,16 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
-    historyBtn.appendChild(
-      createSvgIcon(doc, "library", { size: 11, strokeWidth: 1.7 }),
-    );
-    const historyLbl = doc.createElement("span");
-    historyLbl.textContent = "History";
-    historyBtn.appendChild(historyLbl);
-    toolbar.appendChild(historyBtn);
+    this.setTableButtonContent(doc, historyBtn, "library", "History", 11);
+    workspaceGroup.appendChild(historyBtn);
 
-    // Start Fresh button
     const startFreshBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { className: "table-btn", innerText: "New" },
-      attributes: { title: "Start fresh workspace" },
-      styles: {
-        padding: "6px 10px",
-        fontSize: "11px",
-        border: "1px solid #cc6666",
-        borderRadius: "4px",
-        backgroundColor: "var(--background-primary)",
-        color: "#cc6666",
-        cursor: "pointer",
+      properties: {
+        className: "table-btn",
       },
+      attributes: { title: "Start fresh workspace" },
+      styles: makeToolButtonStyle(false, true),
       listeners: [
         {
           type: "click",
@@ -12685,22 +12964,18 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
-    toolbar.appendChild(startFreshBtn);
+    this.setTableButtonContent(doc, startFreshBtn, "add", "New");
+    workspaceGroup.appendChild(startFreshBtn);
 
-    // === PAGINATION CONTROLS ===
     const paginationContainer = ztoolkit.UI.createElement(doc, "div", {
       properties: { className: "pagination-container" },
       styles: {
         display: "flex",
         alignItems: "center",
-        gap: "8px",
-        marginLeft: "auto", // Push to right
-        padding: "2px 8px",
-        borderLeft: "1px solid var(--border-primary)",
+        gap: "6px",
       },
     });
 
-    // Page Size Selector
     const pageSizeLabel = ztoolkit.UI.createElement(doc, "span", {
       properties: { innerText: "Lines:" },
       styles: { fontSize: "11px", color: "var(--text-secondary)" },
@@ -12746,24 +13021,22 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     });
     paginationContainer.appendChild(pageSizeSelect);
 
-    // Page info
     const currentPage = currentTableConfig?.currentPage || 1;
     const pageSize = currentTableConfig?.pageSize || 25;
     const totalItems = currentTableConfig?.addedPaperIds?.length || 0;
     const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
 
-    // Prev Button
     const prevBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "◀", disabled: currentPage <= 1 },
+      properties: {
+        disabled: currentPage <= 1,
+      },
       styles: {
-        background: "none",
-        border: "none",
+        ...makeIconOnlyStyle(),
+        width: "24px",
+        height: "24px",
         cursor: currentPage <= 1 ? "default" : "pointer",
-        padding: "2px 4px",
         opacity: currentPage <= 1 ? "0.3" : "0.7",
-        fontSize: "12px",
-        color: "var(--text-primary)",
       },
       listeners: [
         {
@@ -12774,9 +13047,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
+    this.setTableButtonContent(doc, prevBtn, "chevron-left", undefined, 14);
     paginationContainer.appendChild(prevBtn);
 
-    // Page Indicator
     const pageIndicator = ztoolkit.UI.createElement(doc, "span", {
       properties: {
         id: "table-page-indicator",
@@ -12791,18 +13064,17 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     });
     paginationContainer.appendChild(pageIndicator);
 
-    // Next Button
     const nextBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "▶", disabled: currentPage >= totalPages },
+      properties: {
+        disabled: currentPage >= totalPages,
+      },
       styles: {
-        background: "none",
-        border: "none",
+        ...makeIconOnlyStyle(),
+        width: "24px",
+        height: "24px",
         cursor: currentPage >= totalPages ? "default" : "pointer",
-        padding: "2px 4px",
         opacity: currentPage >= totalPages ? "0.3" : "0.7",
-        fontSize: "12px",
-        color: "var(--text-primary)",
       },
       listeners: [
         {
@@ -12813,9 +13085,31 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
+    this.setTableButtonContent(doc, nextBtn, "chevron-right", undefined, 14);
     paginationContainer.appendChild(nextBtn);
+    paginationGroup.appendChild(paginationContainer);
 
-    toolbar.appendChild(paginationContainer);
+    primaryRow.appendChild(workspaceGroup);
+    primaryRow.appendChild(filterGroup);
+    primaryRow.appendChild(paginationGroup);
+    secondaryRow.appendChild(paperGroup);
+    secondaryRow.appendChild(exportGroup);
+    toolbar.appendChild(primaryRow);
+    toolbar.appendChild(secondaryRow);
+
+    const applyToolbarDensity = () => {
+      const width = toolbar.getBoundingClientRect().width;
+      if (!width) return;
+      toolbar.classList.toggle("table-toolbar-compact", width < 760);
+      toolbar.classList.toggle("table-toolbar-narrow", width < 520);
+    };
+    const ResizeObserverCtor = doc.defaultView?.ResizeObserver;
+    if (ResizeObserverCtor) {
+      const observer = new ResizeObserverCtor(applyToolbarDensity);
+      observer.observe(toolbar);
+      (toolbar as any)._tableToolbarObserver = observer;
+    }
+    setTimeout(applyToolbarDensity, 0);
 
     return toolbar;
   }
@@ -13217,7 +13511,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             }
 
             // Update button to show success
-            addBtn.innerText = `✓ Added ${added}`;
+            addBtn.innerHTML =
+              iconMarkup("check", { size: 12 }) + ` Added ${added}`;
             addBtn.style.backgroundColor = "#4CAF50";
             setTimeout(() => popup.remove(), 1000);
           },
@@ -13331,7 +13626,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // Close button in header
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "✕" },
+      properties: { innerHTML: iconMarkup("close", { size: 13 }) },
       styles: {
         background: "rgba(0,0,0,0.1)",
         border: "none",
@@ -13419,7 +13714,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     controlsRow.appendChild(filterSelect);
 
     const searchInput = ztoolkit.UI.createElement(doc, "input", {
-      attributes: { type: "text", placeholder: "🔍 Search papers..." },
+      attributes: { type: "text", placeholder: "Search papers..." },
       styles: {
         flex: "1",
         padding: "8px 12px",
@@ -13765,7 +14060,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     // Add All button
     const addAllBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "➕ Add All" },
+      properties: { innerHTML: iconMarkup("add", { size: 12 }) + " Add All" },
       styles: {
         padding: "10px 18px",
         border: "none",
@@ -13812,9 +14107,11 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             });
             listContainer.appendChild(emptyMsg);
             if (count > 0) {
-              (addAllBtn as HTMLElement).innerText = `✓ Added ${count}`;
+              (addAllBtn as HTMLElement).innerHTML =
+                iconMarkup("check", { size: 12 }) + ` Added ${count}`;
               setTimeout(() => {
-                (addAllBtn as HTMLElement).innerText = "➕ Add All";
+                (addAllBtn as HTMLElement).innerHTML =
+                  iconMarkup("add", { size: 12 }) + " Add All";
               }, 1500);
             }
           },
@@ -14013,7 +14310,12 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         });
 
         // Immediate visual feedback
-        td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Generating...</span>`;
+        this.setTableCellStatus(
+          td,
+          "hourglass",
+          "Generating...",
+          "var(--text-tertiary)",
+        );
         td.style.cursor = "wait";
       }
     }
@@ -14105,7 +14407,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         } else {
           task.td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">Empty - no notes</span>`;
           task.td.title =
-            "No notes found. Use '🔍 Extract with ocr' to create notes first.";
+            "No notes found. Use 'Extract with ocr' to create notes first.";
           task.td.style.cursor = "default";
         }
         updateProgress();
@@ -14132,7 +14434,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Restore button
     if (generateBtn) {
-      generateBtn.innerText = `✓ Done (${generated}/${tasks.length})`;
+      generateBtn.innerHTML =
+        iconMarkup("check", { size: 12 }) +
+        ` Done (${generated}/${tasks.length})`;
       generateBtn.disabled = false;
       generateBtn.style.cursor = "pointer";
       setTimeout(() => {
@@ -14452,7 +14756,12 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
       // Immediate feedback
       tds.forEach((td) => {
-        td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Queued...</span>`;
+        this.setTableCellStatus(
+          td,
+          "hourglass",
+          "Queued...",
+          "var(--text-tertiary)",
+        );
         td.style.cursor = "wait";
       });
     }
@@ -14467,14 +14776,19 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     const extractBtn = doc.getElementById(
       "extract-all-btn",
     ) as HTMLButtonElement | null;
-    const originalBtnText = extractBtn?.innerText || "Extract All";
     let completed = 0;
     let success = 0;
     let failed = 0;
 
     const updateProgress = () => {
       if (extractBtn) {
-        extractBtn.innerText = `OCR ${completed}/${tasks.length}`;
+        this.setTableButtonContent(
+          doc,
+          extractBtn,
+          "hourglass",
+          `OCR ${completed}/${tasks.length}`,
+          13,
+        );
         extractBtn.disabled = true;
         extractBtn.style.cursor = "wait";
       }
@@ -14484,7 +14798,12 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       try {
         // Update cells to "Processing"
         task.tds.forEach((td) => {
-          td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">OCR Processing...</span>`;
+          this.setTableCellStatus(
+            td,
+            "hourglass",
+            "OCR Processing...",
+            "var(--highlight-primary)",
+          );
         });
 
         // Run silent OCR
@@ -14492,13 +14811,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
         // Update cells to "Done"
         task.tds.forEach((td) => {
-          td.innerHTML = `<span style="color: green; font-size: 11px;">✓ Note Extracted</span>`;
+          this.setTableCellStatus(td, "check", "Note Extracted", "green");
         });
         success++;
       } catch (e) {
         Zotero.debug(`[seerai] OCR Error for ${task.paperId}: ${e}`);
         task.tds.forEach((td) => {
-          td.innerHTML = `<span style="color: #c62828; font-size: 11px;">OCR Error</span>`;
+          this.setTableCellStatus(td, "warning", "OCR Error", "#c62828");
           td.title = String(e);
         });
         failed++;
@@ -14521,11 +14840,17 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     // Restore button
     if (extractBtn) {
-      extractBtn.innerText = `✓ OCR Done (${success})`;
+      this.setTableButtonContent(
+        doc,
+        extractBtn,
+        "check",
+        `OCR Done (${success})`,
+        12,
+      );
       extractBtn.disabled = false;
       extractBtn.style.cursor = "pointer";
       setTimeout(() => {
-        extractBtn.innerText = originalBtnText;
+        this.setTableButtonContent(doc, extractBtn, "review", "Extract All");
       }, 2000);
     }
 
@@ -14594,9 +14919,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     if (tasks.length === 0) {
       Zotero.debug("[seerai] No items without PDF to search");
-      btn.innerText = "✓ All have PDFs";
+      this.setTableButtonContent(doc, btn, "check", "All have PDFs", 12);
       setTimeout(() => {
-        btn.innerText = "🔍 Search all PDF";
+        this.setTableButtonContent(doc, btn, "search", "Find PDFs", 12);
       }, 2000);
       return;
     }
@@ -14605,7 +14930,6 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       `[seerai] ${tasks.length} items to search for PDFs (concurrent mode)`,
     );
 
-    const originalBtnText = btn.innerText;
     (btn as HTMLButtonElement).disabled = true;
     btn.style.cursor = "wait";
 
@@ -14665,24 +14989,49 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           content.includes("Source-Link") ||
           content.includes("Searching") ||
           content.includes("") ||
-          content.includes("↻")
+          content.includes("Retrying")
         ) {
           const cell = td as HTMLElement;
           switch (status) {
             case "searching":
-              cell.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">🔍 Searching...</span>`;
+              this.setTableCellStatus(
+                cell,
+                "search",
+                "Searching...",
+                "var(--highlight-primary)",
+              );
               break;
             case "retrying":
-              cell.innerHTML = `<span style="color: #f57c00; font-size: 11px;">↻ Retrying...</span>`;
+              this.setTableCellStatus(
+                cell,
+                "refresh",
+                "Retrying...",
+                "#f57c00",
+              );
               break;
             case "found":
-              cell.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Process PDF</span>`;
+              this.setTableCellStatus(
+                cell,
+                "review",
+                "Process PDF",
+                "var(--highlight-primary)",
+              );
               break;
             case "skipped":
-              cell.innerHTML = `<span style="color: #f57c00; font-size: 11px;">⏭ ${message || "Skipped"}</span>`;
+              this.setTableCellStatus(
+                cell,
+                "block",
+                message || "Skipped",
+                "#f57c00",
+              );
               break;
             case "error":
-              cell.innerHTML = `<span style="color: #c62828; font-size: 11px;">✗ ${message || "Error"}</span>`;
+              this.setTableCellStatus(
+                cell,
+                "x-circle",
+                message || "Error",
+                "#c62828",
+              );
               cell.title = message || "";
               break;
             case "notfound": {
@@ -14706,10 +15055,37 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               );
 
               if (sourceLink) {
-                // Clicking this will trigger the expanded menu (Attach, Retry, Note) via the TD click listener
-                cell.innerHTML = `<span class="source-link-btn" data-url="${sourceLink}" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer; text-decoration: underline;">🔗 Source-Link</span>`;
+                const link = doc.createElement("span");
+                link.className = "source-link-btn";
+                link.setAttribute("data-url", sourceLink);
+                link.style.cssText =
+                  "color: var(--highlight-primary); font-size: 11px; cursor: pointer; text-decoration: underline; display: inline-flex; align-items: center; gap: 4px;";
+                link.appendChild(
+                  createSvgIcon(doc, "open-link", {
+                    size: 11,
+                    strokeWidth: 1.8,
+                  }),
+                );
+                const label = doc.createElement("span");
+                label.textContent = "Source-Link";
+                link.appendChild(label);
+                cell.replaceChildren(link);
               } else {
-                cell.innerHTML = `<span class="attach-pdf-btn" data-item-id="${paperId}" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer; text-decoration: underline;">⬇️ Attach</span>`;
+                const attach = doc.createElement("span");
+                attach.className = "attach-pdf-btn";
+                attach.setAttribute("data-item-id", String(paperId));
+                attach.style.cssText =
+                  "color: var(--highlight-primary); font-size: 11px; cursor: pointer; text-decoration: underline; display: inline-flex; align-items: center; gap: 4px;";
+                attach.appendChild(
+                  createSvgIcon(doc, "download", {
+                    size: 11,
+                    strokeWidth: 1.8,
+                  }),
+                );
+                const label = doc.createElement("span");
+                label.textContent = "Attach";
+                attach.appendChild(label);
+                cell.replaceChildren(attach);
               }
               break;
             }
@@ -14734,7 +15110,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           failed: stats.failed,
           skipped: stats.skipped,
         };
-        btn.innerText = `🔍 ${formatTaskStats(stats)}`;
+        this.setTableButtonContent(
+          doc,
+          btn,
+          "search",
+          formatTaskStats(stats),
+          12,
+        );
       },
 
       onTaskStart: (task) => {
@@ -14840,11 +15222,17 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     }, 30000); // Keep states for 30 seconds
 
     // Restore button with summary
-    btn.innerText = `✓ ${succeeded} (${failed} failed)`;
+    this.setTableButtonContent(
+      doc,
+      btn,
+      "check",
+      `${succeeded} (${failed} failed)`,
+      12,
+    );
     (btn as HTMLButtonElement).disabled = false;
     btn.style.cursor = "pointer";
     setTimeout(() => {
-      btn.innerText = originalBtnText;
+      this.setTableButtonContent(doc, btn, "search", "Find PDFs", 12);
     }, 4000);
   }
 
@@ -14923,14 +15311,26 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
         // Step 1: Try SS Open Access PDF first
         if (paper.openAccessPdf?.url) {
-          btn.innerText = "📥 SS PDF...";
+          this.setTableButtonContent(
+            btn.ownerDocument,
+            btn,
+            "download",
+            "SS PDF...",
+            12,
+          );
           const attached = await downloadAndAttachPdf(
             item,
             paper.openAccessPdf.url,
           );
           if (attached) {
             pdfAttached = true;
-            btn.innerText = "✓";
+            this.setTableButtonContent(
+              btn.ownerDocument,
+              btn,
+              "check",
+              undefined,
+              12,
+            );
             btn.title = "PDF Attached from Semantic Scholar!";
 
             // Update cell to show "Process PDF"
@@ -14939,7 +15339,12 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               const cells = tr.querySelectorAll("td");
               cells.forEach((td: HTMLElement) => {
                 if (td.contains(btn)) {
-                  td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Process PDF</span>`;
+                  this.setTableCellAction(
+                    td,
+                    "review",
+                    "Process PDF",
+                    "process-pdf-btn",
+                  );
                 }
               });
             }
@@ -14952,7 +15357,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         // because it's redundant if the batch search just finished and failed.
         if (!pdfAttached) {
           if (metadataUpdated) {
-            btn.innerText = "✓ Metadata Updated";
+            this.setTableButtonContent(
+              btn.ownerDocument,
+              btn,
+              "check",
+              "Metadata Updated",
+              12,
+            );
             btn.title =
               "Found new identifiers (DOI/PMID). Re-rendering row for better direct links...";
 
@@ -14963,7 +15374,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               }
             }, 1500);
           } else {
-            btn.innerText = "🔍 No PDF";
+            this.setTableButtonContent(
+              btn.ownerDocument,
+              btn,
+              "search",
+              "No PDF",
+              12,
+            );
             btn.title =
               "Search finished: Metadata already correct, no OA PDF found on Semantic Scholar.";
           }
@@ -14972,7 +15389,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         // Fallback to launching URL if all PDF attempts failed
         if (!pdfAttached && paper.url) {
           Zotero.launchURL(paper.url);
-          btn.innerText = "📖";
+          this.setTableButtonContent(
+            btn.ownerDocument,
+            btn,
+            "open-link",
+            undefined,
+            12,
+          );
           btn.title = "Opened Semantic Scholar page (no PDF found)";
         } else if (!pdfAttached) {
           btn.title = "No PDF found via any source";
@@ -14987,11 +15410,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       btn.title = `Error: ${e}`;
       btn.innerText = "!";
     } finally {
-      if (
-        btn.innerText === "" ||
-        btn.innerText.includes("📥") ||
-        btn.innerText.includes("🔍")
-      ) {
+      const finalText = btn.innerText.trim();
+      if (finalText.includes("SS PDF") || finalText.includes("No PDF")) {
         btn.innerText = originalText;
       }
       (btn as HTMLButtonElement).disabled = false;
@@ -15007,7 +15427,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     btn: HTMLElement,
   ): Promise<void> {
     const originalText = btn.innerText;
-    btn.innerHTML = "";
+    this.setTableButtonContent(
+      btn.ownerDocument,
+      btn,
+      "hourglass",
+      undefined,
+      12,
+    );
     (btn as HTMLButtonElement).disabled = true;
     btn.style.cursor = "wait";
 
@@ -15036,7 +15462,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               `Firecrawl found: ${url}\n\nDo you want to attach this file?`,
             );
             if (choice) {
-              btn.innerText = "📥";
+              this.setTableButtonContent(
+                btn.ownerDocument,
+                btn,
+                "download",
+                undefined,
+                12,
+              );
               await Zotero.Attachments.importFromURL({
                 url: url,
                 parentItemID: item.id,
@@ -15044,9 +15476,15 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
                 contentType: "application/pdf",
               });
               // Update UI to "Process PDF" on success
-              const cell = btn.parentElement?.parentElement;
+              const cell = btn.parentElement
+                ?.parentElement as HTMLElement | null;
               if (cell) {
-                cell.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Process PDF</span>`;
+                this.setTableCellAction(
+                  cell,
+                  "review",
+                  "Process PDF",
+                  "process-pdf-btn",
+                );
               }
             } else {
               // User cancelled, revert button
@@ -15082,7 +15520,12 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     td: HTMLElement,
   ): Promise<void> {
     // Show loading indicator
-    td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Generating...</span>`;
+    this.setTableCellStatus(
+      td,
+      "hourglass",
+      "Generating...",
+      "var(--text-tertiary)",
+    );
     td.style.cursor = "wait";
 
     try {
@@ -15103,7 +15546,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       const tableStore = getTableStore();
       await tableStore.saveConfig(currentTableConfig!);
     } catch (e) {
-      td.innerHTML = `<span style="color: #c62828; font-size: 11px;">Error: ${e}</span>`;
+      this.setTableCellStatus(td, "warning", `Error: ${e}`, "#c62828");
       td.style.cursor = "pointer";
       Zotero.debug(`[seerai] Cell generation error: ${e}`);
     }
@@ -15119,7 +15562,12 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     td: HTMLElement,
   ): Promise<void> {
     // Show loading indicator
-    td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Extracting PDF...</span>`;
+    this.setTableCellStatus(
+      td,
+      "hourglass",
+      "Extracting PDF...",
+      "var(--text-tertiary)",
+    );
     td.style.cursor = "wait";
 
     try {
@@ -15157,13 +15605,18 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       }
 
       if (!pdfText) {
-        td.innerHTML = `<span style="color: #ff9800; font-size: 11px;">PDF not indexed</span>`;
+        this.setTableCellStatus(td, "warning", "PDF not indexed", "#ff9800");
         td.style.cursor = "default";
         return;
       }
 
       // Now generate with PDF context
-      td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Generating...</span>`;
+      this.setTableCellStatus(
+        td,
+        "hourglass",
+        "Generating...",
+        "var(--text-tertiary)",
+      );
 
       const content = await this.generateColumnContentFromText(
         item,
@@ -15483,8 +15936,13 @@ Task: ${columnPrompt}`;
     row: TableRow,
     btn: HTMLElement,
   ): Promise<void> {
-    const originalText = btn.innerText;
-    btn.innerText = "";
+    this.setTableButtonContent(
+      btn.ownerDocument,
+      btn,
+      "hourglass",
+      undefined,
+      14,
+    );
     btn.style.cursor = "wait";
 
     try {
@@ -15541,10 +15999,22 @@ Task: ${columnPrompt}`;
       }
 
       if (!sourceText.trim()) {
-        btn.innerText = "!";
+        this.setTableButtonContent(
+          btn.ownerDocument,
+          btn,
+          "warning",
+          undefined,
+          14,
+        );
         btn.title = "No content available to generate tags";
         setTimeout(() => {
-          btn.innerText = originalText;
+          this.setTableButtonContent(
+            btn.ownerDocument,
+            btn,
+            "tag",
+            undefined,
+            14,
+          );
           btn.title = "Generate AI tags for this paper";
         }, 2000);
         btn.style.cursor = "pointer";
@@ -15686,11 +16156,23 @@ Call the generate_tags function with an array of 3-7 high-quality tags.`;
       await item.saveTx();
 
       // Show success
-      btn.innerText = "✓";
+      this.setTableButtonContent(
+        btn.ownerDocument,
+        btn,
+        "check",
+        undefined,
+        14,
+      );
       btn.style.color = "#4CAF50";
       btn.title = `Added ${generatedTags.length} tags: ${generatedTags.join(", ")}`;
       setTimeout(() => {
-        btn.innerText = originalText;
+        this.setTableButtonContent(
+          btn.ownerDocument,
+          btn,
+          "tag",
+          undefined,
+          14,
+        );
         btn.style.color = "";
         btn.title = "Generate AI tags for this paper";
       }, 3000);
@@ -15700,11 +16182,23 @@ Call the generate_tags function with an array of 3-7 high-quality tags.`;
       );
     } catch (err) {
       Zotero.debug(`[seerai] Error generating tags: ${err}`);
-      btn.innerText = "!";
+      this.setTableButtonContent(
+        btn.ownerDocument,
+        btn,
+        "warning",
+        undefined,
+        14,
+      );
       btn.style.color = "#c62828";
       btn.title = `Error: ${err}`;
       setTimeout(() => {
-        btn.innerText = originalText;
+        this.setTableButtonContent(
+          btn.ownerDocument,
+          btn,
+          "tag",
+          undefined,
+          14,
+        );
         btn.style.color = "";
         btn.title = "Generate AI tags for this paper";
       }, 2000);
@@ -15948,11 +16442,11 @@ You MUST call the generate_tags function.`;
 
     const closeX = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "✕" },
+      properties: { innerHTML: iconMarkup("close", { size: 16 }) },
       styles: {
         background: "none",
         border: "none",
-        fontSize: "18px",
+        display: "inline-flex",
         cursor: "pointer",
         color: "var(--text-secondary)",
       },
@@ -15985,7 +16479,7 @@ You MUST call the generate_tags function.`;
 
     const previewBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "👁 Preview" },
+      properties: { innerHTML: iconMarkup("eye", { size: 13 }) + " Preview" },
       styles: {
         padding: "6px 12px",
         border: "1px solid var(--border-primary)",
@@ -16001,7 +16495,7 @@ You MUST call the generate_tags function.`;
 
     const editBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "✏️ Edit" },
+      properties: { innerHTML: iconMarkup("edit", { size: 13 }) + " Edit" },
       styles: {
         padding: "6px 12px",
         border: "1px solid var(--border-primary)",
@@ -16162,7 +16656,9 @@ You MUST call the generate_tags function.`;
       if (!hasPDF) {
         const searchPdfBtn = ztoolkit.UI.createElement(doc, "button", {
           namespace: "html",
-          properties: { innerText: "🔍 Search PDF" },
+          properties: {
+            innerHTML: iconMarkup("search", { size: 13 }) + " Search PDF",
+          },
           attributes: { title: "Search for PDF to attach" },
           styles: {
             padding: "10px 16px",
@@ -16234,7 +16730,8 @@ You MUST call the generate_tags function.`;
                         }),
                       );
                     } else {
-                      searchPdfBtn.innerText = "✓ PDF Attached";
+                      searchPdfBtn.innerHTML =
+                        iconMarkup("check", { size: 13 }) + " PDF Attached";
                       searchPdfBtn.style.backgroundColor =
                         "var(--background-secondary)";
                       searchPdfBtn.style.color = "var(--text-secondary)";
@@ -16257,7 +16754,9 @@ You MUST call the generate_tags function.`;
                       searchPdfBtn.replaceWith(
                         ztoolkit.UI.createElement(doc, "a", {
                           properties: {
-                            innerText: "🔗 Open Source",
+                            innerHTML:
+                              iconMarkup("open-link", { size: 13 }) +
+                              " Open Source",
                             href: sourceLink,
                             target: "_blank",
                           },
@@ -16349,7 +16848,8 @@ You MUST call the generate_tags function.`;
                 note.setNote(noteContent);
                 await note.saveTx();
 
-                saveAsNoteBtn.innerText = "✓ Saved";
+                saveAsNoteBtn.innerHTML =
+                  iconMarkup("check", { size: 13 }) + " Saved";
                 setTimeout(() => {
                   saveAsNoteBtn.innerText = originalText;
                   saveAsNoteBtn.style.cursor = "pointer";
@@ -16374,7 +16874,7 @@ You MUST call the generate_tags function.`;
     // Save button
     const saveBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "💾 Save" },
+      properties: { innerHTML: iconMarkup("save", { size: 13 }) + " Save" },
       styles: {
         padding: "10px 16px",
         border: "1px solid var(--border-primary)",
@@ -16511,11 +17011,11 @@ You MUST call the generate_tags function.`;
 
     const closeX = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "✕" },
+      properties: { innerHTML: iconMarkup("close", { size: 16 }) },
       styles: {
         background: "none",
         border: "none",
-        fontSize: "18px",
+        display: "inline-flex",
         cursor: "pointer",
         color: "var(--text-secondary)",
       },
@@ -16543,7 +17043,7 @@ You MUST call the generate_tags function.`;
 
     const previewBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "👁 Preview" },
+      properties: { innerHTML: iconMarkup("eye", { size: 13 }) + " Preview" },
       styles: {
         padding: "6px 12px",
         border: "1px solid var(--border-primary)",
@@ -16559,7 +17059,7 @@ You MUST call the generate_tags function.`;
 
     const editBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "✏️ Edit" },
+      properties: { innerHTML: iconMarkup("edit", { size: 13 }) + " Edit" },
       styles: {
         padding: "6px 12px",
         border: "1px solid var(--border-primary)",
@@ -16693,8 +17193,11 @@ You MUST call the generate_tags function.`;
     // Save button
     const saveBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "💾 Save" },
+      properties: { innerHTML: iconMarkup("save", { size: 13 }) + " Save" },
       styles: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
         padding: "10px 16px",
         border: "1px solid var(--border-primary)",
         borderRadius: "6px",
@@ -17047,12 +17550,15 @@ You MUST call the generate_tags function.`;
           // Rename button
           const renameBtn = ztoolkit.UI.createElement(doc, "button", {
             namespace: "html",
-            properties: { innerText: "✏️", title: "Rename" },
+            properties: {
+              innerHTML: iconMarkup("edit", { size: 13 }),
+              title: "Rename",
+            },
             styles: {
               background: "none",
               border: "none",
+              display: "inline-flex",
               cursor: "pointer",
-              fontSize: "12px",
               opacity: "0.6",
               padding: "2px",
             },
@@ -17092,12 +17598,15 @@ You MUST call the generate_tags function.`;
           // Delete button
           const deleteBtn = ztoolkit.UI.createElement(doc, "button", {
             namespace: "html",
-            properties: { innerText: "🗑", title: "Delete" },
+            properties: {
+              innerHTML: iconMarkup("trash", { size: 13 }),
+              title: "Delete",
+            },
             styles: {
               background: "none",
               border: "none",
+              display: "inline-flex",
               cursor: "pointer",
-              fontSize: "12px",
               color: "#c62828",
               opacity: "0.6",
               padding: "2px",
@@ -17139,9 +17648,9 @@ You MUST call the generate_tags function.`;
           // Highlight active
           if (isActive) {
             const check = ztoolkit.UI.createElement(doc, "div", {
-              properties: { innerText: "✓" },
+              properties: { innerHTML: iconMarkup("check", { size: 14 }) },
               styles: {
-                fontSize: "14px",
+                display: "inline-flex",
                 color: "var(--highlight-primary)",
                 marginRight: "6px",
               },
@@ -17445,7 +17954,7 @@ You MUST call the generate_tags function.`;
                 this.reRenderSelectionArea();
 
                 // Feedback
-                addBtn.innerText = "✓ Added";
+                addBtn.innerHTML = iconMarkup("check", { size: 12 }) + " Added";
                 addBtn.style.backgroundColor = "var(--highlight-primary)";
                 addBtn.style.color = "var(--highlight-text)";
                 setTimeout(() => {
@@ -17461,7 +17970,7 @@ You MUST call the generate_tags function.`;
           addBtn.style.color = "var(--highlight-text)";
         });
         addBtn.addEventListener("mouseleave", () => {
-          if (addBtn.innerText !== "✓ Added") {
+          if (!addBtn.textContent?.includes("Added")) {
             addBtn.style.backgroundColor = "transparent";
             addBtn.style.color = "var(--highlight-primary)";
           }
@@ -17647,7 +18156,9 @@ You MUST call the generate_tags function.`;
     // Add Button
     const addBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "➕ Add Papers" },
+      properties: {
+        innerHTML: iconMarkup("add", { size: 13 }) + " Add Papers",
+      },
       styles: {
         marginTop: "12px",
         padding: "8px 16px",
@@ -17909,8 +18420,8 @@ You MUST call the generate_tags function.`;
 
         // Edit icon (pencil)
         const editIcon = ztoolkit.UI.createElement(doc, "span", {
-          properties: { innerHTML: "✎" },
-          styles: { fontSize: "11px", opacity: "0.4" },
+          properties: { innerHTML: iconMarkup("edit", { size: 11 }) },
+          styles: { display: "inline-flex", opacity: "0.4" },
         });
         headerContent.appendChild(editIcon);
 
@@ -18356,24 +18867,52 @@ You MUST call the generate_tags function.`;
 
           if (hasNotes) {
             if (hasPDFForIndicator) {
-              td.innerHTML = `<span class="generate-indexed-btn" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">Generate</span>`;
+              this.setTableCellAction(
+                td,
+                "sparkle",
+                "Generate",
+                "generate-indexed-btn",
+              );
               td.title = "Generate: uses existing notes";
             } else {
-              td.innerHTML = `<span style="font-size: 11px;">
-                              <span class="generate-indexed-btn" style="color: var(--highlight-primary); cursor: pointer;">Generate</span>
-                              <span style="margin: 0 4px; color: var(--text-tertiary);">|</span>
-                              <span class="search-pdf-btn" style="color: var(--text-secondary); cursor: pointer;">🔍 Search PDF</span>
-                          </span>`;
+              const actions = doc.createElement("span");
+              actions.className = "table-cell-action-group";
+              actions.style.cssText =
+                "display: inline-flex; align-items: center; gap: 8px; font-size: 11px;";
+              this.appendTableCellAction(
+                actions,
+                "sparkle",
+                "Generate",
+                "generate-indexed-btn",
+              );
+              this.appendTableCellAction(
+                actions,
+                "search",
+                "Search PDF",
+                "search-pdf-btn",
+              );
+              td.replaceChildren(actions);
               td.title =
                 "Generate: uses notes | Search PDF: find and attach PDF";
             }
           } else if (hasPDFForIndicator) {
-            // Show both options: Generate (uses indexed PDF text) and OCR (creates refined notes)
-            td.innerHTML = `<span style="font-size: 11px;">
-                            <span class="generate-indexed-btn" style="color: var(--highlight-primary); cursor: pointer;">Generate</span>
-                            <span style="margin: 0 4px; color: var(--text-tertiary);">|</span>
-                            <span class="process-pdf-btn" style="color: var(--text-secondary); cursor: pointer;">OCR</span>
-                        </span>`;
+            const actions = doc.createElement("span");
+            actions.className = "table-cell-action-group";
+            actions.style.cssText =
+              "display: inline-flex; align-items: center; gap: 8px; font-size: 11px;";
+            this.appendTableCellAction(
+              actions,
+              "sparkle",
+              "Generate",
+              "generate-indexed-btn",
+            );
+            this.appendTableCellAction(
+              actions,
+              "review",
+              "OCR",
+              "process-pdf-btn",
+            );
+            td.replaceChildren(actions);
             td.title = "Generate: uses PDF text | OCR: extracts refined notes";
           } else {
             // Check if paper has identifiers for PDF search
@@ -18389,13 +18928,28 @@ You MUST call the generate_tags function.`;
                 switch (activeSearch.status) {
                   case "queued":
                   case "searching":
-                    td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">🔍 Searching...</span>`;
+                    this.setTableCellStatus(
+                      td,
+                      "search",
+                      "Searching...",
+                      "var(--highlight-primary)",
+                    );
                     break;
                   case "retrying":
-                    td.innerHTML = `<span style="color: #f57c00; font-size: 11px;">↻ Retrying...</span>`;
+                    this.setTableCellStatus(
+                      td,
+                      "refresh",
+                      "Retrying...",
+                      "#f57c00",
+                    );
                     break;
                   case "found":
-                    td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Process PDF</span>`;
+                    this.setTableCellAction(
+                      td,
+                      "review",
+                      "Process PDF",
+                      "process-pdf-btn",
+                    );
                     break;
                   case "notfound": {
                     // Show source link if we can resolve one
@@ -18411,17 +18965,38 @@ You MUST call the generate_tags function.`;
                       itemUrl,
                     );
                     if (sourceLink) {
-                      td.innerHTML = `<span class="source-link-btn" data-url="${sourceLink}" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔗 Source Link</span>`;
+                      this.setTableCellAction(
+                        td,
+                        "open-link",
+                        "Source Link",
+                        "source-link-btn",
+                        { "data-url": sourceLink },
+                      );
                     } else {
-                      td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">No PDF found</span>`;
+                      this.setTableCellStatus(
+                        td,
+                        "block",
+                        "No PDF found",
+                        "var(--text-tertiary)",
+                      );
                     }
                     break;
                   }
                   case "skipped":
-                    td.innerHTML = `<span style="color: #f57c00; font-size: 11px;">⏭ ${activeSearch.message || "Skipped"}</span>`;
+                    this.setTableCellStatus(
+                      td,
+                      "block",
+                      activeSearch.message || "Skipped",
+                      "#f57c00",
+                    );
                     break;
                   case "error":
-                    td.innerHTML = `<span style="color: #c62828; font-size: 11px;">✗ ${activeSearch.message || "Error"}</span>`;
+                    this.setTableCellStatus(
+                      td,
+                      "x-circle",
+                      activeSearch.message || "Error",
+                      "#c62828",
+                    );
                     break;
                 }
               } else {
@@ -18430,23 +19005,54 @@ You MUST call the generate_tags function.`;
                   currentTableConfig?.pdfDiscoveryData?.[row.paperId];
                 if (persistedDiscovery) {
                   if (persistedDiscovery.status === "found") {
-                    td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Process PDF</span>`;
+                    this.setTableCellAction(
+                      td,
+                      "review",
+                      "Process PDF",
+                      "process-pdf-btn",
+                    );
                   } else if (
                     persistedDiscovery.status === "source_link" &&
                     persistedDiscovery.sourceUrl
                   ) {
-                    td.innerHTML = `<span class="source-link-btn" data-url="${persistedDiscovery.sourceUrl}" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔗 Source-Link</span>`;
+                    this.setTableCellAction(
+                      td,
+                      "open-link",
+                      "Source-Link",
+                      "source-link-btn",
+                      { "data-url": persistedDiscovery.sourceUrl },
+                    );
                   } else if (persistedDiscovery.status === "not_found") {
-                    td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">Not found</span>`;
+                    this.setTableCellStatus(
+                      td,
+                      "block",
+                      "Not found",
+                      "var(--text-tertiary)",
+                    );
                   } else {
-                    td.innerHTML = `<span class="search-pdf-btn" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔍 Search PDF</span>`;
+                    this.setTableCellAction(
+                      td,
+                      "search",
+                      "Search PDF",
+                      "search-pdf-btn",
+                    );
                   }
                 } else {
-                  td.innerHTML = `<span class="search-pdf-btn" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔍 Search PDF</span>`;
+                  this.setTableCellAction(
+                    td,
+                    "search",
+                    "Search PDF",
+                    "search-pdf-btn",
+                  );
                 }
               }
             } else {
-              td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">No source</span>`;
+              this.setTableCellStatus(
+                td,
+                "block",
+                "No source",
+                "var(--text-tertiary)",
+              );
             }
           }
         } else {
@@ -18494,9 +19100,19 @@ You MUST call the generate_tags function.`;
                     parentItemID: item.id,
                     contentType: "application/pdf",
                   });
-                  td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Process PDF</span>`;
+                  this.setTableCellAction(
+                    td,
+                    "review",
+                    "Process PDF",
+                    "process-pdf-btn",
+                  );
                 } catch (e) {
-                  td.innerHTML = `<span style="color: #c62828; font-size: 11px;">Attach failed</span>`;
+                  this.setTableCellStatus(
+                    td,
+                    "warning",
+                    "Attach failed",
+                    "#c62828",
+                  );
                 }
               }
               return;
@@ -18507,7 +19123,12 @@ You MUST call the generate_tags function.`;
               ".generate-indexed-btn",
             );
             if (generateIndexedBtn && item) {
-              td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Generating...</span>`;
+              this.setTableCellStatus(
+                td,
+                "hourglass",
+                "Generating...",
+                "var(--text-tertiary)",
+              );
               td.style.cursor = "wait";
               try {
                 // Use generateFromPDF which now uses indexed text first
@@ -18529,7 +19150,12 @@ You MUST call the generate_tags function.`;
                   await tableStore.saveConfig(currentTableConfig);
                 }
               } catch (err) {
-                td.innerHTML = `<span style="color: #c62828; font-size: 11px;">Error: ${err}</span>`;
+                this.setTableCellStatus(
+                  td,
+                  "warning",
+                  `Error: ${err}`,
+                  "#c62828",
+                );
                 td.style.cursor = "pointer";
               }
               return;
@@ -18542,10 +19168,20 @@ You MUST call the generate_tags function.`;
             if (processPdfBtn && item) {
               const pdf = ocrService.getFirstPdfAttachment(item);
               if (!pdf) {
-                td.innerHTML = `<span style="color: #c62828; font-size: 11px;">No PDF found</span>`;
+                this.setTableCellStatus(
+                  td,
+                  "warning",
+                  "No PDF found",
+                  "#c62828",
+                );
                 return;
               }
-              td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">OCR Processing...</span>`;
+              this.setTableCellStatus(
+                td,
+                "hourglass",
+                "OCR Processing...",
+                "var(--text-tertiary)",
+              );
               td.style.cursor = "wait";
               try {
                 await ocrService.convertToMarkdown(pdf);
@@ -18602,10 +19238,15 @@ You MUST call the generate_tags function.`;
                     await tableStore.saveConfig(currentTableConfig);
                   }
                 } else {
-                  td.innerHTML = `<span style="color: #ff9800; font-size: 11px;">OCR done, no note created</span>`;
+                  this.setTableCellStatus(
+                    td,
+                    "warning",
+                    "OCR done, no note created",
+                    "#ff9800",
+                  );
                 }
               } catch (err) {
-                td.innerHTML = `<span style="color: #c62828; font-size: 11px;">OCR Error</span>`;
+                this.setTableCellStatus(td, "warning", "OCR Error", "#c62828");
                 td.title = String(err);
                 td.style.cursor = "pointer";
               }
@@ -18618,16 +19259,31 @@ You MUST call the generate_tags function.`;
             );
             if (searchPdfBtn && !hasNotes && !hasPDF && item) {
               // Run PDF discovery pipeline
-              td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Searching...</span>`;
+              this.setTableCellStatus(
+                td,
+                "search",
+                "Searching...",
+                "var(--text-tertiary)",
+              );
               td.style.cursor = "wait";
 
               try {
                 const success = await findAndAttachPdfForItem(item, (step) => {
-                  td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">${step}</span>`;
+                  this.setTableCellStatus(
+                    td,
+                    "search",
+                    step,
+                    "var(--text-tertiary)",
+                  );
                 });
 
                 if (success) {
-                  td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Process PDF</span>`;
+                  this.setTableCellAction(
+                    td,
+                    "review",
+                    "Process PDF",
+                    "process-pdf-btn",
+                  );
                   td.style.cursor = "pointer";
                   // Persist the discovery result
                   if (currentTableConfig) {
@@ -18655,7 +19311,13 @@ You MUST call the generate_tags function.`;
                   );
 
                   if (sourceLink) {
-                    td.innerHTML = `<span class="source-link-btn" data-url="${sourceLink}" style="color: var(--highlight-primary); font-size: 11px; cursor: pointer;">🔗 Source-Link</span>`;
+                    this.setTableCellAction(
+                      td,
+                      "open-link",
+                      "Source-Link",
+                      "source-link-btn",
+                      { "data-url": sourceLink },
+                    );
                     td.style.cursor = "pointer";
                     // Persist the source link discovery result
                     if (currentTableConfig) {
@@ -18670,7 +19332,12 @@ You MUST call the generate_tags function.`;
                       await tableStore.saveConfig(currentTableConfig);
                     }
                   } else {
-                    td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px; font-style: italic;">Not found</span>`;
+                    this.setTableCellStatus(
+                      td,
+                      "block",
+                      "Not found",
+                      "var(--text-tertiary)",
+                    );
                     td.style.cursor = "pointer";
                     // Persist the not-found result
                     if (currentTableConfig) {
@@ -18686,7 +19353,7 @@ You MUST call the generate_tags function.`;
                   }
                 }
               } catch (err) {
-                td.innerHTML = `<span style="color: #c62828; font-size: 11px;">Error</span>`;
+                this.setTableCellStatus(td, "warning", "Error", "#c62828");
                 td.style.cursor = "pointer";
                 // Persist the error result
                 if (currentTableConfig) {
@@ -18709,12 +19376,35 @@ You MUST call the generate_tags function.`;
               const linkUrl = sourceLinkBtn.getAttribute("data-url");
               if (linkUrl) {
                 Zotero.launchURL(linkUrl);
-                // Show Attach, Retry, and Add Note buttons
-                td.innerHTML = `<span style="font-size: 11px;">
-                                    <span class="attach-pdf-btn" data-item-id="${row.paperId}" style="color: var(--highlight-primary); cursor: pointer; margin-right: 8px;">⬇️ Attach</span>
-                                    <span class="search-pdf-btn" style="color: var(--highlight-primary); cursor: pointer; margin-right: 8px;">🔁 Retry</span>
-                                    <span class="add-note-btn" data-item-id="${row.paperId}" style="color: var(--highlight-primary); cursor: pointer;">Add Note</span>
-                                </span>`;
+                const actions = td.ownerDocument!.createElement("span");
+                actions.className = "table-cell-action-group";
+                actions.style.cssText =
+                  "display: inline-flex; align-items: center; gap: 8px; font-size: 11px;";
+                this.appendTableCellAction(
+                  actions,
+                  "download",
+                  "Attach",
+                  "attach-pdf-btn",
+                  {
+                    "data-item-id": String(row.paperId),
+                  },
+                );
+                this.appendTableCellAction(
+                  actions,
+                  "refresh",
+                  "Retry",
+                  "search-pdf-btn",
+                );
+                this.appendTableCellAction(
+                  actions,
+                  "paper",
+                  "Add Note",
+                  "add-note-btn",
+                  {
+                    "data-item-id": String(row.paperId),
+                  },
+                );
+                td.replaceChildren(actions);
                 td.style.cursor = "pointer";
               }
               return;
@@ -18724,7 +19414,12 @@ You MUST call the generate_tags function.`;
             const addNoteBtn = (e.target as Element).closest(".add-note-btn");
             if (addNoteBtn && item) {
               try {
-                td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">Creating note...</span>`;
+                this.setTableCellStatus(
+                  td,
+                  "hourglass",
+                  "Creating note...",
+                  "var(--text-tertiary)",
+                );
                 td.style.cursor = "wait";
 
                 // Create a new note with the paper title as the note title
@@ -18756,12 +19451,22 @@ You MUST call the generate_tags function.`;
                 row.data["sources"] = String(row.noteIds.length);
 
                 // Show "Generate" button now that we have a note
-                td.innerHTML = `<span style="color: var(--highlight-primary); font-size: 11px;">Generate</span>`;
+                this.setTableCellAction(
+                  td,
+                  "sparkle",
+                  "Generate",
+                  "generate-indexed-btn",
+                );
                 td.style.cursor = "pointer";
 
                 Zotero.debug(`[seerai] Created note for paper: ${paperTitle}`);
               } catch (err) {
-                td.innerHTML = `<span style="color: #c62828; font-size: 11px;">Error creating note</span>`;
+                this.setTableCellStatus(
+                  td,
+                  "warning",
+                  "Error creating note",
+                  "#c62828",
+                );
                 td.style.cursor = "pointer";
                 Zotero.debug(`[seerai] Error creating note: ${err}`);
               }
@@ -18769,7 +19474,12 @@ You MUST call the generate_tags function.`;
             }
 
             if (hasNotes || hasPDF) {
-              td.innerHTML = `<span style="color: var(--text-tertiary); font-size: 11px;">${hasNotes ? "Generating..." : "Processing..."}</span>`;
+              this.setTableCellStatus(
+                td,
+                "hourglass",
+                hasNotes ? "Generating..." : "Processing...",
+                "var(--text-tertiary)",
+              );
               td.style.cursor = "wait";
 
               try {
@@ -18836,12 +19546,12 @@ You MUST call the generate_tags function.`;
 
       const saveRowBtn = ztoolkit.UI.createElement(doc, "button", {
         namespace: "html",
-        properties: { innerText: "💾" },
         attributes: { title: "Save this row as a note attached to the paper" },
         styles: {
           background: "none",
           border: "none",
-          fontSize: "14px",
+          display: "inline-flex",
+          alignItems: "center",
           cursor: "pointer",
           padding: "4px",
           borderRadius: "4px",
@@ -18852,25 +19562,28 @@ You MUST call the generate_tags function.`;
             type: "click",
             listener: async (e: Event) => {
               e.stopPropagation();
-              const btn = e.target as HTMLElement;
-              btn.innerText = "";
+              const btn = (e.target as HTMLElement).closest(
+                "button",
+              ) as HTMLElement;
+              if (!btn) return;
+              this.setTableButtonContent(doc, btn, "hourglass", undefined, 14);
               btn.style.cursor = "wait";
 
               const cols = currentTableConfig?.columns || defaultColumns;
               const success = await this.saveRowAsNote(row, cols);
 
               if (success) {
-                btn.innerText = "✓";
+                this.setTableButtonContent(doc, btn, "check", undefined, 14);
                 btn.style.color = "#4CAF50";
                 setTimeout(() => {
-                  btn.innerText = "💾";
+                  this.setTableButtonContent(doc, btn, "save", undefined, 14);
                   btn.style.color = "";
                 }, 2000);
               } else {
-                btn.innerText = "✕";
+                this.setTableButtonContent(doc, btn, "close", undefined, 14);
                 btn.style.color = "#c62828";
                 setTimeout(() => {
-                  btn.innerText = "💾";
+                  this.setTableButtonContent(doc, btn, "save", undefined, 14);
                   btn.style.color = "";
                 }, 2000);
               }
@@ -18879,6 +19592,7 @@ You MUST call the generate_tags function.`;
           },
         ],
       });
+      this.setTableButtonContent(doc, saveRowBtn, "save", undefined, 14);
       saveRowBtn.addEventListener("mouseenter", () => {
         saveRowBtn.style.backgroundColor = "rgba(128,128,128,0.2)";
       });
@@ -18890,12 +19604,12 @@ You MUST call the generate_tags function.`;
       // Tag generation button
       const tagBtn = ztoolkit.UI.createElement(doc, "button", {
         namespace: "html",
-        properties: { innerText: "🏷️" },
         attributes: { title: "Generate AI tags for this paper" },
         styles: {
           background: "none",
           border: "none",
-          fontSize: "14px",
+          display: "inline-flex",
+          alignItems: "center",
           cursor: "pointer",
           padding: "4px",
           borderRadius: "4px",
@@ -18906,12 +19620,16 @@ You MUST call the generate_tags function.`;
             type: "click",
             listener: async (e: Event) => {
               e.stopPropagation();
-              const btn = e.target as HTMLElement;
+              const btn = (e.target as HTMLElement).closest(
+                "button",
+              ) as HTMLElement;
+              if (!btn) return;
               await this.generateTagsForItem(row, btn);
             },
           },
         ],
       });
+      this.setTableButtonContent(doc, tagBtn, "tag", undefined, 14);
       tagBtn.addEventListener("mouseenter", () => {
         tagBtn.style.backgroundColor = "rgba(128,128,128,0.2)";
       });
@@ -18923,12 +19641,12 @@ You MUST call the generate_tags function.`;
       // Bomb button (Delete from Zotero)
       const bombBtn = ztoolkit.UI.createElement(doc, "button", {
         namespace: "html",
-        properties: { innerText: "💣" },
         attributes: { title: "Delete item from Zotero completely" },
         styles: {
           background: "none",
           border: "none",
-          fontSize: "14px",
+          display: "inline-flex",
+          alignItems: "center",
           cursor: "pointer",
           padding: "4px",
           borderRadius: "4px",
@@ -18946,13 +19664,13 @@ You MUST call the generate_tags function.`;
 
               if (btn.dataset.confirmBomb !== "true") {
                 btn.dataset.confirmBomb = "true";
-                btn.innerText = "💥";
+                this.setTableButtonContent(doc, btn, "bomb", undefined, 14);
                 btn.style.color = "#c62828";
                 btn.style.backgroundColor = "rgba(198,40,40,0.15)";
                 btn.title = "Click again to PERMANENTLY DELETE from Zotero";
                 setTimeout(() => {
                   btn.dataset.confirmBomb = "";
-                  btn.innerText = "💣";
+                  this.setTableButtonContent(doc, btn, "bomb", undefined, 14);
                   btn.style.color = "";
                   btn.style.backgroundColor = "";
                   btn.title = "Delete item from Zotero completely";
@@ -18962,7 +19680,13 @@ You MUST call the generate_tags function.`;
 
               // Execute delete
               try {
-                btn.innerText = "⌛";
+                this.setTableButtonContent(
+                  doc,
+                  btn,
+                  "hourglass",
+                  undefined,
+                  14,
+                );
                 await Zotero.Items.erase([row.paperId]);
 
                 // Also remove from table config if present
@@ -18990,6 +19714,7 @@ You MUST call the generate_tags function.`;
           },
         ],
       });
+      this.setTableButtonContent(doc, bombBtn, "bomb", undefined, 14);
       bombBtn.addEventListener("mouseenter", () => {
         bombBtn.style.backgroundColor = "rgba(198,40,40,0.2)";
       });
@@ -19003,12 +19728,12 @@ You MUST call the generate_tags function.`;
       // Remove button
       const removeRowBtn = ztoolkit.UI.createElement(doc, "button", {
         namespace: "html",
-        properties: { innerText: "🗑️" },
         attributes: { title: "Remove this paper from the table" },
         styles: {
           background: "none",
           border: "none",
-          fontSize: "14px",
+          display: "inline-flex",
+          alignItems: "center",
           cursor: "pointer",
           padding: "4px",
           borderRadius: "4px",
@@ -19027,13 +19752,13 @@ You MUST call the generate_tags function.`;
               // Confirm removal with visual feedback
               if (btn.dataset.confirmRemove !== "true") {
                 btn.dataset.confirmRemove = "true";
-                btn.innerText = "!";
+                this.setTableButtonContent(doc, btn, "warning", undefined, 14);
                 btn.style.color = "#c62828";
                 btn.style.backgroundColor = "rgba(198,40,40,0.15)";
                 btn.title = "Click again to confirm removal";
                 setTimeout(() => {
                   btn.dataset.confirmRemove = "";
-                  btn.innerText = "🗑️";
+                  this.setTableButtonContent(doc, btn, "trash", undefined, 14);
                   btn.style.color = "";
                   btn.style.backgroundColor = "";
                   btn.title = "Remove this paper from the table";
@@ -19068,6 +19793,7 @@ You MUST call the generate_tags function.`;
           },
         ],
       });
+      this.setTableButtonContent(doc, removeRowBtn, "trash", undefined, 14);
       removeRowBtn.addEventListener("mouseenter", () => {
         removeRowBtn.style.backgroundColor = "rgba(198,40,40,0.2)";
       });
@@ -19535,8 +20261,13 @@ You MUST call the generate_tags function.`;
     });
 
     const headerTitle = ztoolkit.UI.createElement(doc, "div", {
-      properties: { innerText: "⚙️ Manage Columns" },
+      properties: {
+        innerHTML: iconMarkup("settings", { size: 13 }) + " Manage Columns",
+      },
       styles: {
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
         fontSize: "13px",
         fontWeight: "600",
         color: "var(--highlight-text)",
@@ -19547,7 +20278,7 @@ You MUST call the generate_tags function.`;
 
     const closeBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "✕" },
+      properties: { innerHTML: iconMarkup("close", { size: 12 }) },
       styles: {
         background: "rgba(0,0,0,0.1)",
         border: "none",
@@ -19647,7 +20378,7 @@ You MUST call the generate_tags function.`;
     // Load Button
     const loadPresetBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "📥" },
+      properties: { innerHTML: iconMarkup("download", { size: 13 }) },
       attributes: { title: "Load preset" },
       styles: {
         padding: "6px 10px",
@@ -19690,7 +20421,7 @@ You MUST call the generate_tags function.`;
     // Save Button
     const savePresetBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "💾" },
+      properties: { innerHTML: iconMarkup("save", { size: 13 }) },
       attributes: { title: "Save current as preset" },
       styles: {
         padding: "6px 10px",
@@ -19732,7 +20463,7 @@ You MUST call the generate_tags function.`;
     // Delete Button
     const deletePresetBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "🗑" },
+      properties: { innerHTML: iconMarkup("trash", { size: 13 }) },
       attributes: { title: "Delete selected preset" },
       styles: {
         padding: "6px 10px",
@@ -19831,11 +20562,11 @@ You MUST call the generate_tags function.`;
       if (!coreColumns.includes(col.id)) {
         const deleteBtn = ztoolkit.UI.createElement(doc, "button", {
           namespace: "html",
-          properties: { innerText: "🗑" },
+          properties: { innerHTML: iconMarkup("trash", { size: 12 }) },
           styles: {
             background: "none",
             border: "none",
-            fontSize: "12px",
+            display: "inline-flex",
             cursor: "pointer",
             color: "#c62828",
             padding: "2px 4px",
@@ -19877,7 +20608,9 @@ You MUST call the generate_tags function.`;
     });
 
     const addLabel = ztoolkit.UI.createElement(doc, "div", {
-      properties: { innerText: "➕ Add New Column" },
+      properties: {
+        innerHTML: iconMarkup("add", { size: 12 }) + " Add New Column",
+      },
       styles: {
         fontSize: "12px",
         fontWeight: "600",
@@ -20174,7 +20907,9 @@ You MUST call the generate_tags function.`;
     });
 
     const headerTitle = ztoolkit.UI.createElement(doc, "div", {
-      properties: { innerText: "➕ New Column" },
+      properties: {
+        innerHTML: iconMarkup("add", { size: 12 }) + " New Column",
+      },
       styles: {
         fontSize: "12px",
         fontWeight: "600",
@@ -20737,7 +21472,10 @@ You MUST call the generate_tags function.`;
       },
     });
     const tempResetBtn = ztoolkit.UI.createElement(doc, "span", {
-      properties: { innerText: "↺", title: "Reset to Default" },
+      properties: {
+        innerHTML: iconMarkup("refresh", { size: 13 }),
+        title: "Reset to Default",
+      },
       styles: {
         cursor: "pointer",
         display: column.temperature === undefined ? "none" : "inline-block",
@@ -20808,7 +21546,10 @@ You MUST call the generate_tags function.`;
       },
     });
     const maxLenResetBtn = ztoolkit.UI.createElement(doc, "span", {
-      properties: { innerText: "↺", title: "Reset to Default" },
+      properties: {
+        innerHTML: iconMarkup("refresh", { size: 13 }),
+        title: "Reset to Default",
+      },
       styles: {
         cursor: "pointer",
         display: column.maxTokens === undefined ? "none" : "inline-block",
@@ -20855,7 +21596,9 @@ You MUST call the generate_tags function.`;
     // Remove Column button
     const removeBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "🗑️ Remove Column" },
+      properties: {
+        innerHTML: iconMarkup("trash", { size: 13 }) + " Remove Column",
+      },
       styles: {
         padding: "8px 12px",
         fontSize: "12px",
@@ -21036,8 +21779,13 @@ You MUST call the generate_tags function.`;
         // Generate button
         const genBtn = ztoolkit.UI.createElement(doc, "button", {
           namespace: "html",
-          properties: { innerText: "✨ Generate" },
+          properties: {
+            innerHTML: iconMarkup("sparkle", { size: 12 }) + " Generate",
+          },
           styles: {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "4px",
             padding: "6px 12px",
             fontSize: "11px",
             border: "1px solid var(--highlight-primary)",
@@ -21308,8 +22056,8 @@ You MUST call the generate_tags function.`;
 
         // Edit Icon (Pencil)
         const editIcon = ztoolkit.UI.createElement(doc, "span", {
-          properties: { innerHTML: "✎" },
-          styles: { fontSize: "12px", opacity: "0.4" },
+          properties: { innerHTML: iconMarkup("edit", { size: 12 }) },
+          styles: { display: "inline-flex", opacity: "0.4" },
         });
 
         // Hover effect for edit icon
@@ -21403,7 +22151,10 @@ You MUST call the generate_tags function.`;
     // "Show More" button (Initial placement at bottom of table container)
     const showMoreBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "📥 Show More", id: "show-more-btn" },
+      properties: {
+        innerHTML: iconMarkup("download", { size: 13 }) + " Show More",
+        id: "show-more-btn",
+      },
       styles: {
         display: "block",
         width: "calc(100% - 24px)",
@@ -21463,7 +22214,6 @@ You MUST call the generate_tags function.`;
     ) => {
       const btn = ztoolkit.UI.createElement(doc, "button", {
         namespace: "html",
-        properties: { innerText: icon },
         attributes: { title: title },
         styles: {
           width: "24px",
@@ -21475,7 +22225,6 @@ You MUST call the generate_tags function.`;
           borderRadius: "4px",
           backgroundColor: "var(--background-primary)",
           cursor: "pointer",
-          fontSize: "14px",
           color: "var(--text-primary)",
           transition: "all 0.2s ease",
         },
@@ -21486,6 +22235,9 @@ You MUST call the generate_tags function.`;
           },
         ],
       });
+      btn.appendChild(
+        createSvgIcon(doc, icon as IconName, { size: 14, strokeWidth: 1.7 }),
+      );
 
       // Hover effects
       btn.addEventListener("mouseenter", () => {
@@ -21503,13 +22255,13 @@ You MUST call the generate_tags function.`;
     };
 
     // 1. (+) Add Column (Immediate)
-    const addColumnBtn = createSideBtn("➕", "Add Analysis Column", (e) => {
+    const addColumnBtn = createSideBtn("add", "Add Analysis Column", (e) => {
       e.stopPropagation();
       this.addImmediateSearchColumn(doc, resultsContainer, item);
     });
     sideStrip.appendChild(addColumnBtn);
 
-    // 2. (⚡) Generate All
+    // 2. Generate All
     const generateAllBtn = createSideBtn(
       "lightning",
       "Generate All Analysis",
@@ -21520,9 +22272,9 @@ You MUST call the generate_tags function.`;
     );
     sideStrip.appendChild(generateAllBtn);
 
-    // 3. (⚙️) Settings
+    // 3. Settings
     const settingsBtn = createSideBtn(
-      "⚙️",
+      "settings",
       "Manage Columns & Settings",
       (e) => {
         e.stopPropagation();
@@ -21680,8 +22432,13 @@ You MUST call the generate_tags function.`;
 
     const removeBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "🗑️ Remove Column" },
+      properties: {
+        innerHTML: iconMarkup("trash", { size: 13 }) + " Remove Column",
+      },
       styles: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
         padding: "6px 10px",
         fontSize: "11px",
         color: "var(--button-clear-text)",
@@ -22020,7 +22777,7 @@ You MUST call the generate_tags function.`;
 
     const savePresetBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "💾 Save" },
+      properties: { innerHTML: iconMarkup("save", { size: 12 }) + " Save" },
       styles: {
         padding: "4px 8px",
         fontSize: "11px",
@@ -22127,9 +22884,8 @@ You MUST call the generate_tags function.`;
           // Delete
           const delBtn = ztoolkit.UI.createElement(doc, "button", {
             namespace: "html",
-            properties: { innerText: "✕" },
+            properties: { innerHTML: iconMarkup("close", { size: 11 }) },
             styles: {
-              fontSize: "10px",
               padding: "2px 6px",
               cursor: "pointer",
               backgroundColor: "transparent",
@@ -22392,7 +23148,10 @@ You MUST call the generate_tags function.`;
     lenHeader.appendChild(lenLabel);
 
     const lenResetBtn = ztoolkit.UI.createElement(doc, "span", {
-      properties: { innerText: "↺", title: "Reset to Default" },
+      properties: {
+        innerHTML: iconMarkup("refresh", { size: 13 }),
+        title: "Reset to Default",
+      },
       styles: {
         fontSize: "14px",
         cursor: "pointer",
@@ -22474,7 +23233,10 @@ You MUST call the generate_tags function.`;
     tempHeader.appendChild(tempLabel);
 
     const tempResetBtn = ztoolkit.UI.createElement(doc, "span", {
-      properties: { innerText: "↺", title: "Reset to Default" },
+      properties: {
+        innerHTML: iconMarkup("refresh", { size: 13 }),
+        title: "Reset to Default",
+      },
       styles: {
         fontSize: "14px",
         cursor: "pointer",
@@ -22566,7 +23328,7 @@ You MUST call the generate_tags function.`;
 
     const savePresetBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "💾 Save" },
+      properties: { innerHTML: iconMarkup("save", { size: 12 }) + " Save" },
       styles: {
         padding: "4px 8px",
         fontSize: "11px",
@@ -22672,9 +23434,8 @@ You MUST call the generate_tags function.`;
           // Delete
           const delBtn = ztoolkit.UI.createElement(doc, "button", {
             namespace: "html",
-            properties: { innerText: "✕" },
+            properties: { innerHTML: iconMarkup("close", { size: 11 }) },
             styles: {
-              fontSize: "10px",
               padding: "2px 6px",
               cursor: "pointer",
               backgroundColor: "transparent",
@@ -22802,12 +23563,12 @@ You MUST call the generate_tags function.`;
       if (!coreColumnIds.includes(col.id)) {
         const deleteBtn = ztoolkit.UI.createElement(doc, "button", {
           namespace: "html",
-          properties: { innerText: "🗑" },
+          properties: { innerHTML: iconMarkup("trash", { size: 12 }) },
           attributes: { title: "Delete column" },
           styles: {
             background: "none",
             border: "none",
-            fontSize: "12px",
+            display: "inline-flex",
             cursor: "pointer",
             color: "#c62828",
             padding: "2px 4px",
@@ -22912,8 +23673,13 @@ You MUST call the generate_tags function.`;
     });
 
     const label = ztoolkit.UI.createElement(doc, "span", {
-      properties: { innerText: "📊 Columns:" },
+      properties: {
+        innerHTML: iconMarkup("table", { size: 12 }) + " Columns:",
+      },
       styles: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "4px",
         fontSize: "11px",
         color: "var(--text-secondary)",
         marginRight: "4px",
@@ -22943,8 +23709,9 @@ You MUST call the generate_tags function.`;
 
       // Remove button
       const removeBtn = ztoolkit.UI.createElement(doc, "span", {
-        properties: { innerText: "✕" },
+        properties: { innerHTML: iconMarkup("close", { size: 11 }) },
         styles: {
+          display: "inline-flex",
           cursor: "pointer",
           marginLeft: "2px",
           opacity: "0.8",
@@ -23535,8 +24302,14 @@ ${lengthConstraint}`;
         const note = Zotero.Items.get(noteID);
         if (note) {
           const noteContent = note.getNote();
-          // Check if note has the Tables marker
-          if (noteContent.includes("<h2>📊 Tables")) {
+          // Check if note has the Tables marker. Matches the current plain
+          // heading and the legacy heading from older versions (a chart glyph,
+          // referenced via escape so no literal emoji appears in source).
+          const legacyMarker = "<h2>\uD83D\uDCCA Tables";
+          if (
+            noteContent.includes("<h2>Tables") ||
+            noteContent.includes(legacyMarker)
+          ) {
             return note as Zotero.Item;
           }
         }
@@ -23600,7 +24373,7 @@ ${lengthConstraint}`;
       tableRows += `    <tr><td style="padding: 8px; border: 1px solid #ddd; font-weight: 600;">${col.name}</td><td style="padding: 8px; border: 1px solid #ddd;">${escapedValue}</td></tr>\n`;
     }
 
-    return `<h2>📊 Tables - ${paperTitle.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</h2>
+    return `<h2>Tables - ${paperTitle.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</h2>
 <table style="border-collapse: collapse; width: 100%; margin: 10px 0;">
   <thead>
     <tr style="background: #f5f5f5;">
@@ -24017,9 +24790,11 @@ ${tableRows}  </tbody>
                 row.style.backgroundColor = "var(--background-hover)";
                 addBtn.replaceWith(
                   ztoolkit.UI.createElement(doc, "span", {
-                    properties: { innerText: "✓" },
+                    properties: {
+                      innerHTML: iconMarkup("check", { size: 14 }),
+                    },
                     styles: {
-                      fontSize: "14px",
+                      display: "inline-flex",
                       color: "green",
                       fontWeight: "bold",
                     },
@@ -24392,9 +25167,11 @@ ${tableRows}  </tbody>
                   row.style.backgroundColor = "var(--background-hover)";
                   addBtn.replaceWith(
                     ztoolkit.UI.createElement(doc, "span", {
-                      properties: { innerText: "✓" },
+                      properties: {
+                        innerHTML: iconMarkup("check", { size: 14 }),
+                      },
                       styles: {
-                        fontSize: "14px",
+                        display: "inline-flex",
                         color: "green",
                         fontWeight: "bold",
                       },
@@ -25583,7 +26360,7 @@ ${tableRows}  </tbody>
         });
 
         const removeBtn = ztoolkit.UI.createElement(doc, "div", {
-          properties: { innerText: "✕" },
+          properties: { innerHTML: iconMarkup("close", { size: 11 }) },
           styles: {
             position: "absolute",
             top: "2px",
@@ -25593,9 +26370,9 @@ ${tableRows}  </tbody>
             backgroundColor: "rgba(255,0,0,0.7)",
             color: "#fff",
             borderRadius: "50%",
-            fontSize: "10px",
-            textAlign: "center",
-            lineHeight: "16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
             cursor: "pointer",
           },
           listeners: [
@@ -26553,7 +27330,7 @@ ${tableRows}  </tbody>
     toolbarLeft.appendChild(promptsContainer);
     toolbarLeft.appendChild(placeholderBtn);
 
-    // ── ☁️ Google Drive Button ──
+    // ── Google Drive Button ──
     const driveBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
       properties: {
@@ -26589,7 +27366,7 @@ ${tableRows}  </tbody>
       });
     });
 
-    // ── 📎 File Upload Button ──
+    // ── File Upload Button ──
     // Opens a file picker for PDF/audio/text/markdown, adds to context system
     const uploadBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
@@ -27082,7 +27859,7 @@ ${tableRows}  </tbody>
     attachmentContainer.appendChild(attachmentBtn);
     toolbarLeft.appendChild(attachmentContainer);
 
-    // ── 🎨 Image Generation Button (Two-part: emoji sends, ▲ opens settings) ──
+    // ── Image Generation Button (Two-part: icon sends, caret opens settings) ──
     // Persisted image generation settings
     let imageGenSize: "256x256" | "512x512" | "1024x1024" = "1024x1024";
     let imageGenSeed: number | undefined;
@@ -27456,7 +28233,9 @@ Rules:
             HTML_NS,
             "button",
           ) as HTMLButtonElement;
-          downloadBtn.innerText = "\u{2B07}\u{FE0F}";
+          downloadBtn.appendChild(
+            createSvgIcon(downloadBtn.ownerDocument!, "download", { size: 14 }),
+          );
           downloadBtn.title = "Save image";
           downloadBtn.style.cssText = `
             position: absolute; top: 6px; right: 6px;
@@ -27551,7 +28330,7 @@ Rules:
     imageGenContainer.appendChild(imageGenBtn);
     imageGenContainer.appendChild(imageGenDropupBtn);
 
-    // ── 🎬 Video Generation Button (Two-part: emoji sends, ▲ opens settings) ──
+    // ── Video Generation Button (Two-part: icon sends, caret opens settings) ──
     // Persisted video generation settings
     let videoGenDuration = "5";
     let videoGenAspectRatio: "16:9" | "9:16" | "1:1" | "4:3" | "3:4" = "16:9";
@@ -27996,7 +28775,12 @@ Rules:
             HTML_NS,
             "button",
           ) as HTMLButtonElement;
-          saveVideoBtn.innerText = "\u{2B07}\u{FE0F} Save";
+          saveVideoBtn.replaceChildren(
+            createSvgIcon(saveVideoBtn.ownerDocument!, "download", {
+              size: 14,
+            }),
+            saveVideoBtn.ownerDocument!.createTextNode(" Save"),
+          );
           saveVideoBtn.title = "Save video to disk";
           saveVideoBtn.style.cssText = `
             padding: 4px 10px; border: 1px solid var(--border-primary); border-radius: 4px;

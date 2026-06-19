@@ -635,11 +635,16 @@ export function wireCodePreviewButtons(contentDiv: HTMLElement): void {
       if (pre) pre.style.flex = "";
       existingSplit.remove();
       wrapper.querySelector(".code-preview-handle")?.remove();
-      btn.textContent = "\u25B6 Preview";
+      btn.replaceChildren(
+        createSvgIcon(btn.ownerDocument!, "play", { size: 11 }),
+        btn.ownerDocument!.createTextNode(" Preview"),
+      );
       return;
     }
 
-    btn.textContent = "\u2715";
+    btn.replaceChildren(
+      createSvgIcon(btn.ownerDocument!, "close", { size: 11 }),
+    );
     btn.title = "Close preview";
 
     // ── Build the split pane ────────────────────────────────────
@@ -1438,18 +1443,6 @@ export function createRAGProgressUI(doc: Document): {
 
   // ── Update function ────────────────────────────────────────────────────
   function update(event: RAGProgressEvent): void {
-    const stepIcons: Record<string, string> = {
-      indexing: "\u2261", // ≡
-      "embedding-query": "\u25CB", // ○
-      searching: "\u25D0", // ◐
-      reranking: "\u21C5", // ⇅
-      assembling: "\u25A3", // ▣
-      "embedding-passthrough": "\u25A1", // □
-      complete: "\u2713", // ✓
-    };
-
-    const icon = stepIcons[event.step] || "\u25CE";
-
     const setSpinnerIcon = (name: IconName, color?: string) => {
       spinner.replaceChildren(
         createSvgIcon(doc, name, { size: 14, strokeWidth: 1.8 }),

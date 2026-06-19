@@ -6,6 +6,7 @@
 import { getWorkspaceStore } from "./store";
 import { WorkspaceFileEntry, inferLanguage, DiffLine } from "./types";
 import { createDiffResult } from "./diff";
+import { iconMarkup } from "../ui/icons";
 import {
   isRenderableExtension,
   getRenderType,
@@ -551,7 +552,9 @@ export class WorkspaceEditorManager {
       // Update button states
       if (previewBtn) {
         const isPreview = mode === "preview";
-        previewBtn.textContent = isPreview ? "\u270F Edit" : "\u25B6 Preview";
+        previewBtn.innerHTML = isPreview
+          ? iconMarkup("edit", { size: 11 }) + " Edit"
+          : iconMarkup("play", { size: 11 }) + " Preview";
         previewBtn.title = isPreview
           ? "Switch to edit mode"
           : "Switch to preview mode";
@@ -564,7 +567,9 @@ export class WorkspaceEditorManager {
         previewBtn.style.opacity = isPreview ? "1" : "0.5";
       }
       const isDiff = mode === "diff";
-      diffBtn!.textContent = isDiff ? "\u270F Edit" : "\u2261 Diff";
+      diffBtn!.innerHTML = isDiff
+        ? iconMarkup("edit", { size: 11 }) + " Edit"
+        : iconMarkup("review", { size: 11 }) + " Diff";
       diffBtn!.title = isDiff ? "Switch to edit mode" : "View changes (diff)";
       diffBtn!.style.backgroundColor = isDiff ? "#e5b73b" : "";
       diffBtn!.style.color = isDiff ? "#fff" : "#e5b73b";
@@ -593,7 +598,7 @@ export class WorkspaceEditorManager {
         HTML_NS,
         "button",
       ) as HTMLButtonElement;
-      enlargeBtn.textContent = "\u26F6 Enlarge";
+      enlargeBtn.innerHTML = iconMarkup("focus", { size: 11 }) + " Enlarge";
       enlargeBtn.title = "Open preview in full window";
       enlargeBtn.style.cssText = createSmallBtnStyle();
       enlargeBtn.style.color = "var(--highlight-primary)";
@@ -639,7 +644,7 @@ export class WorkspaceEditorManager {
           HTML_NS,
           "button",
         ) as HTMLButtonElement;
-        mclose.textContent = "\u2715";
+        mclose.innerHTML = iconMarkup("close", { size: 13 });
         mclose.title = "Close preview";
         Object.assign(mclose.style, {
           padding: "4px 10px",
@@ -719,7 +724,7 @@ export class WorkspaceEditorManager {
       HTML_NS,
       "button",
     ) as HTMLButtonElement;
-    stageBtn.textContent = "\u2B07 Stage";
+    stageBtn.innerHTML = iconMarkup("download", { size: 11 }) + " Stage";
     stageBtn.title = "Stage changes for commit";
     stageBtn.style.cssText = createSmallBtnStyle();
     stageBtn.style.color = "#4caf50";
@@ -728,7 +733,7 @@ export class WorkspaceEditorManager {
       HTML_NS,
       "button",
     ) as HTMLButtonElement;
-    revertBtn.textContent = "\u21A9 Revert";
+    revertBtn.innerHTML = iconMarkup("refresh", { size: 11 }) + " Revert";
     revertBtn.title = "Discard changes and revert to HEAD";
     revertBtn.style.cssText = createSmallBtnStyle();
     revertBtn.style.color = "#ef5350";
@@ -803,9 +808,9 @@ export class WorkspaceEditorManager {
       try {
         const store = getWorkspaceStore();
         await store.stageFile(entry.path);
-        stageBtn.textContent = "\u2713 Staged";
+        stageBtn.innerHTML = iconMarkup("check", { size: 11 }) + " Staged";
         setTimeout(() => {
-          stageBtn.textContent = "\u2B07 Stage";
+          stageBtn.innerHTML = iconMarkup("download", { size: 11 }) + " Stage";
         }, 1500);
       } catch (e) {
         Zotero.debug(`[seerai] Stage failed: ${e}`);

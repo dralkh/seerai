@@ -540,9 +540,9 @@ function renderNextcloudForm(doc: Document, container: HTMLElement): void {
 
   const iconBig = div(
     doc,
-    "font-size: 48px; margin-bottom: 16px; text-align: center;",
-    "\uD83D\uDCBB",
+    "margin-bottom: 16px; display: flex; justify-content: center; opacity: 0.6;",
   );
+  iconBig.appendChild(createSvgIcon(doc, "cloud", { size: 48 }));
   wrapper.appendChild(iconBig);
 
   const title = div(
@@ -927,9 +927,9 @@ function renderProviderBar(doc: Document): HTMLElement {
   if (loggedIn.length > 0) {
     const logoutBtn = div(
       doc,
-      "margin-left: auto; padding: 6px 10px; cursor: pointer; font-size: 14px; color: var(--text-secondary); border-radius: 50%; transition: all 0.2s; opacity: 0.6; flex-shrink: 0;",
-      "\uD83D\uDEAA",
+      "margin-left: auto; padding: 6px 10px; cursor: pointer; color: var(--text-secondary); border-radius: 50%; transition: all 0.2s; opacity: 0.6; flex-shrink: 0; display: inline-flex; align-items: center;",
     );
+    logoutBtn.appendChild(createSvgIcon(doc, "logout", { size: 15 }));
     logoutBtn.title = `Disconnect ${state.currentProvider?.name || ""}`;
     logoutBtn.addEventListener("click", () => {
       if (!state.currentProvider) return;
@@ -994,9 +994,9 @@ function renderSearchBar(doc: Document): HTMLElement {
 
   const searchIcon = span(
     doc,
-    "font-size: 14px; color: var(--text-tertiary); flex-shrink: 0;",
-    "\uD83D\uDD0D",
+    "color: var(--text-tertiary); flex-shrink: 0; display: inline-flex; align-items: center;",
   );
+  searchIcon.appendChild(createSvgIcon(doc, "search", { size: 14 }));
   searchBox.appendChild(searchIcon);
 
   const input = el(
@@ -1129,9 +1129,10 @@ function updateBreadcrumb(doc: Document): void {
 
   const rootSpan = span(
     doc,
-    "cursor: pointer; color: var(--highlight-primary); font-weight: 600;",
-    "\uD83D\uDCC1 / root",
+    "cursor: pointer; color: var(--highlight-primary); font-weight: 600; display: inline-flex; align-items: center; gap: 4px;",
   );
+  rootSpan.appendChild(createSvgIcon(doc, "folder", { size: 13 }));
+  rootSpan.appendChild(doc.createTextNode(" / root"));
   rootSpan.addEventListener("click", () => navigateToFolder(doc, "root"));
   bc.appendChild(rootSpan);
 
@@ -1236,7 +1237,9 @@ function renderFileList(doc: Document): void {
       doc,
       "display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; transition: background 0.15s; border-radius: 6px; margin: 2px 4px;",
     );
-    backRow.appendChild(span(doc, "font-size: 14px;", "\u21A9\uFE0F"));
+    const backIcon = span(doc, "display: inline-flex; align-items: center;");
+    backIcon.appendChild(createSvgIcon(doc, "chevron-left", { size: 14 }));
+    backRow.appendChild(backIcon);
     backRow.appendChild(
       span(
         doc,
@@ -2145,10 +2148,9 @@ function refreshEditorPanel(doc: Document): void {
       tabEl.style.background = "transparent";
     }
 
-    const tabIcon = span(
-      doc,
-      "font-size: 12px;",
-      tab.mode === "preview" ? "\uD83D\uDC41\uFE0F" : "\u270F\uFE0F",
+    const tabIcon = span(doc, "display: inline-flex; align-items: center;");
+    tabIcon.appendChild(
+      createSvgIcon(doc, tab.mode === "preview" ? "eye" : "edit", { size: 12 }),
     );
     tabEl.appendChild(tabIcon);
 
@@ -2350,12 +2352,16 @@ function renderEditorToolbar(doc: Document, tab: EditorFileTab): void {
   } else {
     const switchBtn = btn(
       doc,
-      "\u270F\uFE0F Edit",
-      "padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border-primary); background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 10px; line-height: 1.3;",
+      "Edit",
+      "padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border-primary); background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 10px; line-height: 1.3; display: inline-flex; align-items: center; gap: 4px;",
       () => {
         tab.mode = "edit";
         refreshEditorPanel(doc);
       },
+    );
+    switchBtn.insertBefore(
+      createSvgIcon(doc, "edit", { size: 11 }),
+      switchBtn.firstChild,
     );
     switchBtn.title = "Switch to edit mode";
     toolbar.appendChild(switchBtn);

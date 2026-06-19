@@ -218,16 +218,16 @@ export function formatTaskStats(stats: TaskStats): string {
   const parts: string[] = [`${stats.completed}/${stats.total}`];
 
   if (stats.inProgress > 0) {
-    parts.push(`⏳${stats.inProgress}`);
+    parts.push(`${stats.inProgress} active`);
   }
   if (stats.retrying > 0) {
-    parts.push(`↻${stats.retrying}`);
+    parts.push(`${stats.retrying} retry`);
   }
   if (stats.skipped > 0) {
-    parts.push(`⏭${stats.skipped}`);
+    parts.push(`${stats.skipped} skipped`);
   }
   if (stats.failed > 0) {
-    parts.push(`✗${stats.failed}`);
+    parts.push(`${stats.failed} failed`);
   }
 
   return parts.join(" ");
@@ -240,13 +240,13 @@ export function formatTaskSummary(stats: TaskStats): string {
   const parts: string[] = [];
 
   if (stats.succeeded > 0) {
-    parts.push(`${stats.succeeded}✓`);
+    parts.push(`${stats.succeeded} ok`);
   }
   if (stats.failed > 0) {
-    parts.push(`${stats.failed}✗`);
+    parts.push(`${stats.failed} failed`);
   }
   if (stats.skipped > 0) {
-    parts.push(`${stats.skipped}⏭`);
+    parts.push(`${stats.skipped} skipped`);
   }
 
   return parts.join(" ") || "0 items";

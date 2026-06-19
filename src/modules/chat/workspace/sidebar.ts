@@ -44,7 +44,7 @@ const gitStatusLabels: Record<string, string> = {
   added: "+",
   deleted: "\u00D7",
   untracked: "?",
-  committed: "\u2713",
+  committed: "committed",
   unmodified: "",
 };
 
@@ -1280,7 +1280,11 @@ function createFileRowWithIndent(
 
   if (statusLabel) {
     const badge = doc.createElement("span");
-    badge.textContent = statusLabel;
+    if (statusLabel === "committed") {
+      badge.appendChild(createSvgIcon(doc, "check", { size: 11 }));
+    } else {
+      badge.textContent = statusLabel;
+    }
     if (statusTooltip) badge.title = statusTooltip;
     badge.style.cssText = `
       font-size: 10px;
@@ -1299,7 +1303,7 @@ function createFileRowWithIndent(
                 ? "#ef5350"
                 : statusLabel === "?"
                   ? "#40c4ff"
-                  : statusLabel === "\u2713"
+                  : statusLabel === "committed"
                     ? "var(--text-tertiary)"
                     : "var(--text-tertiary)"
       };
@@ -1346,7 +1350,11 @@ function createGitFileRow(
   // Status badge
   if (statusLabel) {
     const badge = doc.createElement("span");
-    badge.textContent = statusLabel;
+    if (statusLabel === "committed") {
+      badge.appendChild(createSvgIcon(doc, "check", { size: 11 }));
+    } else {
+      badge.textContent = statusLabel;
+    }
     if (statusTooltip) badge.title = statusTooltip;
     badge.style.cssText = `
       font-size: 10px;
@@ -1365,7 +1373,7 @@ function createGitFileRow(
                 ? "#ef5350"
                 : statusLabel === "?"
                   ? "#40c4ff"
-                  : statusLabel === "\u2713"
+                  : statusLabel === "committed"
                     ? "var(--text-tertiary)"
                     : "var(--text-tertiary)"
       };

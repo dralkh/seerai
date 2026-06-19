@@ -4,6 +4,7 @@
  */
 
 import { highlightCode } from "./syntaxHighlight";
+import { iconMarkup } from "./ui/icons";
 
 /**
  * Strip <think> tags and their content from text.
@@ -261,7 +262,7 @@ export function parseMarkdown(markdown: string): string {
                     <div style="position: relative; margin: 8px 0; max-width: 100%;"${hasPreview ? ` data-codeblock-lang="${codeLanguage.toLowerCase()}"` : ""}>
                         <div style="display: flex; align-items: center; gap: 6px; position: absolute; top: 0; left: 12px; z-index: 1;">
                             ${codeLanguage ? `<span style="font-size: 10px; color: #aaa; background: #2d2d2d; padding: 2px 6px; border-radius: 0 0 4px 4px; text-transform: uppercase;">${codeLanguage}</span>` : ""}
-                            ${hasPreview ? '<span class="code-preview-btn" style="font-size: 10px; color: #4a9eff; cursor: pointer; padding: 2px 4px; border-radius: 3px; background: rgba(74,158,255,0.1);">\u25B6 Preview</span>' : ""}
+                            ${hasPreview ? `<span class="code-preview-btn" style="font-size: 10px; color: #4a9eff; cursor: pointer; padding: 2px 4px; border-radius: 3px; background: rgba(74,158,255,0.1); display: inline-flex; align-items: center; gap: 3px;">${iconMarkup("play", { size: 10 })} Preview</span>` : ""}
                         </div>
                         <pre style="background: #1e1e1e; color: #d4d4d4; padding: ${codeLanguage ? "28px" : "12px"} 12px 12px; border-radius: 6px; overflow-x: auto; font-family: 'SF Mono', Consolas, monospace; font-size: 0.9em; margin: 0; white-space: pre-wrap; word-break: break-word;"><code>${highlightedCode}</code></pre>
                     </div>

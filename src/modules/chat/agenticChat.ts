@@ -126,12 +126,12 @@ async function getTodoProgress(): Promise<string | null> {
     for (const t of todos) {
       const icon =
         t.status === "completed"
-          ? "✅"
+          ? "[x]"
           : t.status === "in_progress"
-            ? "🔄"
+            ? "[~]"
             : t.status === "cancelled"
-              ? "❌"
-              : "⬜";
+              ? "[-]"
+              : "[ ]";
       lines.push(`  ${icon} ${t.content}`);
     }
     return lines.join("\n");
@@ -585,8 +585,12 @@ export function createQuestionPanel(
       navRow.appendChild(continueBtn);
     } else {
       const completeBtn = doc.createElementNS(HTML_NS, "button") as HTMLElement;
-      completeBtn.textContent = "\u2713 Complete";
+      completeBtn.appendChild(createSvgIcon(doc, "check", { size: 13 }));
+      completeBtn.appendChild(doc.createTextNode(" Complete"));
       completeBtn.style.cssText = `
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
         padding: 6px 16px;
         font-size: 12px;
         font-weight: 600;

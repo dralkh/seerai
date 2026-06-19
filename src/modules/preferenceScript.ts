@@ -10,7 +10,7 @@ import {
 } from "./chat/modelConfig";
 import { AIModelConfig, ModelType, MODEL_TYPE_ENDPOINTS } from "./chat/types";
 import { CloudProviderManager, CloudProviderId } from "./drive";
-import { createSvgIcon } from "./chat/ui/icons";
+import { createSvgIcon, iconMarkup, type IconName } from "./chat/ui/icons";
 
 // Track selected model config ID
 let selectedConfigId: string | null = null;
@@ -765,36 +765,35 @@ function renderModelList() {
 
     const info = doc.createElementNS(HTML_NS, "div") as HTMLElement;
     // Build capability badges
-    const configuredTypes: { icon: string; label: string; color: string }[] = [
-      { icon: "\u{1F4AC}", label: "Chat", color: accentColor },
-    ];
+    const configuredTypes: { icon: IconName; label: string; color: string }[] =
+      [{ icon: "chat", label: "Chat", color: accentColor }];
     if (cfg.ttsConfig?.model)
       configuredTypes.push({
-        icon: "\u{1F50A}",
+        icon: "tts",
         label: "TTS",
         color: "#00bfa5",
       });
     if (cfg.sttConfig?.model)
       configuredTypes.push({
-        icon: "\u{1F3A4}",
+        icon: "tts",
         label: "STT",
         color: "#ff9100",
       });
     if (cfg.embeddingConfig?.model)
       configuredTypes.push({
-        icon: "\u{1F9E0}",
+        icon: "brain",
         label: "Embed",
         color: "#7c4dff",
       });
     if (cfg.imageConfig?.model)
       configuredTypes.push({
-        icon: "\u{1F3A8}",
+        icon: "image",
         label: "Image",
         color: "#e91e63",
       });
     if (cfg.videoConfig?.model)
       configuredTypes.push({
-        icon: "\u{1F3AC}",
+        icon: "video",
         label: "Video",
         color: "#ff6d00",
       });
@@ -811,7 +810,10 @@ function renderModelList() {
         font-weight: 600;
         letter-spacing: 0.3px;
         white-space: nowrap;
-      ">${b.icon} ${b.label}</span>`,
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+      " >${iconMarkup(b.icon, { size: 11 })} ${b.label}</span>`,
       )
       .join("");
 
@@ -819,7 +821,7 @@ function renderModelList() {
       <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">
         <strong style="font-size: 13px;">${escapeHtml(cfg.name)}</strong>
         ${badgesHtml}
-        ${cfg.isDefault ? `<span style="color: ${accentColor}; font-size: 11px;">★ Default</span>` : ""}
+        ${cfg.isDefault ? `<span style="color: ${accentColor}; font-size: 11px; display: inline-flex; align-items: center; gap: 3px;">${iconMarkup("star", { size: 11 })} Default</span>` : ""}
       </div>
       <div style="font-size: 11px; color: ${secondaryTextColor}; margin-top: 2px;">
         ${escapeHtml(cfg.model)} • ${escapeHtml(new URL(cfg.apiURL).hostname)}
@@ -2163,7 +2165,7 @@ function initProviderUI(
   function updateStatus(): void {
     const loggedIn = provider!.isLoggedIn();
     if (elements.statusIcon)
-      elements.statusIcon.textContent = loggedIn ? "\uD83D\uDFE2" : "\u26AA";
+      elements.statusIcon.innerHTML = `<span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${loggedIn ? "#22c55e" : "#9ca3af"};"></span>`;
     if (elements.statusText)
       elements.statusText.textContent = loggedIn
         ? "Connected"

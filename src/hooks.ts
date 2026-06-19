@@ -124,7 +124,7 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
         "menuitem",
       ) as XUL.MenuItem;
       generateTagsMenuItem.setAttribute("id", generateTagsMenuItemId);
-      generateTagsMenuItem.setAttribute("label", "✨ Generate Tags");
+      generateTagsMenuItem.setAttribute("label", "Generate Tags");
       generateTagsMenuItem.setAttribute("class", "menuitem-iconic");
       generateTagsMenuItem.addEventListener("command", async () => {
         await processGenerateTagsForSelectedItems();
@@ -137,7 +137,7 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
     if (!menuItem) {
       menuItem = win.document.createXULElement("menuitem") as XUL.MenuItem;
       menuItem.setAttribute("id", menuItemId);
-      menuItem.setAttribute("label", "🔍 Extract with ocr");
+      menuItem.setAttribute("label", "Extract with ocr");
       menuItem.setAttribute("class", "menuitem-iconic");
       menuItem.addEventListener("command", async () => {
         await processSelectedItems();
@@ -153,7 +153,7 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
     if (!searchPdfMenu) {
       searchPdfMenu = win.document.createXULElement("menuitem") as XUL.MenuItem;
       searchPdfMenu.setAttribute("id", searchPdfMenuId);
-      searchPdfMenu.setAttribute("label", "🔍 Search all PDF");
+      searchPdfMenu.setAttribute("label", "Search all PDF");
       searchPdfMenu.setAttribute("class", "menuitem-iconic");
       searchPdfMenu.addEventListener("command", async () => {
         await searchPdfsForSelectedItems();
@@ -171,7 +171,7 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
         "menuitem",
       ) as XUL.MenuItem;
       addToTableMenu.setAttribute("id", addToTableMenuId);
-      addToTableMenu.setAttribute("label", "📅 Add to Table");
+      addToTableMenu.setAttribute("label", "Add to Table");
       addToTableMenu.setAttribute("class", "menuitem-iconic");
       addToTableMenu.addEventListener("command", async () => {
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
@@ -190,7 +190,7 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
         "menuitem",
       ) as XUL.MenuItem;
       removeFromTableMenu.setAttribute("id", removeFromTableMenuId);
-      removeFromTableMenu.setAttribute("label", "🔴 Remove from Tables");
+      removeFromTableMenu.setAttribute("label", "Remove from Tables");
       removeFromTableMenu.setAttribute("class", "menuitem-iconic");
       removeFromTableMenu.addEventListener("command", async () => {
         const items = Zotero.getActiveZoteroPane().getSelectedItems();
@@ -481,7 +481,7 @@ async function searchPdfsForSelectedItems() {
     retryDelayMs: 2000,
 
     onProgress: (stats) => {
-      pw.changeHeadline(`🔍 ${formatTaskStats(stats)}`);
+      pw.changeHeadline(`${formatTaskStats(stats)}`);
     },
 
     executor: async (task) => {
@@ -513,7 +513,7 @@ async function searchPdfsForSelectedItems() {
 
   // Show final result
   pw.changeHeadline("Search Complete");
-  pw.addDescription(`✓ ${succeeded}📄 found, ${notFound + failed} not found`);
+  pw.addDescription(`${succeeded} found, ${notFound + failed} not found`);
   pw.startCloseTimer(3000);
 }
 

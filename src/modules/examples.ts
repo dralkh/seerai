@@ -214,7 +214,7 @@ export class UIExampleFactory {
         const span = doc.createElement("span");
         span.className = `cell ${column.className}`;
         span.style.background = "#0dd068";
-        span.innerText = "⭐" + data;
+        span.innerText = data;
         return span;
       },
     });

@@ -1002,7 +1002,7 @@ function buildFolderBar(doc: Document): HTMLElement {
   currentState.spaces.forEach((project) => {
     projectPopup.appendChild(
       menuButton(
-        `${project.id === currentState!.activeSpaceId ? "✓ " : ""}${project.name}`,
+        `${project.id === currentState!.activeSpaceId ? "\u2022 " : ""}${project.name}`,
         () => {
           if (!currentState || project.id === currentState.activeSpaceId)
             return;
@@ -2159,7 +2159,9 @@ function buildArticleRow(
   const exCount = (currentState!.extractions[paper.id] || []).length;
   if (exCount > 0) {
     const exDot = doc.createElement("span");
-    exDot.textContent = "\u2713";
+    exDot.replaceChildren(
+      createSvgIcon(exDot.ownerDocument!, ICONS.check, "included", 14),
+    );
     exDot.title = exCount + " extractions";
     exDot.style.cssText = "font-size:8px;color:#16a34a;";
     sub.appendChild(exDot);
@@ -3311,7 +3313,14 @@ function buildDecisionBtn(
     ";font-size:10px;font-weight:600;cursor:pointer;font-family:inherit;transition:all 0.1s;opacity:" +
     (isActive ? "1" : "0.82") +
     ";";
-  btn.textContent = isActive ? `✓ ${label}` : label;
+  btn.replaceChildren();
+  if (isActive)
+    btn.appendChild(
+      createSvgIcon(btn.ownerDocument!, ICONS.check, "active", 12),
+    );
+  btn.appendChild(
+    btn.ownerDocument!.createTextNode(isActive ? ` ${label}` : label),
+  );
   if (shortcut) {
     btn.title = `Shortcut ${shortcut}`;
   }
@@ -6793,7 +6802,9 @@ function makeArrow(doc: Document): HTMLElement {
   const ac = doc.createElement("div");
   ac.className = "sr-prisma-arrow-down";
   const arr = doc.createElement("span");
-  arr.textContent = "\u2193";
+  arr.replaceChildren(
+    createSvgIcon(arr.ownerDocument!, ICONS.arrowDown, "sort descending", 14),
+  );
   ac.appendChild(arr);
   return ac;
 }
@@ -9093,10 +9104,14 @@ function openCriteriaModal(doc: Document): void {
         const checkbox = stepCheckboxes.get(step);
         if (row) {
           if (partial.errors[step]) {
-            row.textContent = "✕";
+            row.replaceChildren(
+              createSvgIcon(row.ownerDocument!, ICONS.close, "error", 14),
+            );
             row.style.color = "#dc2626";
           } else {
-            row.textContent = "✓";
+            row.replaceChildren(
+              createSvgIcon(row.ownerDocument!, ICONS.check, "done", 14),
+            );
             row.style.color = "#15803d";
           }
         }
@@ -9135,7 +9150,14 @@ function openCriteriaModal(doc: Document): void {
             const summary = stepSummaries.get(step as ProtocolGenerationStep);
             const checkbox = stepCheckboxes.get(step as ProtocolGenerationStep);
             if (row) {
-              row.textContent = err ? "✕" : "✓";
+              row.replaceChildren(
+                createSvgIcon(
+                  row.ownerDocument!,
+                  err ? ICONS.close : ICONS.check,
+                  err ? "error" : "done",
+                  14,
+                ),
+              );
               row.style.color = err ? "#dc2626" : "#15803d";
             }
             if (summary) {
@@ -9160,7 +9182,9 @@ function openCriteriaModal(doc: Document): void {
         toast(doc, `Protocol ${mode} failed: ${(error as Error).message}`);
         stepRows.forEach((row) => {
           if (row.textContent === "…") {
-            row.textContent = "✕";
+            row.replaceChildren(
+              createSvgIcon(row.ownerDocument!, ICONS.close, "error", 14),
+            );
             row.style.color = "#dc2626";
           }
         });
@@ -9661,7 +9685,16 @@ function openCriteriaModal(doc: Document): void {
             name.textContent = definition.name;
             mapLabel.appendChild(name);
             const state = doc.createElement("span");
-            state.textContent = selected ? "✓ Added" : "+ Add";
+            state.replaceChildren();
+            if (selected)
+              state.appendChild(
+                createSvgIcon(state.ownerDocument!, ICONS.check, "added", 12),
+              );
+            state.appendChild(
+              state.ownerDocument!.createTextNode(
+                selected ? " Added" : "+ Add",
+              ),
+            );
             state.style.fontWeight = "700";
             mapLabel.appendChild(state);
             mapLabel.style.background = selected
@@ -10328,7 +10361,14 @@ function openLegacyCriteriaModal(_doc: Document): void {
           "display:flex;align-items:center;gap:6px;padding:4px 8px;margin-bottom:3px;border:1px solid var(--border-secondary);border-radius:6px;background:var(--background-primary);font-size:11px;";
 
         const iconSpan = doc.createElement("span");
-        iconSpan.textContent = d.error ? "\u26A0" : "\uD83D\uDCC4";
+        iconSpan.replaceChildren(
+          createSvgIcon(
+            iconSpan.ownerDocument!,
+            d.error ? ICONS.warning : ICONS.document,
+            d.error ? "error" : "document",
+            14,
+          ),
+        );
         iconSpan.style.cssText = "flex-shrink:0;";
         row.appendChild(iconSpan);
 
@@ -10392,7 +10432,9 @@ function openLegacyCriteriaModal(_doc: Document): void {
       } else if (progress.status === "complete") {
         statusIcon.style.cssText +=
           "background:#16a34a;color:#fff;border:2px solid #16a34a;";
-        statusIcon.textContent = "\u2713";
+        statusIcon.replaceChildren(
+          createSvgIcon(statusIcon.ownerDocument!, ICONS.check, "done", 14),
+        );
       } else {
         statusIcon.style.cssText +=
           "background:#dc2626;color:#fff;border:2px solid #dc2626;";
@@ -11340,7 +11382,11 @@ function openLegacySourcesModal(_doc: Document): void {
         });
         row.appendChild(cb);
         const icon = doc.createElement("span");
-        icon.textContent = sel ? "\u2713" : "";
+        icon.replaceChildren();
+        if (sel)
+          icon.appendChild(
+            createSvgIcon(icon.ownerDocument!, ICONS.check, "selected", 14),
+          );
         icon.style.cssText = "width:12px;font-size:10px;flex-shrink:0;";
         row.appendChild(icon);
         const name = doc.createElement("span");

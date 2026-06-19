@@ -436,21 +436,73 @@ html.dark .chip-tables {
 
 .table-toolbar {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   padding: 8px;
   background-color: var(--background-secondary);
   border-bottom: 1px solid var(--border-primary);
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: stretch;
   flex-shrink: 0;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
 }
 
+.table-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.table-toolbar-group {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.table-toolbar-group-label {
+  flex: 0 0 auto;
+}
+
+.table-workspace-group {
+  flex: 1 1 250px !important;
+}
+
+.table-filter-group {
+  flex: 2 1 340px !important;
+}
+
+.table-pagination-group {
+  flex: 0 0 auto !important;
+  margin-left: auto;
+}
+
+.table-workspace-title {
+  flex: 1 1 auto;
+}
+
+.workspace-name-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.table-filter-controls {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.table-library-select {
+  flex: 0 1 180px;
+  min-width: 110px !important;
+  max-width: 220px;
+}
+
 .table-search-input {
   flex: 1;
-  min-width: 60px;
+  min-width: 140px;
   padding: 6px 10px;
   border: 1px solid var(--border-primary);
   border-radius: 4px;
@@ -476,6 +528,14 @@ html.dark .chip-tables {
   align-items: center;
   gap: 4px;
   white-space: nowrap;
+  min-width: 0;
+}
+
+.table-btn-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .table-btn:hover {
@@ -490,6 +550,111 @@ html.dark .chip-tables {
 
 .table-btn-primary:hover {
   opacity: 0.9;
+}
+
+.table-toolbar-compact .table-toolbar-row-primary {
+  align-items: stretch;
+}
+
+.table-toolbar-compact .table-workspace-group,
+.table-toolbar-compact .table-filter-group,
+.table-toolbar-compact .table-pagination-group {
+  flex: 1 1 100% !important;
+  margin-left: 0;
+}
+
+.table-toolbar-compact .table-filter-controls {
+  flex-wrap: nowrap;
+}
+
+.table-toolbar-compact .table-library-select {
+  flex: 0 1 170px;
+}
+
+.table-toolbar-compact .pagination-container {
+  margin-left: auto;
+}
+
+.table-toolbar-narrow .table-toolbar-row,
+.table-toolbar-narrow .table-toolbar-group,
+.table-toolbar-narrow .table-filter-controls {
+  align-items: stretch;
+}
+
+.table-toolbar-narrow .table-filter-controls {
+  flex-wrap: wrap;
+}
+
+.table-toolbar-narrow .table-paper-actions-group,
+.table-toolbar-narrow .table-output-actions-group {
+  flex: 1 1 100% !important;
+}
+
+.table-toolbar-narrow .table-library-select,
+.table-toolbar-narrow .table-search-input {
+  flex: 1 1 100%;
+  min-width: 0 !important;
+  max-width: none;
+}
+
+.table-toolbar-narrow .table-toolbar-group-label {
+  width: 56px;
+}
+
+.table-toolbar-narrow
+  .table-paper-actions-group
+  .table-btn:not(.table-btn-primary)
+  .table-btn-label,
+.table-toolbar-narrow .table-output-actions-group .table-btn .table-btn-label,
+.table-toolbar-narrow .table-workspace-group .table-btn .table-btn-label {
+  display: none;
+}
+
+.table-toolbar-narrow
+  .table-paper-actions-group
+  .table-btn:not(.table-btn-primary),
+.table-toolbar-narrow .table-output-actions-group .table-btn,
+.table-toolbar-narrow .table-workspace-group .table-btn {
+  width: 28px;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.table-cell-action-chip,
+.table-cell-status-chip {
+  max-width: 100%;
+  min-width: 0;
+  white-space: nowrap !important;
+  word-break: normal !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+.table-cell-action-chip svg,
+.table-cell-status-chip svg {
+  flex: 0 0 auto;
+}
+
+.table-cell-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.table-cell-action-group {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.table-cell-action-group .table-cell-action-chip {
+  flex: 0 1 auto;
 }
 
 /* Table Wrapper */

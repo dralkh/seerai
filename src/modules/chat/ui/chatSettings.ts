@@ -240,7 +240,7 @@ export function showChatSettings(
   tempValueDisplay.style.color = "var(--text-primary)";
 
   const tempResetBtn = doc.createElement("span");
-  tempResetBtn.innerText = "↺";
+  tempResetBtn.appendChild(createSvgIcon(doc, "refresh", { size: 13 }));
   tempResetBtn.title = "Reset to Default";
   Object.assign(tempResetBtn.style, {
     marginLeft: "10px",
@@ -317,7 +317,7 @@ export function showChatSettings(
   tokensLabel.style.color = "var(--text-secondary)";
 
   const tokensResetBtn = doc.createElement("span");
-  tokensResetBtn.innerText = "↺";
+  tokensResetBtn.appendChild(createSvgIcon(doc, "refresh", { size: 13 }));
   tokensResetBtn.title = "Reset to Default";
   Object.assign(tokensResetBtn.style, {
     fontSize: "14px",
