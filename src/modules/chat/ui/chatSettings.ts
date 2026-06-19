@@ -1,15 +1,11 @@
-import {
-  getModelConfigs,
-  getActiveModelConfig,
-  setActiveModelId,
-  updateModelConfig,
-} from "../modelConfig";
+import { getActiveModelConfig, updateModelConfig } from "../modelConfig";
 import { getChatStateManager } from "../stateManager";
 import { config } from "../../../../package.json";
 import { TOOL_NAMES } from "../tools/toolTypes";
 import { isTtsConfigured } from "./messageRenderer";
 import { getEmbeddingService } from "../rag/embeddingService";
 import { getRAGConfig } from "../rag/retrievalEngine";
+import { resolveModel } from "../modelResolver";
 import { createSvgIcon, setButtonIcon, type IconName } from "./icons";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
@@ -83,124 +79,6 @@ export function showChatSettings(
     maxHeight: "350px",
     overflowY: "auto",
   });
-
-  // --- 1. Model Selection (Custom dropdown to avoid XUL <select> issues) ---
-  const modelSection = doc.createElement("div");
-  modelSection.style.position = "relative";
-
-  const modelLabel = doc.createElement("div");
-  modelLabel.innerText = "AI Model";
-  modelLabel.style.marginBottom = "4px";
-  modelLabel.style.fontSize = "11px";
-  modelLabel.style.color = "var(--text-secondary, #666)";
-  modelSection.appendChild(modelLabel);
-
-  const configs = getModelConfigs();
-  const activeConfig = getActiveModelConfig();
-
-  // Custom dropdown button
-  const modelButton = doc.createElement("div");
-  Object.assign(modelButton.style, {
-    width: "100%",
-    padding: "6px 8px",
-    borderRadius: "4px",
-    fontSize: "12px",
-    border: "1px solid var(--border-primary)",
-    backgroundColor: "var(--background-secondary, #f5f5f5)",
-    cursor: "pointer",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    boxSizing: "border-box",
-  });
-  modelButton.innerText =
-    activeConfig?.name ||
-    (configs.length === 0 ? "Default" : configs[0]?.name || "Select Model");
-
-  // Dropdown arrow
-  const arrow = doc.createElement("span");
-  arrow.innerText = "▼";
-  arrow.style.fontSize = "8px";
-  arrow.style.marginLeft = "8px";
-  modelButton.appendChild(arrow);
-
-  // Dropdown options container
-  const optionsContainer = doc.createElement("div");
-  Object.assign(optionsContainer.style, {
-    position: "absolute",
-    top: "100%",
-    left: "0",
-    right: "0",
-    backgroundColor: "var(--background-primary, #fff)",
-    border: "1px solid var(--border-primary)",
-    borderRadius: "4px",
-    boxShadow: "0 4px 8px rgba(0,0,0,0.15)",
-    zIndex: "10005",
-    display: "none",
-    maxHeight: "150px",
-    overflowY: "auto",
-  });
-
-  // Populate options
-  if (configs.length === 0) {
-    const optEl = doc.createElement("div");
-    Object.assign(optEl.style, {
-      padding: "8px 10px",
-      fontSize: "12px",
-      color: "var(--text-secondary)",
-    });
-    optEl.innerText = "No models configured";
-    optionsContainer.appendChild(optEl);
-  } else {
-    configs.forEach((cfg) => {
-      const optEl = doc.createElement("div");
-      Object.assign(optEl.style, {
-        padding: "8px 10px",
-        fontSize: "12px",
-        cursor: "pointer",
-        backgroundColor:
-          activeConfig && cfg.id === activeConfig.id
-            ? "var(--background-secondary)"
-            : "transparent",
-        fontWeight:
-          activeConfig && cfg.id === activeConfig.id ? "600" : "normal",
-      });
-      optEl.innerText = cfg.name;
-
-      optEl.addEventListener("mouseenter", () => {
-        optEl.style.backgroundColor = "var(--background-tertiary, #e0e0e0)";
-      });
-      optEl.addEventListener("mouseleave", () => {
-        optEl.style.backgroundColor =
-          activeConfig && cfg.id === activeConfig.id
-            ? "var(--background-secondary)"
-            : "transparent";
-      });
-
-      optEl.addEventListener("click", (e) => {
-        e.stopPropagation();
-        setActiveModelId(cfg.id);
-        modelButton.childNodes[0].textContent = cfg.name;
-        optionsContainer.style.display = "none";
-        Zotero.debug(`[seerai] Model changed to ${cfg.id} (${cfg.name})`);
-      });
-
-      optionsContainer.appendChild(optEl);
-    });
-  }
-
-  // Toggle dropdown
-  modelButton.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    Zotero.debug("[seerai] Model button clicked");
-    const isVisible = optionsContainer.style.display === "block";
-    optionsContainer.style.display = isVisible ? "none" : "block";
-  });
-
-  modelSection.appendChild(modelButton);
-  modelSection.appendChild(optionsContainer);
-  body.appendChild(modelSection);
 
   // --- 1.5. Model Parameters (Temp & Max Tokens) ---
   const paramSection = doc.createElement("div");
@@ -860,7 +738,17 @@ export function showChatSettings(
   ragSection.appendChild(ragToggleRow);
 
   // "Always Use RAG" toggle — persisted on the active model config
-  const activeModelCfg = getActiveModelConfig();
+  const resolvedChatModel = resolveModel("chat", currentOptions.modelRef);
+  const activeModelCfg = resolvedChatModel
+    ? {
+        id: resolvedChatModel.model.id,
+        name: resolvedChatModel.model.displayName,
+        ragAlwaysUse: resolvedChatModel.model.ragAlwaysUse,
+        ragTokenThreshold: resolvedChatModel.model.ragTokenThreshold,
+        ragTopK: resolvedChatModel.model.ragTopK,
+        ragMinScore: resolvedChatModel.model.ragMinScore,
+      }
+    : getActiveModelConfig();
   const currentAlwaysUse = activeModelCfg?.ragAlwaysUse ?? false;
 
   const alwaysUseRow = doc.createElement("div");

@@ -7,6 +7,7 @@ interface ProviderConfig {
   authMethod?: AuthMethod;
   apiKey?: string;
   authHeaderName?: string;
+  authPrefix?: string;
   extraHeaders?: Record<string, string>;
 }
 
@@ -28,7 +29,7 @@ export function buildAuthHeaders(
 
   switch (authMethod) {
     case "bearer":
-      headers["Authorization"] = "Bearer " + apiKey;
+      headers["Authorization"] = `${config.authPrefix ?? "Bearer "}${apiKey}`;
       break;
     case "x-api-key":
       headers[config.authHeaderName || "x-api-key"] = apiKey;
@@ -56,33 +57,28 @@ export function buildAuthHeaders(
 export async function discoverModels(
   config: ProviderConfig,
 ): Promise<DiscoveredModel[]> {
-  try {
-    const modelsURL =
-      config.modelsURL || config.apiURL.replace(/\/+$/, "") + "/models";
-    const headers = buildAuthHeaders(config);
+  const modelsURL =
+    config.modelsURL || config.apiURL.replace(/\/+$/, "") + "/models";
+  const headers = buildAuthHeaders(config);
 
-    const response = await Zotero.HTTP.request("GET", modelsURL, {
-      headers,
-    });
+  const response = await Zotero.HTTP.request("GET", modelsURL, {
+    headers,
+  });
 
-    const text = response.responseText || "{}";
-    const parsed: ModelsResponse = JSON.parse(text);
-    const models: DiscoveredModel[] = (parsed.data || []).map(
-      (item): DiscoveredModel => ({
-        id: item.id,
-        object: item.object || "model",
-        created: item.created,
-        owned_by: item.owned_by,
-        displayName: formatModelDisplayName(item.id),
-        capabilities: inferCapabilities(item.id),
-      }),
-    );
+  const text = response.responseText || "{}";
+  const parsed: ModelsResponse = JSON.parse(text);
+  const models: DiscoveredModel[] = (parsed.data || []).map(
+    (item): DiscoveredModel => ({
+      id: item.id,
+      object: item.object || "model",
+      created: item.created,
+      owned_by: item.owned_by,
+      displayName: formatModelDisplayName(item.id),
+      capabilities: inferCapabilities(item.id),
+    }),
+  );
 
-    return models;
-  } catch (e) {
-    Zotero.log(`Model discovery failed: ${e}`, "warning");
-    return [];
-  }
+  return models;
 }
 
 export async function testProviderConnection(

@@ -11,6 +11,11 @@ import {
   PromptTemplate,
   getDefaultTemplates,
 } from "./promptLibrary";
+import {
+  getProviderRegistryState,
+  replaceProviderRegistryState,
+} from "./providerRegistry";
+import type { ProviderRegistryState } from "./providerTypes";
 
 interface SeerAIConfig {
   meta: {
@@ -25,9 +30,10 @@ interface SeerAIConfig {
     presets: any[];
   };
   prompts: any[];
+  providers?: ProviderRegistryState;
 }
 
-const CONFIG_VERSION = 1;
+const CONFIG_VERSION = 2;
 
 // Helper to get all preference keys for a branch
 function getPrefKeys(branchName: string): string[] {
@@ -96,6 +102,7 @@ export async function exportAllData(): Promise<SeerAIConfig> {
       presets: tablePresets,
     },
     prompts: customPrompts,
+    providers: getProviderRegistryState(),
   };
 }
 
@@ -108,7 +115,7 @@ export async function importAllData(
   data: SeerAIConfig,
 ): Promise<{ success: boolean; stats: string; error?: string }> {
   try {
-    if (!data || !data.meta || data.meta.version !== CONFIG_VERSION) {
+    if (!data || !data.meta || data.meta.version > CONFIG_VERSION) {
       // Basic version check, potentially handle migrations here in future
       Zotero.debug(
         `[seerai] Config version mismatch or invalid format. Expected ${CONFIG_VERSION}, got ${data?.meta?.version}`,
@@ -175,6 +182,10 @@ export async function importAllData(
       const merged = [...defaults, ...validPrompts];
       await savePrompts(merged);
       importedPrompts = validPrompts.length;
+    }
+
+    if (data.providers?.version === 2) {
+      replaceProviderRegistryState(data.providers);
     }
 
     const stats = `Imported: ${importedPrefs} preferences, ${importedTables} table history items, ${importedPresets} column presets, ${importedPrompts} custom prompts.`;

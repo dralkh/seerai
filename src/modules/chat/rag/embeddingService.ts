@@ -4,10 +4,8 @@
  * Uses the embeddingConfig from the active AIModelConfig.
  */
 
-import { config } from "../../../../package.json";
 import { RateLimiter } from "../../../utils/rateLimiter";
-import { getActiveModelConfig } from "../modelConfig";
-import { MODEL_TYPE_ENDPOINTS } from "../types";
+import { requireResolvedModel, resolveModel } from "../modelResolver";
 import type {
   EmbeddingRequest,
   EmbeddingResponse,
@@ -60,16 +58,14 @@ export class EmbeddingService {
    * Check whether the active model config has embedding configured.
    */
   isConfigured(): boolean {
-    const cfg = getActiveModelConfig();
-    return !!(cfg?.embeddingConfig?.model && cfg.apiKey);
+    return !!resolveModel("embedding");
   }
 
   /**
    * Get the configured embedding model name, or null if not configured.
    */
   getConfiguredModel(): string | null {
-    const cfg = getActiveModelConfig();
-    return cfg?.embeddingConfig?.model || null;
+    return resolveModel("embedding")?.model.modelId || null;
   }
 
   /**
@@ -81,53 +77,16 @@ export class EmbeddingService {
    */
   private resolveEndpoint(): {
     endpoint: string;
-    apiKey: string;
     model: string;
+    headers: Record<string, string>;
+    resolved: ReturnType<typeof requireResolvedModel>;
   } {
-    const cfg = getActiveModelConfig();
-    if (!cfg) {
-      throw new Error(
-        "No active model configuration. Please configure a model in preferences.",
-      );
-    }
-    if (!cfg.embeddingConfig?.model) {
-      throw new Error(
-        "Embedding model not configured. Add an embedding model in your API configuration.",
-      );
-    }
-    if (!cfg.apiKey) {
-      throw new Error("API key is missing. Please set it in preferences.");
-    }
-
-    let endpoint: string;
-    if (cfg.embeddingConfig.endpoint) {
-      endpoint = cfg.embeddingConfig.endpoint;
-    } else {
-      const base = cfg.apiURL.endsWith("/")
-        ? cfg.apiURL.slice(0, -1)
-        : cfg.apiURL;
-      endpoint = `${base}${MODEL_TYPE_ENDPOINTS.embedding.path}`;
-    }
-
+    const resolved = requireResolvedModel("embedding");
     return {
-      endpoint,
-      apiKey: cfg.apiKey,
-      model: cfg.embeddingConfig.model,
-    };
-  }
-
-  /**
-   * Build request headers.
-   * Always includes:
-   *  - Content-Type
-   *  - Authorization: Bearer (OpenAI standard)
-   *  - x-api-key (NanoGPT / alternative providers)
-   */
-  private buildHeaders(apiKey: string): Record<string, string> {
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-      "x-api-key": apiKey,
+      endpoint: resolved.endpoint,
+      model: resolved.model.modelId,
+      headers: resolved.headers,
+      resolved,
     };
   }
 
@@ -146,13 +105,12 @@ export class EmbeddingService {
       user?: string;
     },
   ): Promise<EmbeddingResponse> {
-    const { endpoint, apiKey, model } = this.resolveEndpoint();
+    const { endpoint, model, headers, resolved } = this.resolveEndpoint();
 
     // Use explicitly passed dimensions, or fall back to the configured value,
     // but ONLY if the model supports the dimensions parameter.
-    const cfg = getActiveModelConfig();
     const candidateDimensions =
-      options?.dimensions || cfg?.embeddingConfig?.dimensions || undefined;
+      options?.dimensions || resolved.model.dimensions || undefined;
 
     // Check if this model supports the dimensions parameter
     let effectiveDimensions: number | undefined;
@@ -178,13 +136,11 @@ export class EmbeddingService {
 
     // Rate limiting
     const rateLimiter = RateLimiter.getInstance();
-    if (cfg) {
-      const textLength = Array.isArray(input)
-        ? input.reduce((sum, t) => sum + t.length, 0)
-        : input.length;
-      const estimatedTokens = Math.ceil(textLength / 4);
-      await rateLimiter.acquire(cfg, estimatedTokens);
-    }
+    const textLength = Array.isArray(input)
+      ? input.reduce((sum, t) => sum + t.length, 0)
+      : input.length;
+    const estimatedTokens = Math.ceil(textLength / 4);
+    await rateLimiter.acquire(resolved.model, estimatedTokens);
 
     Zotero.debug(
       `[seerai] Embedding request: model=${model}, endpoint=${endpoint}, ` +
@@ -194,7 +150,7 @@ export class EmbeddingService {
     try {
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: this.buildHeaders(apiKey),
+        headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify(body),
       });
 
@@ -228,9 +184,7 @@ export class EmbeddingService {
       Zotero.debug(`[seerai] Embedding request failed: ${error}`);
       throw new Error(`Embedding request failed: ${(error as Error).message}`);
     } finally {
-      if (cfg) {
-        rateLimiter.release(cfg.id);
-      }
+      rateLimiter.release(resolved.model.id);
     }
   }
 
@@ -290,8 +244,7 @@ export class EmbeddingService {
     const MAX_ITEMS_PER_BATCH = 2048;
     // Use the user-configured max tokens for the embedding model.
     // Fall back to a conservative 8000 if not set.
-    const cfg = getActiveModelConfig();
-    const configuredMaxTokens = cfg?.embeddingConfig?.maxTokens;
+    const configuredMaxTokens = resolveModel("embedding")?.model.maxTokens;
     const MAX_TOKENS_PER_BATCH = configuredMaxTokens || 8000;
 
     // ── Build all batches first ─────────────────────────────────────────────
@@ -373,8 +326,7 @@ export class EmbeddingService {
    * For providers without a known models endpoint, conservatively returns true.
    */
   async modelSupportsDimensions(model: string): Promise<boolean> {
-    const cfg = getActiveModelConfig();
-    if (!cfg) return true;
+    if (!resolveModel("embedding")) return true;
 
     const models = await this.fetchEmbeddingModels();
     if (models.length === 0) return true;
@@ -391,10 +343,10 @@ export class EmbeddingService {
    * Returns empty array if the endpoint doesn't exist or fails.
    */
   async fetchEmbeddingModels(): Promise<EmbeddingModelInfo[]> {
-    const cfg = getActiveModelConfig();
-    if (!cfg) return [];
+    const resolved = resolveModel("embedding");
+    if (!resolved) return [];
 
-    const cacheKey = cfg.apiURL;
+    const cacheKey = resolved.provider.apiURL;
     const cached = this.modelListCache.get(cacheKey);
     if (cached) {
       const ttl = cached.negativeCacheExpiry
@@ -406,17 +358,14 @@ export class EmbeddingService {
     }
 
     try {
-      const baseUrl = cfg.apiURL.replace(/\/+$/, "");
+      const baseUrl = resolved.provider.apiURL.replace(/\/+$/, "");
       const modelsUrl = `${baseUrl}/embedding-models`;
 
       Zotero.debug(`[seerai] Fetching embedding models from ${modelsUrl}`);
 
       const response = await fetch(modelsUrl, {
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${cfg.apiKey}`,
-          "x-api-key": cfg.apiKey,
-        },
+        headers: resolved.headers,
       });
 
       if (!response.ok) {

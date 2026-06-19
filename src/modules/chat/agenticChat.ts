@@ -33,7 +33,8 @@ import {
 } from "./tools";
 import { ChatMessage } from "./types";
 import { parseMarkdown } from "./markdown";
-import { getActiveModelConfig } from "./modelConfig";
+import { resolveModel } from "./modelResolver";
+import type { ModelRef } from "./providerTypes";
 import { agentTracer } from "./tracer";
 import { ChatStateManager } from "./stateManager";
 import { getWorkspaceStore } from "./workspace/store";
@@ -295,6 +296,7 @@ export interface AgenticChatOptions {
   maxTokens?: number;
   libraryScope?: import("./tools").LibraryScope;
   continuation?: string;
+  modelRef?: ModelRef;
 }
 
 /**
@@ -1324,9 +1326,9 @@ export async function handleAgenticChat(
     : undefined;
 
   if (tools && tools.length > 0) {
-    const activeConfig = getActiveModelConfig();
-    const apiURL = activeConfig?.apiURL || "";
-    const model = activeConfig?.model || "";
+    const activeConfig = resolveModel("chat", options.modelRef);
+    const apiURL = activeConfig?.provider.apiURL || "";
+    const model = activeConfig?.model.modelId || "";
     const capabilities = getAgentModelCapabilities(apiURL, model);
     if (!capabilities.supportsTools) {
       const message =
@@ -1384,12 +1386,15 @@ export async function handleAgenticChat(
   }
 
   // Get model config
-  const activeModel = getActiveModelConfig();
+  const activeModel = resolveModel("chat", options.modelRef);
   const configOverride = activeModel
     ? {
-        apiURL: activeModel.apiURL,
-        apiKey: activeModel.apiKey,
-        model: activeModel.model,
+        apiURL: activeModel.provider.apiURL,
+        apiKey: activeModel.provider.apiKey,
+        model: activeModel.model.modelId,
+        modelRef: activeModel.ref,
+        endpoint: activeModel.endpoint,
+        headers: activeModel.headers,
         temperature: options.temperature,
         max_tokens: options.maxTokens,
       }
@@ -1413,7 +1418,7 @@ export async function handleAgenticChat(
   let toolCallRepairAttempts = 0;
 
   const compactionState: CompactionState = { count: 0, lastCompactAt: 0 };
-  const modelContextLength = activeModel?.contextLength || 128000;
+  const modelContextLength = activeModel?.model.contextLength || 128000;
   const outputBudget = configOverride?.max_tokens || 16384;
 
   // Start tracing session

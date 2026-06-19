@@ -1,4 +1,10 @@
-import { AIModelConfig } from "../modules/chat/types";
+interface RateLimitedModel {
+  id: string;
+  rateLimit?: {
+    type: "tpm" | "rpm" | "concurrency";
+    value: number;
+  };
+}
 
 interface RateLimitState {
   tokens: number;
@@ -44,7 +50,7 @@ export class RateLimiter {
    * @param estimatedTokens Estimated tokens for TPM check (default 0)
    */
   public async acquire(
-    modelConfig: AIModelConfig,
+    modelConfig: RateLimitedModel,
     estimatedTokens: number = 0,
   ): Promise<void> {
     if (!modelConfig.rateLimit) {

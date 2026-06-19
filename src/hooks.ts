@@ -34,24 +34,9 @@ async function onStartup() {
 
   initLocale();
 
+  await initModelConfigs();
   Assistant.register();
   BasicExampleFactory.registerPrefs();
-
-  // Clear legacy modelConfigs pref synchronously (prevents Zotero large-pref warnings)
-  try {
-    const prefKey = `${addon.data.config.prefsPrefix}.modelConfigs`;
-    if (Zotero.Prefs.get(prefKey)) {
-      Zotero.Prefs.clear(prefKey);
-      Zotero.debug("[seerai] Cleared legacy modelConfigs pref on startup");
-    }
-  } catch {
-    // ignore
-  }
-
-  // Load model configs from file storage (migrate from legacy prefs)
-  initModelConfigs().catch((e) => {
-    Zotero.debug(`[seerai] Failed to init model configs from file: ${e}`);
-  });
 
   // Preload systematic review paper IDs for context menu visibility
   try {

@@ -1,30 +1,29 @@
-/**
- * Provider Configuration Registry
- * Handles CRUD operations for user-defined AI provider configurations.
- *
- * Storage: {Zotero.DataDirectory.dir}/{addonRef}/providerConfigs.json
- * Uses an in-memory cache with async file writes, same pattern as modelConfig.ts.
- */
-
 import { config } from "../../../package.json";
-import { ProviderConfig } from "./providerTypes";
+import type { AIModelConfig, ModelType } from "./types";
+import {
+  formatModelDisplayName,
+  inferCapabilities,
+  type ModelCapability,
+  type ModelRef,
+  type ProviderConfig,
+  type ProviderModel,
+  type ProviderRegistryState,
+} from "./providerTypes";
+import { getPresetById, providerPresets } from "./providerPresets";
 
 const PROVIDER_CONFIGS_FILE = "providerConfigs.json";
+const LEGACY_MODEL_CONFIGS_FILE = "modelConfigs.json";
+const ACTIVE_MODEL_KEY = `${config.prefsPrefix}.activeModelId`;
+const LEGACY_MODELS_PREF = `${config.prefsPrefix}.modelConfigs`;
 
-/** In-memory provider config cache. Null means not yet loaded. */
-let _providerCache: ProviderConfig[] | null = null;
+let state: ProviderRegistryState | null = null;
+let writeQueue: Promise<void> = Promise.resolve();
+const listeners = new Set<() => void>();
 
-function getConfigPath(): string {
-  return PathUtils.join(
-    Zotero.DataDirectory.dir,
-    config.addonRef,
-    PROVIDER_CONFIGS_FILE,
-  );
+function configPath(file: string): string {
+  return PathUtils.join(Zotero.DataDirectory.dir, config.addonRef, file);
 }
 
-/**
- * Generate a UUID v4 for provider config IDs.
- */
 function generateId(): string {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
@@ -33,160 +32,457 @@ function generateId(): string {
   });
 }
 
-/**
- * Get all provider configurations from the in-memory cache.
- * Loads from file on first call.
- */
-export function getProviderConfigs(): ProviderConfig[] {
-  if (_providerCache !== null) return _providerCache;
-
-  // Cache not yet populated — initProviderConfigs() should have been called
-  // during startup, but handle the fallback case.
-  _providerCache = [];
-  return _providerCache;
+function emptyState(): ProviderRegistryState {
+  return { version: 2, providers: [], defaults: {} };
 }
 
-/**
- * Initialize provider configs from file storage on startup.
- * Called asynchronously from hooks.ts.
- */
-export async function initProviderConfigs(): Promise<void> {
-  try {
-    const filePath = getConfigPath();
-    if (await IOUtils.exists(filePath)) {
-      const raw = await IOUtils.readUTF8(filePath);
-      if (raw && raw.trim()) {
-        const configs = JSON.parse(raw) as ProviderConfig[];
-        _providerCache = configs;
-        Zotero.debug(
-          `[seerai] Loaded ${configs.length} provider configs from file`,
-        );
-        return;
-      }
+function normalizeProvider(provider: ProviderConfig): ProviderConfig {
+  const preset = provider.presetId
+    ? getPresetById(provider.presetId)
+    : undefined;
+  return {
+    ...provider,
+    adapterId: provider.adapterId || preset?.adapterId || "openai-compatible",
+    enabled: provider.enabled ?? provider.isActive ?? true,
+    isActive: provider.isActive ?? true,
+    modelPolicy: provider.modelPolicy || "automatic",
+    configuredModels: provider.configuredModels || [],
+    models: provider.models || [],
+  };
+}
+
+function providerFingerprint(configValue: AIModelConfig): string {
+  return `${configValue.apiURL.trim().replace(/\/+$/, "").toLowerCase()}\n${configValue.apiKey}`;
+}
+
+function presetForURL(apiURL: string) {
+  const normalized = apiURL.replace(/\/+$/, "").toLowerCase();
+  return providerPresets.find(
+    (preset) => preset.apiURL.replace(/\/+$/, "").toLowerCase() === normalized,
+  );
+}
+
+function modelFromLegacy(
+  modelId: string,
+  capability: ModelCapability,
+  legacy: AIModelConfig,
+  endpoint?: string,
+): ProviderModel {
+  const now = new Date().toISOString();
+  return {
+    id: generateId(),
+    modelId,
+    displayName: formatModelDisplayName(modelId),
+    capabilities: Array.from(
+      new Set<ModelCapability>([
+        capability,
+        ...(capability === "chat" ? inferCapabilities(modelId) : []),
+      ]),
+    ),
+    ...(endpoint && { endpointOverrides: { [capability]: endpoint } }),
+    ...(capability === "chat" && legacy.contextLength
+      ? { contextLength: legacy.contextLength }
+      : {}),
+    ...(capability === "chat" && legacy.reasoningEffort
+      ? { reasoningEffort: legacy.reasoningEffort }
+      : {}),
+    ...(capability === "chat" && legacy.toolChoice
+      ? { toolChoice: legacy.toolChoice }
+      : {}),
+    ...(capability === "chat" && legacy.rateLimit
+      ? { rateLimit: legacy.rateLimit }
+      : {}),
+    createdAt: legacy.createdAt || now,
+    updatedAt: legacy.updatedAt || now,
+  };
+}
+
+export function migrateLegacyModels(
+  legacyModels: AIModelConfig[],
+  base: ProviderRegistryState,
+  activeId?: string,
+): ProviderRegistryState {
+  if (legacyModels.length === 0) return base;
+  const providers = [...base.providers];
+  const legacyRefs = new Map<string, Partial<Record<ModelType, ModelRef>>>();
+
+  for (const legacy of legacyModels) {
+    const fingerprint = providerFingerprint(legacy);
+    let provider = providers.find(
+      (candidate) =>
+        (candidate as ProviderConfig & { legacyFingerprint?: string })
+          .legacyFingerprint === fingerprint,
+    );
+    if (!provider) {
+      const preset = presetForURL(legacy.apiURL);
+      const now = new Date().toISOString();
+      provider = normalizeProvider({
+        id: generateId(),
+        presetId: preset?.id,
+        name: preset?.name || legacy.name,
+        apiURL: legacy.apiURL,
+        apiKey: legacy.apiKey,
+        authMethod: preset?.authMethod || "bearer",
+        authHeaderName: preset?.authHeaderName,
+        authPrefix: preset?.authPrefix,
+        extraHeaders: preset?.extraHeaders,
+        models: [],
+        configuredModels: [],
+        modelPolicy: "scoped",
+        isActive: true,
+        enabled: true,
+        adapterId: preset?.adapterId || "openai-compatible",
+        createdAt: legacy.createdAt || now,
+        updatedAt: legacy.updatedAt || now,
+      });
+      Object.assign(provider, { legacyFingerprint: fingerprint });
+      providers.push(provider);
     }
-  } catch (e) {
-    Zotero.debug(`[seerai] Failed to load provider configs from file: ${e}`);
+
+    const refs: Partial<Record<ModelType, ModelRef>> = {};
+    const add = (
+      capability: ModelType,
+      modelId: string | undefined,
+      endpoint?: string,
+      settings?: { voice?: string; dimensions?: number; maxTokens?: number },
+    ) => {
+      if (!modelId) return;
+      const model = modelFromLegacy(modelId, capability, legacy, endpoint);
+      if (settings?.voice) model.voice = settings.voice;
+      if (settings?.dimensions) model.dimensions = settings.dimensions;
+      if (settings?.maxTokens) model.maxTokens = settings.maxTokens;
+      provider!.configuredModels!.push(model);
+      refs[capability] = {
+        providerId: provider!.id,
+        localModelId: model.id,
+      };
+    };
+
+    add("chat", legacy.model);
+    add("tts", legacy.ttsConfig?.model, legacy.ttsConfig?.endpoint, {
+      voice: legacy.ttsConfig?.voice,
+    });
+    add("stt", legacy.sttConfig?.model, legacy.sttConfig?.endpoint);
+    add(
+      "embedding",
+      legacy.embeddingConfig?.model,
+      legacy.embeddingConfig?.endpoint,
+      {
+        dimensions: legacy.embeddingConfig?.dimensions,
+        maxTokens: legacy.embeddingConfig?.maxTokens,
+      },
+    );
+    add("image", legacy.imageConfig?.model, legacy.imageConfig?.endpoint);
+    add("video", legacy.videoConfig?.model, legacy.videoConfig?.endpoint);
+    legacyRefs.set(legacy.id, refs);
   }
-  // Ensure cache is populated with empty array if file doesn't exist yet
-  _providerCache = [];
+
+  for (const provider of providers) {
+    delete (provider as ProviderConfig & { legacyFingerprint?: string })
+      .legacyFingerprint;
+  }
+
+  const selected =
+    legacyModels.find((item) => item.id === activeId) ||
+    legacyModels.find((item) => item.isDefault) ||
+    legacyModels[0];
+  const selectedRefs = selected ? legacyRefs.get(selected.id) : undefined;
+  return {
+    version: 2,
+    providers,
+    defaults: { ...base.defaults, ...selectedRefs },
+    migratedAt: new Date().toISOString(),
+  };
 }
 
-/**
- * Async write helper — writes provider configs to disk.
- */
-async function _writeConfigsToFileAsync(
-  configs: ProviderConfig[],
-): Promise<void> {
+async function readLegacyModels(): Promise<AIModelConfig[]> {
+  const legacyPath = configPath(LEGACY_MODEL_CONFIGS_FILE);
   try {
-    const filePath = getConfigPath();
+    if (await IOUtils.exists(legacyPath)) {
+      const raw = await IOUtils.readUTF8(legacyPath);
+      const parsed = JSON.parse(raw || "[]") as AIModelConfig[];
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (error) {
+    Zotero.debug(`[seerai] Failed to read legacy model configs: ${error}`);
+  }
+  try {
+    const raw = Zotero.Prefs.get(LEGACY_MODELS_PREF) as string | undefined;
+    const parsed = JSON.parse(raw || "[]") as AIModelConfig[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function persist(): Promise<void> {
+  if (!state) return;
+  const snapshot = JSON.stringify(state);
+  writeQueue = writeQueue.then(async () => {
+    const filePath = configPath(PROVIDER_CONFIGS_FILE);
     const dir = PathUtils.parent(filePath);
     if (dir && !(await IOUtils.exists(dir))) {
       await IOUtils.makeDirectory(dir, { ignoreExisting: true });
     }
-    await IOUtils.writeUTF8(filePath, JSON.stringify(configs));
-  } catch (e) {
-    Zotero.debug(`[seerai] Failed to write provider configs to file: ${e}`);
-  }
-}
-
-/**
- * Save all provider configurations. Updates in-memory cache and
- * writes to file asynchronously.
- */
-export function saveProviderConfigs(configs: ProviderConfig[]): void {
-  _providerCache = configs;
-  _writeConfigsToFileAsync(configs).catch((e) => {
-    Zotero.debug(`[seerai] Error saving provider configs to file: ${e}`);
+    await Zotero.File.putContentsAsync(filePath, snapshot);
   });
-  Zotero.debug(`[seerai] Saved ${configs.length} provider configurations`);
+  await writeQueue;
 }
 
-/**
- * Get a specific provider configuration by ID.
- */
+function changed(): void {
+  void persist().catch((error) => {
+    Zotero.debug(`[seerai] Failed to save provider registry: ${error}`);
+  });
+  listeners.forEach((listener) => listener());
+}
+
+export async function initProviderConfigs(): Promise<void> {
+  let loaded = emptyState();
+  let needsMigration = false;
+  const filePath = configPath(PROVIDER_CONFIGS_FILE);
+  try {
+    if (await IOUtils.exists(filePath)) {
+      const raw = await IOUtils.readUTF8(filePath);
+      const parsed = JSON.parse(raw || "[]") as
+        | ProviderRegistryState
+        | ProviderConfig[];
+      if (Array.isArray(parsed)) {
+        loaded.providers = parsed.map(normalizeProvider);
+        needsMigration = true;
+      } else if (parsed.version === 2) {
+        loaded = {
+          ...parsed,
+          providers: parsed.providers.map(normalizeProvider),
+        };
+      }
+    } else {
+      needsMigration = true;
+    }
+  } catch (error) {
+    Zotero.debug(`[seerai] Failed to load provider registry: ${error}`);
+    needsMigration = true;
+  }
+
+  if (needsMigration || !loaded.migratedAt) {
+    loaded = migrateLegacyModels(
+      await readLegacyModels(),
+      loaded,
+      Zotero.Prefs.get(ACTIVE_MODEL_KEY) as string | undefined,
+    );
+  }
+  state = loaded;
+  await persist();
+}
+
+export function getProviderRegistryState(): ProviderRegistryState {
+  if (!state) state = emptyState();
+  return state;
+}
+
+export function replaceProviderRegistryState(
+  value: ProviderRegistryState,
+): void {
+  state = {
+    version: 2,
+    providers: value.providers.map(normalizeProvider),
+    defaults: { ...value.defaults },
+    migratedAt: value.migratedAt || new Date().toISOString(),
+  };
+  changed();
+}
+
+export function subscribeProviderRegistry(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+export function getProviderConfigs(): ProviderConfig[] {
+  return getProviderRegistryState().providers;
+}
+
+export function saveProviderConfigs(configs: ProviderConfig[]): void {
+  getProviderRegistryState().providers = configs.map(normalizeProvider);
+  changed();
+}
+
 export function getProviderConfig(id: string): ProviderConfig | undefined {
-  const configs = getProviderConfigs();
-  return configs.find((c) => c.id === id);
+  return getProviderConfigs().find((provider) => provider.id === id);
 }
 
-/**
- * Add a new provider configuration.
- * Generates UUID and sets timestamps automatically.
- */
 export function addProviderConfig(
-  configData: Omit<ProviderConfig, "id" | "createdAt" | "updatedAt">,
+  value: Omit<ProviderConfig, "id" | "createdAt" | "updatedAt">,
 ): ProviderConfig {
-  const configs = getProviderConfigs();
   const now = new Date().toISOString();
-
-  const newConfig: ProviderConfig = {
-    ...configData,
+  const provider = normalizeProvider({
+    ...value,
     id: generateId(),
     createdAt: now,
     updatedAt: now,
-  };
-
-  configs.push(newConfig);
-  saveProviderConfigs(configs);
-
-  Zotero.debug(
-    `[seerai] Added provider config: ${newConfig.name} (${newConfig.id})`,
-  );
-  return newConfig;
+  });
+  getProviderConfigs().push(provider);
+  changed();
+  return provider;
 }
 
-/**
- * Update an existing provider configuration.
- * Applies partial updates and sets updatedAt timestamp.
- */
 export function updateProviderConfig(
   id: string,
   updates: Partial<Omit<ProviderConfig, "id" | "createdAt">>,
 ): ProviderConfig | undefined {
-  const configs = getProviderConfigs();
-  const index = configs.findIndex((c) => c.id === id);
-
-  if (index === -1) {
-    Zotero.debug(`[seerai] Provider config not found: ${id}`);
-    return undefined;
-  }
-
-  configs[index] = {
-    ...configs[index],
+  const providers = getProviderConfigs();
+  const index = providers.findIndex((provider) => provider.id === id);
+  if (index < 0) return undefined;
+  providers[index] = normalizeProvider({
+    ...providers[index],
     ...updates,
     updatedAt: new Date().toISOString(),
-  };
-
-  saveProviderConfigs(configs);
-  Zotero.debug(`[seerai] Updated provider config: ${configs[index].name}`);
-  return configs[index];
+  });
+  changed();
+  return providers[index];
 }
 
-/**
- * Delete a provider configuration by ID.
- * Returns true if the config was found and removed, false otherwise.
- */
 export function deleteProviderConfig(id: string): boolean {
-  const configs = getProviderConfigs();
-  const index = configs.findIndex((c) => c.id === id);
-
-  if (index === -1) {
-    return false;
+  const registry = getProviderRegistryState();
+  const index = registry.providers.findIndex((provider) => provider.id === id);
+  if (index < 0) return false;
+  registry.providers.splice(index, 1);
+  for (const capability of Object.keys(registry.defaults) as ModelType[]) {
+    if (registry.defaults[capability]?.providerId === id) {
+      delete registry.defaults[capability];
+    }
   }
-
-  configs.splice(index, 1);
-  saveProviderConfigs(configs);
-
-  Zotero.debug(`[seerai] Deleted provider config: ${id}`);
+  changed();
   return true;
 }
 
-/**
- * Find a provider configuration by its linked preset ID.
- */
 export function getProviderConfigByPresetId(
   presetId: string,
 ): ProviderConfig | undefined {
-  const configs = getProviderConfigs();
-  return configs.find((c) => c.presetId === presetId);
+  return getProviderConfigs().find(
+    (provider) => provider.presetId === presetId,
+  );
+}
+
+export function getDefaultModelRef(
+  capability: ModelType,
+): ModelRef | undefined {
+  return getProviderRegistryState().defaults[capability];
+}
+
+export function setDefaultModelRef(
+  capability: ModelType,
+  ref: ModelRef | undefined,
+): void {
+  const defaults = getProviderRegistryState().defaults;
+  if (ref) defaults[capability] = ref;
+  else delete defaults[capability];
+  changed();
+}
+
+export function getConfiguredProviderModels(
+  provider: ProviderConfig,
+): ProviderModel[] {
+  if (provider.modelPolicy === "scoped") {
+    return provider.configuredModels || [];
+  }
+  const configuredByRemoteId = new Map(
+    (provider.configuredModels || []).map((model) => [model.modelId, model]),
+  );
+  return provider.models.map((model) => {
+    const configured = configuredByRemoteId.get(model.id);
+    if (configured) return configured;
+    const now = provider.modelsLastFetched || provider.updatedAt;
+    return {
+      id: `discovered:${model.id}`,
+      modelId: model.id,
+      displayName: model.displayName || formatModelDisplayName(model.id),
+      capabilities: model.capabilities || inferCapabilities(model.id),
+      contextLength: model.contextLength,
+      createdAt: now,
+      updatedAt: now,
+    };
+  });
+}
+
+export function addProviderModel(
+  providerId: string,
+  model: Omit<ProviderModel, "id" | "createdAt" | "updatedAt">,
+): ProviderModel | undefined {
+  const provider = getProviderConfig(providerId);
+  if (!provider) return undefined;
+  const now = new Date().toISOString();
+  const created: ProviderModel = {
+    ...model,
+    id: generateId(),
+    createdAt: now,
+    updatedAt: now,
+  };
+  provider.configuredModels = [...(provider.configuredModels || []), created];
+  provider.modelPolicy = "scoped";
+  provider.updatedAt = now;
+  changed();
+  return created;
+}
+
+export function updateProviderModel(
+  providerId: string,
+  localModelId: string,
+  updates: Partial<Omit<ProviderModel, "id" | "createdAt">>,
+): ProviderModel | undefined {
+  const provider = getProviderConfig(providerId);
+  const index = provider?.configuredModels?.findIndex(
+    (model) => model.id === localModelId,
+  );
+  if (!provider || index === undefined || index < 0) return undefined;
+  provider.configuredModels![index] = {
+    ...provider.configuredModels![index],
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  };
+  changed();
+  return provider.configuredModels![index];
+}
+
+export function deleteProviderModel(
+  providerId: string,
+  localModelId: string,
+): boolean {
+  const registry = getProviderRegistryState();
+  const provider = registry.providers.find((item) => item.id === providerId);
+  const index = provider?.configuredModels?.findIndex(
+    (model) => model.id === localModelId,
+  );
+  if (!provider || index === undefined || index < 0) return false;
+  provider.configuredModels!.splice(index, 1);
+  for (const capability of Object.keys(registry.defaults) as ModelType[]) {
+    const ref = registry.defaults[capability];
+    if (ref?.providerId === providerId && ref.localModelId === localModelId) {
+      delete registry.defaults[capability];
+    }
+  }
+  changed();
+  return true;
+}
+
+export function setProviderModelPolicy(
+  providerId: string,
+  policy: "automatic" | "scoped",
+): void {
+  const provider = getProviderConfig(providerId);
+  if (!provider) return;
+  provider.modelPolicy = policy;
+  if (policy === "automatic") provider.configuredModels = [];
+  provider.updatedAt = new Date().toISOString();
+  changed();
+}
+
+export function replaceDiscoveredModels(
+  providerId: string,
+  models: ProviderConfig["models"],
+): void {
+  const provider = getProviderConfig(providerId);
+  if (!provider) return;
+  provider.models = models;
+  provider.modelsLastFetched = new Date().toISOString();
+  provider.updatedAt = provider.modelsLastFetched;
+  changed();
 }

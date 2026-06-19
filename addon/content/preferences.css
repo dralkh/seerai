@@ -93,3 +93,385 @@ body.dark {
   font-style: italic;
   margin: 0;
 }
+
+.seerai-settings-nav {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+  margin: 0 0 14px;
+  overflow-x: auto;
+  border: 1px solid var(--border-secondary, var(--border-color));
+  border-radius: 10px;
+  background: var(--background-primary, var(--modal-bg));
+}
+
+.seerai-settings-nav button {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary, var(--model-item-text-secondary));
+  cursor: pointer;
+}
+
+.seerai-settings-nav button:hover,
+.seerai-settings-nav button:focus-visible {
+  background: var(--background-secondary, var(--button-hover-background-color));
+  color: var(--text-primary, var(--model-item-text-primary));
+  outline: none;
+}
+
+.seerai-settings-card {
+  display: block;
+  padding: 16px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border-secondary, var(--border-color));
+  border-radius: 12px;
+  background: var(--background-primary, var(--model-item-bg));
+}
+
+.seerai-settings-divider {
+  height: 1px;
+  margin: 20px 0;
+  background: var(--border-secondary, var(--divider-bg));
+}
+
+.seerai-settings-section-header,
+.seerai-provider-card-header,
+.seerai-inline-actions,
+.seerai-policy-row,
+.seerai-default-bulk,
+.seerai-provider-dialog-header,
+.seerai-provider-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.seerai-settings-section-header h3,
+.seerai-provider-dialog h2,
+.seerai-provider-dialog h3 {
+  margin: 0;
+  color: var(--text-primary, var(--modal-title-color));
+}
+
+.seerai-settings-section-header p,
+.seerai-provider-dialog-header p {
+  margin: 3px 0 0;
+  color: var(--text-secondary, var(--model-item-text-secondary));
+  font-size: 12px;
+}
+
+.seerai-primary-button,
+.seerai-secondary-button,
+.seerai-danger-button,
+.seerai-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-secondary, var(--modal-input-border));
+  border-radius: 7px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.seerai-primary-button {
+  border-color: var(--accent-blue, var(--modal-btn-primary-bg));
+  background: var(--accent-blue, var(--modal-btn-primary-bg));
+  color: #fff;
+}
+
+.seerai-secondary-button,
+.seerai-icon-button {
+  background: var(--background-secondary, var(--modal-btn-bg));
+  color: var(--text-primary, var(--modal-btn-text));
+}
+
+.seerai-danger-button {
+  border-color: color-mix(in srgb, #d32f2f 45%, transparent);
+  background: transparent;
+  color: #d32f2f;
+}
+
+.seerai-icon-button {
+  width: 30px;
+  padding: 0;
+}
+
+.seerai-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.seerai-provider-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-secondary, var(--model-item-border));
+  border-radius: 10px;
+  background: var(--background-secondary, var(--background-color));
+}
+
+.seerai-provider-identity {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.seerai-provider-identity > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.seerai-provider-identity span,
+.seerai-provider-meta,
+.seerai-default-row span,
+.seerai-policy-row span {
+  color: var(--text-secondary, var(--model-item-text-secondary));
+  font-size: 11px;
+}
+
+.seerai-status-pill {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #2e7d32 12%, transparent);
+  color: #2e7d32;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.seerai-settings-empty {
+  grid-column: 1 / -1;
+  padding: 24px;
+  border: 1px dashed var(--border-secondary, var(--border-color));
+  border-radius: 9px;
+  color: var(--text-secondary, var(--placeholder-color));
+  text-align: center;
+}
+
+.seerai-default-bulk {
+  padding: 10px;
+  margin: 14px 0;
+  border-radius: 8px;
+  background: var(--background-secondary, var(--background-color));
+}
+
+.seerai-default-bulk select {
+  margin-left: auto;
+}
+
+.seerai-default-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--border-secondary, var(--border-color));
+  border-radius: 9px;
+  background: var(--border-secondary, var(--border-color));
+}
+
+.seerai-default-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(220px, 1.5fr);
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  background: var(--background-primary, var(--modal-bg));
+}
+
+.seerai-default-row > div,
+.seerai-policy-row > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.seerai-provider-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.52);
+}
+
+.seerai-provider-dialog {
+  display: flex;
+  width: min(760px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-primary, var(--modal-input-border));
+  border-radius: 14px;
+  background: var(--background-primary, var(--modal-bg));
+  color: var(--text-primary, var(--modal-input-text));
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.34);
+}
+
+.seerai-provider-dialog-header,
+.seerai-provider-dialog-footer {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-secondary, var(--modal-input-border));
+}
+
+.seerai-provider-dialog-footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--border-secondary, var(--modal-input-border));
+  border-bottom: 0;
+}
+
+.seerai-provider-dialog-body {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.85fr) minmax(340px, 1.15fr);
+  gap: 18px;
+  padding: 18px;
+  overflow: auto;
+}
+
+.seerai-provider-section {
+  min-width: 0;
+}
+
+.seerai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 11px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.seerai-field input,
+.seerai-field select,
+.seerai-field textarea,
+.seerai-policy-row select,
+.seerai-default-row select,
+.seerai-default-bulk select,
+.seerai-add-model-row input {
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-primary, var(--modal-input-border));
+  border-radius: 7px;
+  background: var(--background-primary, var(--modal-input-bg));
+  color: var(--text-primary, var(--modal-input-text));
+  font: inherit;
+  font-weight: 400;
+}
+
+.seerai-field textarea {
+  min-height: 70px;
+  resize: vertical;
+}
+
+.seerai-secret-input,
+.seerai-add-model-row {
+  display: flex;
+  gap: 6px;
+}
+
+.seerai-secret-input input,
+.seerai-add-model-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.seerai-provider-advanced {
+  margin-top: 12px;
+  color: var(--text-secondary, var(--model-item-text-secondary));
+}
+
+.seerai-provider-advanced summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.seerai-connection-status {
+  color: var(--text-secondary, var(--model-item-text-secondary));
+  font-size: 11px;
+}
+
+.seerai-policy-row {
+  align-items: flex-end;
+  padding: 10px;
+  margin-top: 12px;
+  border-radius: 8px;
+  background: var(--background-secondary, var(--background-color));
+}
+
+.seerai-capability-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.seerai-capability-lane {
+  padding: 9px;
+  border: 1px solid var(--border-secondary, var(--border-color));
+  border-radius: 8px;
+}
+
+.seerai-capability-header {
+  margin-bottom: 6px;
+  font-size: 11px;
+}
+
+.seerai-model-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 7px;
+}
+
+.seerai-model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-blue, #1976d2) 12%, transparent);
+  color: var(--text-primary, var(--model-item-text-primary));
+  font-size: 10px;
+}
+
+.seerai-model-chip button {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.seerai-provider-error {
+  padding: 8px 18px;
+  background: var(--modal-error-bg);
+  color: var(--modal-error-text);
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .seerai-provider-dialog-body {
+    grid-template-columns: 1fr;
+  }
+
+  .seerai-default-row {
+    grid-template-columns: 1fr;
+  }
+}

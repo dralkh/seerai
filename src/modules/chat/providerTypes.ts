@@ -24,6 +24,8 @@ export interface ProviderPreset {
   isAgent?: boolean;
   defaultModel?: string;
   notes?: string;
+  adapterId?: ProviderAdapterId;
+  verifiedCapabilities?: ModelCapability[];
 }
 
 export interface DiscoveredModel {
@@ -34,6 +36,45 @@ export interface DiscoveredModel {
   displayName?: string;
   contextLength?: number;
   capabilities?: ModelCapability[];
+}
+
+export type ProviderAdapterId =
+  | "openai-compatible"
+  | "anthropic"
+  | "azure-openai"
+  | "nanogpt";
+
+export type ProviderModelPolicy = "automatic" | "scoped";
+
+export interface ModelRef {
+  providerId: string;
+  localModelId: string;
+}
+
+export interface ProviderModel {
+  id: string;
+  modelId: string;
+  displayName: string;
+  capabilities: ModelCapability[];
+  endpointOverrides?: Partial<
+    Record<Exclude<ModelCapability, "reasoning">, string>
+  >;
+  contextLength?: number;
+  reasoningEffort?: "low" | "medium" | "high";
+  toolChoice?: "auto" | "required" | "none";
+  rateLimit?: {
+    type: "tpm" | "rpm" | "concurrency";
+    value: number;
+  };
+  voice?: string;
+  dimensions?: number;
+  maxTokens?: number;
+  ragTokenThreshold?: number;
+  ragAlwaysUse?: boolean;
+  ragTopK?: number;
+  ragMinScore?: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type ModelCapability =
@@ -56,10 +97,33 @@ export interface ProviderConfig {
   authPrefix?: string;
   extraHeaders?: Record<string, string>;
   models: DiscoveredModel[];
+  configuredModels?: ProviderModel[];
+  modelPolicy?: ProviderModelPolicy;
   modelsLastFetched?: string;
   isActive: boolean;
+  enabled?: boolean;
+  adapterId?: ProviderAdapterId;
+  modelsURL?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProviderRegistryState {
+  version: 2;
+  providers: ProviderConfig[];
+  defaults: Partial<
+    Record<"chat" | "embedding" | "image" | "video" | "tts" | "stt", ModelRef>
+  >;
+  migratedAt?: string;
+}
+
+export interface ResolvedModel {
+  ref: ModelRef;
+  provider: ProviderConfig;
+  model: ProviderModel;
+  adapterId: ProviderAdapterId;
+  endpoint: string;
+  headers: Record<string, string>;
 }
 
 /**

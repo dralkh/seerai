@@ -1,3 +1,5 @@
+@import url("preferences.css");
+
 :root {
   --background-primary: #fafafa;
   --background-secondary: #f5f5f5;
@@ -33,6 +35,100 @@
   --message-user-text: #1976d2;
   --message-assistant-background: #f5f5f5;
   --message-assistant-text: #424242;
+}
+
+.seerai-chat-model-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  height: 32px;
+  padding: 0 9px;
+  overflow: hidden;
+  border: 1px solid var(--border-primary);
+  border-radius: 7px;
+  background: var(--background-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.seerai-chat-model-button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seerai-chat-model-popover {
+  position: fixed;
+  z-index: 200001;
+  display: flex;
+  width: 310px;
+  max-height: 390px;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-primary);
+  border-radius: 10px;
+  background: var(--background-primary);
+  color: var(--text-primary);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+}
+
+.seerai-chat-model-popover > input {
+  margin: 9px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-primary);
+  border-radius: 7px;
+  background: var(--background-primary);
+  color: var(--text-primary);
+}
+
+.seerai-chat-model-results {
+  overflow-y: auto;
+  padding: 0 5px 5px;
+}
+
+.seerai-chat-model-option,
+.seerai-chat-model-manage {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+
+.seerai-chat-model-option:hover,
+.seerai-chat-model-manage:hover {
+  background: var(--background-secondary);
+}
+
+.seerai-chat-model-option span {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.seerai-chat-model-group {
+  padding: 8px 9px 3px;
+  color: var(--text-tertiary);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.seerai-chat-model-manage {
+  flex-direction: row;
+  align-items: center;
+  margin-top: auto;
+  border-top: 1px solid var(--border-primary);
+  border-radius: 0;
 }
 
 @media (prefers-color-scheme: dark) {

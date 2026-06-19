@@ -152,11 +152,12 @@ export interface ChatCompletionOptions {
   };
   timeoutMs?: number;
   isolated?: boolean;
+  modelRef?: import("./chat/providerTypes").ModelRef;
 }
 
 import { RateLimiter } from "../utils/rateLimiter";
-import { getActiveModelConfig } from "./chat/modelConfig";
-import { MODEL_TYPE_ENDPOINTS } from "./chat/types";
+import { requireResolvedModel, resolveModel } from "./chat/modelResolver";
+import type { ModelRef } from "./chat/providerTypes";
 
 export class OpenAIService {
   // Active AbortController for current request (may not be available in Zotero)
@@ -299,34 +300,17 @@ export class OpenAIService {
     messages: OpenAIMessage[],
     options?: ChatCompletionOptions,
   ): Promise<string> {
-    let { apiURL, apiKey, model } = this.getPrefs();
-
-    // Try to get full config for rate limiting
-    const activeConfig = getActiveModelConfig();
-    if (activeConfig) {
-      // Use active config values if available, otherwise fallback to prefs
-      apiURL = activeConfig.apiURL;
-      apiKey = activeConfig.apiKey;
-      model = activeConfig.model;
-    }
-
-    if (!apiKey) {
-      throw new Error(
-        "OpenAI API Key is missing. Please set it in preferences.",
-      );
-    }
-
-    // Apply Rate Limiting
+    const resolved = resolveModel("chat", options?.modelRef);
+    const prefs = this.getPrefs();
+    const model = resolved?.model.modelId || prefs.model;
+    const endpoint =
+      resolved?.endpoint ||
+      `${prefs.apiURL.replace(/\/+$/, "")}/chat/completions`;
     const rateLimiter = RateLimiter.getInstance();
-    if (activeConfig) {
-      // Estimate tokens: conservative count (3.2 chars/token)
+    if (resolved) {
       const estimatedTokens = JSON.stringify(messages).length / 3.2;
-      await rateLimiter.acquire(activeConfig, estimatedTokens);
+      await rateLimiter.acquire(resolved.model, estimatedTokens);
     }
-
-    const endpoint = apiURL.endsWith("/")
-      ? `${apiURL}chat/completions`
-      : `${apiURL}/chat/completions`;
 
     if (!options?.isolated) this.isAborted = false;
     let signal: AbortSignal | undefined;
@@ -355,6 +339,15 @@ export class OpenAIService {
     }
 
     try {
+      if (resolved?.adapterId === "anthropic") {
+        return await this.anthropicCompletion(
+          endpoint,
+          resolved.headers,
+          model,
+          messages,
+          signal,
+        );
+      }
       const requestBody = this.prepareRequestBody(model, messages);
       Zotero.debug(
         `[seerai] Starting chat completion with model ${model} at ${endpoint}`,
@@ -364,7 +357,9 @@ export class OpenAIService {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          ...(resolved?.headers || {
+            Authorization: `Bearer ${prefs.apiKey}`,
+          }),
         },
         body: JSON.stringify(requestBody),
         ...(signal ? { signal } : {}),
@@ -394,8 +389,8 @@ export class OpenAIService {
       if (!options?.isolated && this.currentController === controller) {
         this.currentController = null;
       }
-      if (activeConfig) {
-        rateLimiter.release(activeConfig.id);
+      if (resolved) {
+        rateLimiter.release(resolved.model.id);
       }
     }
   }
@@ -414,43 +409,30 @@ export class OpenAIService {
       model?: string;
       temperature?: number;
       max_tokens?: number;
+      modelRef?: ModelRef;
+      endpoint?: string;
+      headers?: Record<string, string>;
     },
     tools?: ToolDefinition[],
   ): Promise<void> {
     const prefs = this.getPrefs();
-    const apiURL = configOverride?.apiURL || prefs.apiURL;
-    const apiKey = configOverride?.apiKey || prefs.apiKey;
-    const model = configOverride?.model || prefs.model;
-
-    // Try to get full config for rate limiting if no override provided or if override matches active
-    // Simplification: Always check active model config if no override, or if override matches
-    const activeConfig = getActiveModelConfig();
-    // If configOverride is provided, we might not have the ID to check rate limits against the correct model buffer.
-    // However, usually configOverride is used for specialized calls.
-    // Ideally we should pass the full config object instead of partial override.
-    // For now, if activeConfig matches the apiKey/model, we use it.
-    const effectiveConfig =
-      activeConfig &&
-      (!configOverride || configOverride.model === activeConfig.model)
-        ? activeConfig
-        : undefined;
-
-    if (!apiKey) {
-      throw new Error(
-        "OpenAI API Key is missing. Please set it in preferences.",
-      );
-    }
-
-    // Apply Rate Limiting
+    const resolved = resolveModel("chat", configOverride?.modelRef);
+    const apiURL =
+      configOverride?.apiURL || resolved?.provider.apiURL || prefs.apiURL;
+    const apiKey =
+      configOverride?.apiKey || resolved?.provider.apiKey || prefs.apiKey;
+    const model =
+      configOverride?.model || resolved?.model.modelId || prefs.model;
     const rateLimiter = RateLimiter.getInstance();
-    if (effectiveConfig) {
+    if (resolved) {
       const estimatedTokens = JSON.stringify(messages).length / 3.2;
-      await rateLimiter.acquire(effectiveConfig, estimatedTokens);
+      await rateLimiter.acquire(resolved.model, estimatedTokens);
     }
 
-    const endpoint = apiURL.endsWith("/")
-      ? `${apiURL}chat/completions`
-      : `${apiURL}/chat/completions`;
+    const endpoint =
+      configOverride?.endpoint ||
+      resolved?.endpoint ||
+      `${apiURL.replace(/\/+$/, "")}/chat/completions`;
 
     // Create new AbortController for this request (if available)
     this.isAborted = false;
@@ -478,12 +460,25 @@ export class OpenAIService {
     > = new Map();
 
     try {
+      if (resolved?.adapterId === "anthropic") {
+        await this.anthropicCompletionStream(
+          endpoint,
+          configOverride?.headers || resolved.headers,
+          model,
+          messages,
+          callbacks,
+          signal,
+          tools,
+          configOverride?.max_tokens,
+        );
+        return;
+      }
       // Build request body using centralized helper
       const requestBody = this.prepareRequestBody(model, messages, {
         stream: true,
         temperature: configOverride?.temperature,
         max_tokens: configOverride?.max_tokens,
-        reasoningEffort: effectiveConfig?.reasoningEffort,
+        reasoningEffort: resolved?.model.reasoningEffort,
       });
 
       // Add tools if provided
@@ -495,8 +490,7 @@ export class OpenAIService {
           throw new Error(capabilities.knownIncompatibleReason);
         }
         requestBody.tools = tools;
-        const activeModel = getActiveModelConfig();
-        requestBody.tool_choice = activeModel?.toolChoice || "auto";
+        requestBody.tool_choice = resolved?.model.toolChoice || "auto";
         delete requestBody.reasoning_effort;
       }
 
@@ -504,7 +498,8 @@ export class OpenAIService {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
+          ...(configOverride?.headers ||
+            resolved?.headers || { Authorization: `Bearer ${apiKey}` }),
         },
         body: JSON.stringify(requestBody),
         ...(signal ? { signal } : {}),
@@ -628,10 +623,200 @@ export class OpenAIService {
       throw error;
     } finally {
       this.currentController = null;
-      if (effectiveConfig) {
-        rateLimiter.release(effectiveConfig.id);
+      if (resolved) {
+        rateLimiter.release(resolved.model.id);
       }
     }
+  }
+
+  private anthropicMessages(messages: AnyOpenAIMessage[]) {
+    const system = messages
+      .filter((message) => message.role === "system")
+      .map((message) =>
+        typeof message.content === "string"
+          ? message.content
+          : JSON.stringify(message.content),
+      )
+      .join("\n\n");
+    const converted = messages
+      .filter((message) => message.role !== "system")
+      .map((message) => {
+        if (message.role === "tool") {
+          return {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: message.tool_call_id,
+                content: message.content,
+              },
+            ],
+          };
+        }
+        if (message.role === "assistant" && "tool_calls" in message) {
+          return {
+            role: "assistant",
+            content: [
+              ...(message.content
+                ? [{ type: "text", text: message.content }]
+                : []),
+              ...message.tool_calls.map((toolCall) => ({
+                type: "tool_use",
+                id: toolCall.id,
+                name: toolCall.function.name,
+                input: (() => {
+                  try {
+                    return JSON.parse(toolCall.function.arguments || "{}");
+                  } catch {
+                    return {};
+                  }
+                })(),
+              })),
+            ],
+          };
+        }
+        if (Array.isArray(message.content)) {
+          return {
+            role: message.role,
+            content: message.content.map((part) => {
+              if (part.type === "text") {
+                return { type: "text", text: part.text || "" };
+              }
+              const url = part.image_url?.url || "";
+              const dataMatch = url.match(/^data:([^;]+);base64,(.+)$/);
+              return dataMatch
+                ? {
+                    type: "image",
+                    source: {
+                      type: "base64",
+                      media_type: dataMatch[1],
+                      data: dataMatch[2],
+                    },
+                  }
+                : {
+                    type: "image",
+                    source: { type: "url", url },
+                  };
+            }),
+          };
+        }
+        return { role: message.role, content: message.content };
+      });
+    return { system, messages: converted };
+  }
+
+  private async anthropicCompletion(
+    endpoint: string,
+    headers: Record<string, string>,
+    model: string,
+    messages: AnyOpenAIMessage[],
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const converted = this.anthropicMessages(messages);
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({
+        model,
+        max_tokens: 4096,
+        ...(converted.system && { system: converted.system }),
+        messages: converted.messages,
+      }),
+      ...(signal ? { signal } : {}),
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Anthropic API error (${response.status}): ${await response.text()}`,
+      );
+    }
+    const data = (await response.json()) as {
+      content?: Array<{ type: string; text?: string }>;
+    };
+    return (data.content || [])
+      .filter((block) => block.type === "text")
+      .map((block) => block.text || "")
+      .join("");
+  }
+
+  private async anthropicCompletionStream(
+    endpoint: string,
+    headers: Record<string, string>,
+    model: string,
+    messages: AnyOpenAIMessage[],
+    callbacks: StreamCallbacks,
+    signal: AbortSignal | undefined,
+    tools: ToolDefinition[] | undefined,
+    maxTokens: number | undefined,
+  ): Promise<void> {
+    const converted = this.anthropicMessages(messages);
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens || 16384,
+        stream: true,
+        ...(converted.system && { system: converted.system }),
+        messages: converted.messages,
+        ...(tools?.length && {
+          tools: tools.map((tool) => ({
+            name: tool.function.name,
+            description: tool.function.description,
+            input_schema: tool.function.parameters,
+          })),
+        }),
+      }),
+      ...(signal ? { signal } : {}),
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Anthropic API error (${response.status}): ${await response.text()}`,
+      );
+    }
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("Failed to get Anthropic response stream");
+    const decoder = new TextDecoder();
+    const toolCalls = new Map<number, ToolCall>();
+    let buffer = "";
+    let fullContent = "";
+    while (true) {
+      const { done, value } = await (reader as any).read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const events = buffer.split("\n\n");
+      buffer = events.pop() || "";
+      for (const event of events) {
+        const line = event
+          .split("\n")
+          .find((candidate) => candidate.startsWith("data: "));
+        if (!line) continue;
+        const data = JSON.parse(line.slice(6)) as any;
+        if (data.type === "content_block_start") {
+          const block = data.content_block;
+          if (block?.type === "tool_use") {
+            toolCalls.set(data.index, {
+              id: block.id,
+              type: "function",
+              function: { name: block.name, arguments: "" },
+            });
+          }
+        } else if (data.type === "content_block_delta") {
+          if (data.delta?.type === "text_delta") {
+            fullContent += data.delta.text || "";
+            callbacks.onToken?.(data.delta.text || "");
+          } else if (data.delta?.type === "input_json_delta") {
+            const toolCall = toolCalls.get(data.index);
+            if (toolCall) {
+              toolCall.function.arguments += data.delta.partial_json || "";
+            }
+          }
+        }
+      }
+    }
+    if (toolCalls.size > 0) {
+      callbacks.onToolCalls?.(Array.from(toolCalls.values()));
+    }
+    callbacks.onComplete?.(fullContent);
   }
 
   async testConnection(): Promise<boolean> {
@@ -656,34 +841,11 @@ export class OpenAIService {
     text: string,
     options?: { voice?: string },
   ): Promise<ArrayBuffer> {
-    const activeConfig = getActiveModelConfig();
-    if (!activeConfig?.ttsConfig) {
-      throw new Error(
-        "TTS not configured. Add a TTS model in your model configuration.",
-      );
-    }
-
-    const ttsModel = activeConfig.ttsConfig.model;
-    const apiKey = activeConfig.apiKey;
-
-    // Resolve TTS endpoint:
-    // 1. Use explicit ttsConfig.endpoint if set
-    // 2. For NanoGPT, use /api/tts (not the standard /audio/speech path)
-    // 3. Otherwise fall back to apiURL + default path (/audio/speech)
-    let endpoint: string;
-    if (activeConfig.ttsConfig.endpoint) {
-      endpoint = activeConfig.ttsConfig.endpoint;
-    } else if (activeConfig.apiURL.includes("nano-gpt.com")) {
-      endpoint = "https://nano-gpt.com/api/tts";
-    } else {
-      const base = activeConfig.apiURL.endsWith("/")
-        ? activeConfig.apiURL
-        : `${activeConfig.apiURL}/`;
-      endpoint = `${base}${MODEL_TYPE_ENDPOINTS.tts.path.replace(/^\//, "")}`;
-    }
-
-    // Voice: use options override, then configured voice, then omit (API default)
-    const voice = options?.voice || activeConfig.ttsConfig.voice;
+    const resolved = requireResolvedModel("tts");
+    const ttsModel = resolved.model.modelId;
+    const apiKey = resolved.provider.apiKey;
+    const endpoint = resolved.endpoint;
+    const voice = options?.voice || resolved.model.voice;
 
     Zotero.debug(
       `[seerai] TTS request: model=${ttsModel}, voice=${voice || "(default)"}, endpoint=${endpoint}, text length=${text.length}`,
@@ -697,8 +859,7 @@ export class OpenAIService {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "x-api-key": apiKey,
+        ...resolved.headers,
       },
       // Send both "input" (OpenAI standard) and "text" (NanoGPT) fields.
       // Each provider uses the field it recognizes.
@@ -850,34 +1011,11 @@ export class OpenAIService {
       filename?: string;
     },
   ): Promise<{ transcription: string; metadata?: Record<string, unknown> }> {
-    const activeConfig = getActiveModelConfig();
-    if (!activeConfig?.sttConfig) {
-      throw new Error(
-        "STT not configured. Add a Speech-to-Text model in your model configuration.",
-      );
-    }
-
-    const sttModel = activeConfig.sttConfig.model;
-    const apiKey = activeConfig.apiKey;
-
-    // Resolve STT endpoint:
-    // 1. Use explicit sttConfig.endpoint if set
-    // 2. For NanoGPT, use OpenAI-compatible /api/v1/audio/transcriptions
-    // 3. Otherwise fall back to apiURL + default path (/audio/transcriptions)
-    let endpoint: string;
-    let isNanoGpt = false;
-    if (activeConfig.sttConfig.endpoint) {
-      endpoint = activeConfig.sttConfig.endpoint;
-    } else if (activeConfig.apiURL.includes("nano-gpt.com")) {
-      // Use the OpenAI-compatible endpoint (field name="file", same as OpenAI)
-      endpoint = "https://nano-gpt.com/api/v1/audio/transcriptions";
-      isNanoGpt = true;
-    } else {
-      const base = activeConfig.apiURL.endsWith("/")
-        ? activeConfig.apiURL
-        : `${activeConfig.apiURL}/`;
-      endpoint = `${base}${MODEL_TYPE_ENDPOINTS.stt.path.replace(/^\//, "")}`;
-    }
+    const resolved = requireResolvedModel("stt");
+    const sttModel = resolved.model.modelId;
+    const apiKey = resolved.provider.apiKey;
+    const endpoint = resolved.endpoint;
+    const isNanoGpt = resolved.adapterId === "nanogpt";
 
     Zotero.debug(
       `[seerai] STT request: model=${sttModel}, endpoint=${endpoint}, type=${typeof audio === "string" ? "url" : "file"}`,
@@ -891,8 +1029,7 @@ export class OpenAIService {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-          "x-api-key": apiKey,
+          ...resolved.headers,
         },
         body: JSON.stringify({
           model: sttModel,
@@ -1005,8 +1142,7 @@ export class OpenAIService {
         httpResponse = await (Zotero.HTTP as any).request("POST", endpoint, {
           headers: {
             "Content-Type": `multipart/form-data; boundary=${boundary}`,
-            Authorization: `Bearer ${apiKey}`,
-            "x-api-key": apiKey,
+            ...resolved.headers,
           },
           body: body,
           responseType: "json",
@@ -1224,31 +1360,9 @@ export class OpenAIService {
     cost?: number;
     remainingBalance?: number;
   }> {
-    const activeConfig = getActiveModelConfig();
-    if (!activeConfig?.imageConfig) {
-      throw new Error(
-        "Image generation not configured. Add an Image model in your model configuration.",
-      );
-    }
-
-    const imageModel = options?.model || activeConfig.imageConfig.model;
-    const apiKey = activeConfig.apiKey;
-
-    // Resolve endpoint:
-    // 1. Explicit imageConfig.endpoint if set
-    // 2. NanoGPT → /v1/images/generations
-    // 3. apiURL + default path
-    let endpoint: string;
-    if (activeConfig.imageConfig.endpoint) {
-      endpoint = activeConfig.imageConfig.endpoint;
-    } else if (activeConfig.apiURL.includes("nano-gpt.com")) {
-      endpoint = "https://nano-gpt.com/v1/images/generations";
-    } else {
-      const base = activeConfig.apiURL.endsWith("/")
-        ? activeConfig.apiURL
-        : `${activeConfig.apiURL}/`;
-      endpoint = `${base}${MODEL_TYPE_ENDPOINTS.image.path.replace(/^\//, "")}`;
-    }
+    const resolved = requireResolvedModel("image");
+    const imageModel = options?.model || resolved.model.modelId;
+    const endpoint = resolved.endpoint;
 
     // Build request body
     const body: Record<string, unknown> = {
@@ -1274,8 +1388,7 @@ export class OpenAIService {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "x-api-key": apiKey,
+        ...resolved.headers,
       },
       body: JSON.stringify(body),
     });
@@ -1358,31 +1471,10 @@ export class OpenAIService {
     status: string;
     metadata?: Record<string, unknown>;
   }> {
-    const activeConfig = getActiveModelConfig();
-    if (!activeConfig?.videoConfig) {
-      throw new Error(
-        "Video generation not configured. Add a Video model in your model configuration.",
-      );
-    }
-
-    const videoModel = options?.model || activeConfig.videoConfig.model;
-    const apiKey = activeConfig.apiKey;
-
-    // Resolve endpoint:
-    // 1. Explicit videoConfig.endpoint if set
-    // 2. NanoGPT → /api/generate-video
-    // 3. apiURL + default path
-    let endpoint: string;
-    if (activeConfig.videoConfig.endpoint) {
-      endpoint = activeConfig.videoConfig.endpoint;
-    } else if (activeConfig.apiURL.includes("nano-gpt.com")) {
-      endpoint = "https://nano-gpt.com/api/generate-video";
-    } else {
-      const base = activeConfig.apiURL.endsWith("/")
-        ? activeConfig.apiURL
-        : `${activeConfig.apiURL}/`;
-      endpoint = `${base}${MODEL_TYPE_ENDPOINTS.video.path.replace(/^\//, "")}`;
-    }
+    const resolved = requireResolvedModel("video");
+    const videoModel = options?.model || resolved.model.modelId;
+    const apiKey = resolved.provider.apiKey;
+    const endpoint = resolved.endpoint;
 
     // Build request body
     const body: Record<string, unknown> = {
@@ -1410,8 +1502,7 @@ export class OpenAIService {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-        "x-api-key": apiKey,
+        ...resolved.headers,
       },
       body: JSON.stringify(body),
     });
@@ -1442,7 +1533,7 @@ export class OpenAIService {
       runId,
       videoModel,
       apiKey,
-      activeConfig.apiURL,
+      resolved.provider.apiURL,
       onStatusUpdate,
     );
   }

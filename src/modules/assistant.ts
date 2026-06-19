@@ -31,6 +31,7 @@ import {
   setActiveModelId,
   hasModelConfigs,
 } from "./chat/modelConfig";
+import { resolveModel } from "./chat/modelResolver";
 import {
   parseMarkdown,
   processStreamingContent,
@@ -98,6 +99,7 @@ import {
   isDropdownOpen,
 } from "./chat/ui/placeholderDropdown";
 import { showChatSettings } from "./chat/ui/chatSettings";
+import { createChatModelPicker } from "./chat/ui/providerManager";
 import {
   isTtsConfigured,
   autoPlayTtsResponse,
@@ -26972,6 +26974,13 @@ ${tableRows}  </tbody>
     });
     applyToolbarButtonStyle(settingsBtn as HTMLElement);
     setToolbarIcon(settingsBtn as HTMLElement, "settings", "Chat settings");
+    const modelPicker = createChatModelPicker(doc, stateManager, () => {
+      void getMessageStore().saveConversationState(
+        stateManager.getStates(),
+        stateManager.getOptions(),
+        ChatContextManager.getInstance().getSerializableItems(),
+      );
+    });
 
     const settingsContainer = doc.createElement("div");
     settingsContainer.style.cssText = "position:relative;display:flex;";
@@ -29038,6 +29047,7 @@ Rules:
 
     // Add media gen button to toolbar (frees up textInputRow)
     // webSearchBtn will be appended to toolbarLeft after it's created below
+    toolbarLeft.appendChild(modelPicker);
     toolbarLeft.appendChild(mediaGenContainer);
 
     toolbarRow.appendChild(toolbarLeft);
@@ -30313,7 +30323,8 @@ Rules:
 
       // Determine if RAG should activate based on context size
       const estimatedTokens = ChatStateManager.countTokens(context);
-      const activeModelForRAG = getActiveModelConfig();
+      const activeModelForRAG =
+        resolveModel("chat", options.modelRef)?.model || getActiveModelConfig();
 
       // Read per-model RAG settings, falling back to global pref defaults
       const modelRagAlwaysUse = activeModelForRAG?.ragAlwaysUse ?? false;
@@ -30745,8 +30756,13 @@ ${isAgentic ? workspaceTree : ""}`;
       let fullResponse = "";
 
       // Get active model config for API call
-      const activeModel = getActiveModelConfig();
       const chatOptions = getChatStateManager().getOptions();
+      const resolvedChatModel = resolveModel("chat", chatOptions.modelRef);
+      const activeModel = resolvedChatModel
+        ? {
+            contextLength: resolvedChatModel.model.contextLength,
+          }
+        : getActiveModelConfig();
 
       // ── Pre-flight: Token budget check ──────────────────────────────────────
       // Estimate total input tokens and verify they fit within the model's
@@ -30805,11 +30821,14 @@ ${isAgentic ? workspaceTree : ""}`;
           `= ${totalInputTokens + reservedOutputTokens} / ${modelContextLength} (${(((totalInputTokens + reservedOutputTokens) / modelContextLength) * 100).toFixed(1)}%)`,
       );
 
-      const configOverride = activeModel
+      const configOverride = resolvedChatModel
         ? {
-            apiURL: activeModel.apiURL,
-            apiKey: activeModel.apiKey,
-            model: activeModel.model,
+            apiURL: resolvedChatModel.provider.apiURL,
+            apiKey: resolvedChatModel.provider.apiKey,
+            model: resolvedChatModel.model.modelId,
+            modelRef: resolvedChatModel.ref,
+            endpoint: resolvedChatModel.endpoint,
+            headers: resolvedChatModel.headers,
             temperature: chatOptions.temperature,
             max_tokens: chatOptions.maxTokens,
           }
@@ -30846,6 +30865,7 @@ ${isAgentic ? workspaceTree : ""}`;
             permissionHandler: Assistant.handleInlinePermissionRequest,
             temperature: chatOptions.temperature,
             maxTokens: chatOptions.maxTokens,
+            modelRef: chatOptions.modelRef,
             libraryScope:
               scopePref === "selection"
                 ? this.resolveSelectionScope()
@@ -31007,7 +31027,9 @@ ${isAgentic ? workspaceTree : ""}`;
             passthroughContext: retryPassthrough,
           } = await Assistant.expandContextItemsForRAG(retryContextItems);
           // Fresh model config lookup (activeModelForRAG is scoped to the try block above)
-          const cActiveModel = getActiveModelConfig();
+          const cActiveModel =
+            resolveModel("chat", getChatStateManager().getOptions().modelRef)
+              ?.model || getActiveModelConfig();
           const ragResult = await retrieveContext(
             text,
             retryExpanded,
@@ -31062,12 +31084,18 @@ Note: Context was automatically reduced using semantic search due to size constr
                 })),
             ];
 
-            const retryActiveModel = getActiveModelConfig();
+            const retryActiveModel = resolveModel(
+              "chat",
+              retryChatOptions.modelRef,
+            );
             const retryConfigOverride = retryActiveModel
               ? {
-                  apiURL: retryActiveModel.apiURL,
-                  apiKey: retryActiveModel.apiKey,
-                  model: retryActiveModel.model,
+                  apiURL: retryActiveModel.provider.apiURL,
+                  apiKey: retryActiveModel.provider.apiKey,
+                  model: retryActiveModel.model.modelId,
+                  modelRef: retryActiveModel.ref,
+                  endpoint: retryActiveModel.endpoint,
+                  headers: retryActiveModel.headers,
                   temperature: retryChatOptions.temperature,
                   max_tokens: retryChatOptions.maxTokens,
                 }
@@ -31102,6 +31130,7 @@ Note: Context was automatically reduced using semantic search due to size constr
                   permissionHandler: Assistant.handleInlinePermissionRequest,
                   temperature: retryChatOptions.temperature,
                   maxTokens: retryChatOptions.maxTokens,
+                  modelRef: retryChatOptions.modelRef,
                   continuation,
                 },
                 observer,
@@ -31220,7 +31249,9 @@ Note: Context was automatically reduced using semantic search due to size constr
           } = await Assistant.expandContextItemsForRAG(retryContextItems);
 
           // Compute a tighter token budget
-          const dActiveModel = getActiveModelConfig();
+          const dActiveModel =
+            resolveModel("chat", getChatStateManager().getOptions().modelRef)
+              ?.model || getActiveModelConfig();
           const dModelCtx = dActiveModel?.contextLength || 128000;
           const dSystemOverhead = 2000;
           const dHistoryTokens = conversationMessages
@@ -31348,12 +31379,18 @@ Note: Context was automatically reduced using stricter semantic search due to si
               return;
             }
 
-            const retryActiveModel = getActiveModelConfig();
+            const retryActiveModel = resolveModel(
+              "chat",
+              retryChatOptions.modelRef,
+            );
             const retryConfigOverride = retryActiveModel
               ? {
-                  apiURL: retryActiveModel.apiURL,
-                  apiKey: retryActiveModel.apiKey,
-                  model: retryActiveModel.model,
+                  apiURL: retryActiveModel.provider.apiURL,
+                  apiKey: retryActiveModel.provider.apiKey,
+                  model: retryActiveModel.model.modelId,
+                  modelRef: retryActiveModel.ref,
+                  endpoint: retryActiveModel.endpoint,
+                  headers: retryActiveModel.headers,
                   temperature: retryChatOptions.temperature,
                   max_tokens: retryChatOptions.maxTokens,
                 }
@@ -31389,6 +31426,7 @@ Note: Context was automatically reduced using stricter semantic search due to si
                   permissionHandler: Assistant.handleInlinePermissionRequest,
                   temperature: retryChatOptions.temperature,
                   maxTokens: retryChatOptions.maxTokens,
+                  modelRef: retryChatOptions.modelRef,
                   continuation,
                 },
                 observer,

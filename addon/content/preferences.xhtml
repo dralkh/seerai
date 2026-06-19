@@ -9,43 +9,39 @@
     <html:h2 data-l10n-id="pref-title"></html:h2>
   </label>
 
-  <!-- AI Model Configurations -->
-  <label>
-    <html:h3 data-l10n-id="pref-models-title">AI Model Configurations</html:h3>
-  </label>
-  <hbox align="center" style="margin-bottom: 8px">
-    <button
-      id="zotero-prefpane-__addonRef__-models-add"
-      data-l10n-id="pref-models-add"
-    />
-    <button
-      id="zotero-prefpane-__addonRef__-models-edit"
-      data-l10n-id="pref-models-edit"
-      disabled="true"
-    />
-    <button
-      id="zotero-prefpane-__addonRef__-models-delete"
-      data-l10n-id="pref-models-delete"
-      disabled="true"
-    />
-    <button
-      id="zotero-prefpane-__addonRef__-models-default"
-      data-l10n-id="pref-models-set-default"
-      disabled="true"
-    />
-  </hbox>
-  <html:div id="__addonRef__-models-list">
-    <html:p
-      id="__addonRef__-models-empty"
-      data-l10n-id="pref-models-empty"
-    ></html:p>
-  </html:div>
+  <html:nav class="seerai-settings-nav" aria-label="SeerAI settings sections">
+    <html:button type="button" data-settings-target="seerai-ai-settings"
+      >AI Models</html:button
+    >
+    <html:button type="button" data-settings-target="seerai-research-settings"
+      >Research Services</html:button
+    >
+    <html:button type="button" data-settings-target="seerai-retrieval-settings"
+      >Retrieval &amp; Generation</html:button
+    >
+    <html:button type="button" data-settings-target="seerai-cloud-settings"
+      >Cloud Storage</html:button
+    >
+    <html:button
+      type="button"
+      data-settings-target="seerai-integration-settings"
+      >Integrations &amp; Data</html:button
+    >
+  </html:nav>
+
+  <html:section id="seerai-ai-settings" class="seerai-settings-card">
+    <html:div id="__addonRef__-provider-settings"></html:div>
+    <html:div class="seerai-settings-divider"></html:div>
+    <html:div id="__addonRef__-model-defaults"></html:div>
+  </html:section>
 
   <html:hr style="margin: 16px 0" />
 
   <!-- MCP Server Integration -->
   <label>
-    <html:h3>MCP Server Integration (Claude Desktop)</html:h3>
+    <html:h3 id="seerai-integration-settings"
+      >MCP Server Integration (Claude Desktop)</html:h3
+    >
   </label>
   <vbox
     style="
@@ -121,7 +117,9 @@
 
   <!-- OCR Configurations -->
   <label>
-    <html:h3 data-l10n-id="pref-datalab-title">OCR Configurations</html:h3>
+    <html:h3 id="seerai-research-settings" data-l10n-id="pref-datalab-title"
+      >OCR Configurations</html:h3
+    >
   </label>
 
   <!-- Service Selection with Menulist Dropdown -->
@@ -563,7 +561,7 @@
 <html:hr style="margin: 16px 0" />
 
 <label>
-  <html:h3>AI &amp; Table Settings</html:h3>
+  <html:h3 id="seerai-retrieval-settings">AI &amp; Table Settings</html:h3>
 </label>
 <vbox
   style="
@@ -835,7 +833,7 @@
 <html:hr style="margin: 16px 0" />
 
 <label>
-  <html:h3>Cloud Storage Integration</html:h3>
+  <html:h3 id="seerai-cloud-settings">Cloud Storage Integration</html:h3>
 </label>
 <vbox
   style="
