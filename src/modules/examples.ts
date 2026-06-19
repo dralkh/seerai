@@ -75,6 +75,9 @@ export class BasicExampleFactory {
         "chrome://" + addon.data.config.addonRef + "/content/preferences.xhtml",
       label: getString("prefs-title"),
       image: `chrome://${addon.data.config.addonRef}/content/icons/icon-20.png`,
+      stylesheets: [
+        `chrome://${addon.data.config.addonRef}/content/preferences.css`,
+      ],
     });
   }
 }

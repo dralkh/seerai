@@ -71,18 +71,6 @@ function initProviderSettingsUI() {
       renderModelDefaults(doc, defaultsContainer);
     }
   });
-  for (const button of doc.querySelectorAll<HTMLElement>(
-    "[data-settings-target]",
-  )) {
-    button.addEventListener("click", () => {
-      const target = button.dataset.settingsTarget;
-      if (!target) return;
-      doc.getElementById(target)?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-    });
-  }
 }
 
 async function updatePrefsUI() {

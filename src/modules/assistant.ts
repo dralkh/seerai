@@ -23,6 +23,7 @@ import {
   selectionConfigs,
   AIModelConfig,
   ConversationMetadata,
+  GeneratedMedia,
   RAGStats,
 } from "./chat/types";
 import {
@@ -99,6 +100,11 @@ import {
   isDropdownOpen,
 } from "./chat/ui/placeholderDropdown";
 import { showChatSettings } from "./chat/ui/chatSettings";
+import {
+  createOcrSettingsSection,
+  showSemanticScholarQuickSettings,
+  showWebSearchQuickSettings,
+} from "./chat/ui/serviceSettings";
 import { createChatModelPicker } from "./chat/ui/providerManager";
 import {
   isTtsConfigured,
@@ -6898,6 +6904,43 @@ export class Assistant {
       ],
     });
 
+    const searchSettingsBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
+      properties: { title: "Semantic Scholar API settings" },
+      styles: {
+        width: "36px",
+        height: "36px",
+        padding: "0",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "6px",
+        backgroundColor: "var(--background-secondary)",
+        color: "var(--text-primary)",
+        cursor: "pointer",
+        flexShrink: "0",
+      },
+      listeners: [
+        {
+          type: "click",
+          listener: (event: MouseEvent) => {
+            event.stopPropagation();
+            showSemanticScholarQuickSettings(
+              doc,
+              searchSettingsBtn as HTMLElement,
+            );
+          },
+        },
+      ],
+    }) as HTMLButtonElement;
+    setButtonIcon(
+      searchSettingsBtn,
+      "settings",
+      "Semantic Scholar API settings",
+      15,
+    );
+
     // Enter key triggers search
     searchInput.addEventListener("keypress", async (e: Event) => {
       const ke = e as KeyboardEvent;
@@ -7601,6 +7644,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     searchInputContainer.appendChild(pastSearchesBtn);
     searchInputContainer.appendChild(syntaxHelp);
     searchInputContainer.appendChild(searchBtn);
+    searchInputContainer.appendChild(searchSettingsBtn);
     searchInputContainer.appendChild(suggestionsDropdown);
     searchInputContainer.appendChild(aiRefineDropdown);
     searchInputContainer.appendChild(pastSearchesDropdown);
@@ -23609,6 +23653,7 @@ You MUST call the generate_tags function.`;
 
     columnsSection.appendChild(columnsList);
     popover.appendChild(columnsSection);
+    popover.appendChild(createOcrSettingsSection(doc));
 
     // Positioning (left of anchor button)
     const rect = anchorEl.getBoundingClientRect();
@@ -26283,6 +26328,14 @@ ${tableRows}  </tbody>
   ): HTMLElement {
     // Track pasted images (persisted across re-renders)
     const pastedImages = currentPastedImages;
+    let mediaGenType: "image" | "video" = "image";
+    let selectedMediaGeneration: "image" | "video" | null = null;
+    const runSelectedMediaGeneration = () => {
+      if (!selectedMediaGeneration) return false;
+      if (selectedMediaGeneration === "image") imageGenBtn.click();
+      else videoGenBtn.click();
+      return true;
+    };
 
     // Container for everything
     const inputContainer = ztoolkit.UI.createElement(doc, "div", {
@@ -26648,6 +26701,7 @@ ${tableRows}  </tbody>
                 !this.isStreaming
               ) {
                 e.preventDefault(); // Prevent newline
+                if (runSelectedMediaGeneration()) return;
                 this.handleSendWithStreamingAndImages(
                   input as unknown as HTMLInputElement,
                   messagesArea,
@@ -26777,6 +26831,7 @@ ${tableRows}  </tbody>
               (sendBtn as HTMLElement).title = "Send message";
               return;
             }
+            if (runSelectedMediaGeneration()) return;
             this.handleSendWithStreamingAndImages(
               input as unknown as HTMLInputElement,
               messagesArea,
@@ -28213,12 +28268,33 @@ Rules:
         const imgContainer = doc.createElement("div");
         imgContainer.style.cssText =
           "display: flex; flex-direction: column; gap: 8px;";
+        const generatedMedia: GeneratedMedia[] = [];
 
         for (const img of result.images) {
           const imgSrc =
             img.url ||
             (img.b64_json ? `data:image/png;base64,${img.b64_json}` : "");
           if (!imgSrc) continue;
+          let storedMedia: { path: string; mimeType: string } | undefined;
+          try {
+            storedMedia = await getMessageStore().persistGeneratedMedia(
+              imgSrc,
+              `${genMsgId}_${generatedMedia.length}`,
+              "image/png",
+            );
+          } catch (error) {
+            Zotero.debug(
+              `[seerai] Generated image persistence failed: ${error}`,
+            );
+          }
+          const media: GeneratedMedia = {
+            type: "image",
+            ...(storedMedia ? storedMedia : { url: imgSrc }),
+            originalPrompt: promptText,
+            prompt: imagePrompt,
+            cost: result.cost,
+          };
+          generatedMedia.push(media);
 
           const wrapper = doc.createElement("div");
           wrapper.style.cssText =
@@ -28231,10 +28307,9 @@ Rules:
             max-width: 100%; max-height: 400px; border-radius: 8px;
             border: 1px solid var(--border-primary); cursor: pointer;
           `;
-          imgEl.title = "Click to open in new tab";
+          imgEl.title = "Click to enlarge and view the generation prompt";
           imgEl.addEventListener("click", () => {
-            const win = Zotero.getMainWindow();
-            if (win) (win as any).open(imgSrc, "_blank");
+            this.showGeneratedMediaViewer(doc, media, imgSrc);
           });
 
           // Download button
@@ -28311,6 +28386,7 @@ Rules:
           role: "assistant",
           content: `Generated image for: "${promptText.substring(0, 100)}"`,
           timestamp: new Date(),
+          generatedMedia,
         };
         conversationMessages.push(assistantMsg);
         try {
@@ -28730,8 +28806,29 @@ Rules:
         const vidContainer = doc.createElement("div");
         vidContainer.style.cssText =
           "display: flex; flex-direction: column; gap: 8px;";
+        let generatedVideo: GeneratedMedia | undefined;
 
         if (result.videoUrl) {
+          let storedMedia: { path: string; mimeType: string } | undefined;
+          try {
+            storedMedia = await getMessageStore().persistGeneratedMedia(
+              result.videoUrl,
+              genMsgId,
+              "video/mp4",
+            );
+          } catch (error) {
+            Zotero.debug(
+              `[seerai] Generated video persistence failed: ${error}`,
+            );
+          }
+          generatedVideo = {
+            type: "video",
+            ...(storedMedia ? storedMedia : { url: result.videoUrl }),
+            originalPrompt: promptText,
+            prompt: videoPrompt,
+            thumbnailUrl: result.thumbnailUrl,
+            cost: result.cost,
+          };
           // Inline video player
           const videoEl = doc.createElement("video");
           videoEl.src = result.videoUrl;
@@ -28740,8 +28837,18 @@ Rules:
           videoEl.preload = "metadata";
           videoEl.style.cssText = `
             max-width: 100%; max-height: 400px; border-radius: 8px;
-            border: 1px solid var(--border-primary);
+            border: 1px solid var(--border-primary); cursor: zoom-in;
           `;
+          videoEl.title = "Click to enlarge and view the generation prompt";
+          videoEl.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.showGeneratedMediaViewer(
+              doc,
+              generatedVideo!,
+              result.videoUrl!,
+            );
+          });
 
           // Thumbnail poster
           if (result.thumbnailUrl) {
@@ -28844,6 +28951,7 @@ Rules:
           role: "assistant",
           content: `Generated video for: "${promptText.substring(0, 100)}"${result.videoUrl ? ` — ${result.videoUrl}` : ""}`,
           timestamp: new Date(),
+          generatedMedia: generatedVideo ? [generatedVideo] : undefined,
         };
         conversationMessages.push(assistantMsg);
         try {
@@ -28875,8 +28983,6 @@ Rules:
     // ── Combined Media Generation Button (Image + Video in one split button) ──
     // This replaces the separate imageGen/videoGen buttons in textInputRow,
     // freeing the text input row to just textarea + send button.
-    let mediaGenMode: "image" | "video" = "image";
-
     const mediaGenContainer = ztoolkit.UI.createElement(doc, "div", {
       styles: {
         display: "flex",
@@ -28909,13 +29015,23 @@ Rules:
     setToolbarIcon(mediaGenMainBtn, "image", "Generate image from prompt");
     mediaSettingsAnchor = mediaGenMainBtn;
 
-    // Main button click → trigger the appropriate gen handler
+    const updateMediaToggle = () => {
+      const active = selectedMediaGeneration === mediaGenType;
+      applyToolbarButtonStyle(mediaGenMainBtn, active);
+      mediaGenMainBtn.style.borderRadius = "7px 0 0 7px";
+      setToolbarIcon(
+        mediaGenMainBtn,
+        mediaGenType === "image" ? "image" : "video",
+        active
+          ? `${mediaGenType === "image" ? "Image" : "Video"} generation on — next message will generate media`
+          : `Enable ${mediaGenType} generation`,
+      );
+    };
+
     mediaGenMainBtn.addEventListener("click", () => {
-      if (mediaGenMode === "image") {
-        imageGenBtn.click();
-      } else {
-        videoGenBtn.click();
-      }
+      selectedMediaGeneration =
+        selectedMediaGeneration === mediaGenType ? null : mediaGenType;
+      updateMediaToggle();
     });
 
     const mediaGenDropBtn = ztoolkit.UI.createElement(doc, "button", {
@@ -28992,23 +29108,17 @@ Rules:
 
       // Mode selection rows
       dropdown.appendChild(
-        makeRow("Image generation", "image", mediaGenMode === "image", () => {
-          mediaGenMode = "image";
-          setToolbarIcon(
-            mediaGenMainBtn,
-            "image",
-            "Generate image from prompt",
-          );
+        makeRow("Image generation", "image", mediaGenType === "image", () => {
+          mediaGenType = "image";
+          selectedMediaGeneration = "image";
+          updateMediaToggle();
         }),
       );
       dropdown.appendChild(
-        makeRow("Video generation", "video", mediaGenMode === "video", () => {
-          mediaGenMode = "video";
-          setToolbarIcon(
-            mediaGenMainBtn,
-            "video",
-            "Generate video from prompt",
-          );
+        makeRow("Video generation", "video", mediaGenType === "video", () => {
+          mediaGenType = "video";
+          selectedMediaGeneration = "video";
+          updateMediaToggle();
         }),
       );
 
@@ -29044,10 +29154,13 @@ Rules:
 
     mediaGenContainer.appendChild(mediaGenMainBtn);
     mediaGenContainer.appendChild(mediaGenDropBtn);
+    updateMediaToggle();
 
     // Add media gen button to toolbar (frees up textInputRow)
     // webSearchBtn will be appended to toolbarLeft after it's created below
     toolbarLeft.appendChild(modelPicker);
+    toolbarLeft.appendChild(settingsContainer);
+    toolbarLeft.appendChild(attachmentContainer);
     toolbarLeft.appendChild(mediaGenContainer);
 
     toolbarRow.appendChild(toolbarLeft);
@@ -29085,7 +29198,6 @@ Rules:
     toolbarRight.appendChild(newChatBtn);
     toolbarRight.appendChild(saveBtn);
     toolbarRight.appendChild(clearBtn);
-    toolbarRight.appendChild(settingsContainer);
     toolbarRow.appendChild(toolbarRight);
 
     // Web Search toggle button
@@ -29099,7 +29211,7 @@ Rules:
         height: "32px",
         fontSize: "13px",
         border: "1px solid var(--border-primary)",
-        borderRadius: "6px",
+        borderRadius: "6px 0 0 6px",
         backgroundColor: stateManager.getOptions().webSearchEnabled
           ? "var(--accent-color, #007AFF)"
           : "var(--background-secondary)",
@@ -29120,27 +29232,24 @@ Rules:
             const current = stateManager.getOptions().webSearchEnabled;
             const newState = !current;
             stateManager.setOptions({ webSearchEnabled: newState });
-
-            // Update button visual state
-            const btn = webSearchBtn as HTMLElement;
-            if (newState) {
-              btn.style.backgroundColor = "var(--accent-color, #007AFF)";
-              btn.style.color = "#fff";
-              btn.style.borderColor = "var(--accent-color, #007AFF)";
-              btn.title = "Web search ON - click to disable";
-            } else {
-              btn.style.backgroundColor = "var(--background-secondary)";
-              btn.style.color = "var(--text-secondary)";
-              btn.style.borderColor = "var(--border-primary)";
-              btn.title =
-                "Toggle web search (enriches AI context with web results)";
-            }
-
+            updateWebSearchVisual(newState);
             Zotero.debug(`[seerai] Web search toggled: ${newState}`);
           },
         },
       ],
     }) as HTMLButtonElement;
+    const updateWebSearchVisual = (enabled: boolean) => {
+      webSearchBtn.style.backgroundColor = enabled
+        ? "var(--accent-color, #007AFF)"
+        : "var(--background-secondary)";
+      webSearchBtn.style.color = enabled ? "#fff" : "var(--text-secondary)";
+      webSearchBtn.style.borderColor = enabled
+        ? "var(--accent-color, #007AFF)"
+        : "var(--border-primary)";
+      webSearchBtn.title = enabled
+        ? "Web search ON - click to disable"
+        : "Toggle web search (enriches AI context with web results)";
+    };
     applyToolbarButtonStyle(
       webSearchBtn,
       stateManager.getOptions().webSearchEnabled,
@@ -29154,8 +29263,55 @@ Rules:
       (webSearchBtn as HTMLElement).title = "Web search ON - click to disable";
     }
 
+    const webSearchSettingsBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
+      properties: { title: "Web search provider settings" },
+      styles: {
+        width: "18px",
+        height: "32px",
+        padding: "0",
+        border: "1px solid var(--border-primary)",
+        borderLeft: "none",
+        borderRadius: "0 6px 6px 0",
+        backgroundColor: "var(--background-secondary)",
+        color: "var(--text-secondary)",
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: "0",
+      },
+      listeners: [
+        {
+          type: "click",
+          listener: (event: MouseEvent) => {
+            event.stopPropagation();
+            showWebSearchQuickSettings(
+              doc,
+              webSearchSettingsBtn as HTMLElement,
+              stateManager.getOptions().webSearchEnabled,
+              (enabled) => {
+                stateManager.setOptions({ webSearchEnabled: enabled });
+                updateWebSearchVisual(enabled);
+              },
+            );
+          },
+        },
+      ],
+    }) as HTMLButtonElement;
+    setButtonIcon(
+      webSearchSettingsBtn,
+      "chevron-down",
+      "Web search provider settings",
+      11,
+    );
+
     // Add web search toggle to toolbar row (beside media gen button)
-    toolbarLeft.appendChild(webSearchBtn);
+    const webSearchContainer = doc.createElement("div");
+    webSearchContainer.style.cssText =
+      "position:relative;display:inline-flex;align-items:center;";
+    webSearchContainer.append(webSearchBtn, webSearchSettingsBtn);
+    toolbarLeft.appendChild(webSearchContainer);
 
     // Text input row: just textarea + send button (image/video/search moved to toolbar)
     textInputRow.appendChild(input);
@@ -31714,6 +31870,179 @@ Note: Context was automatically reduced using stricter semantic search due to si
    * @param msgId The message ID for reference
    * @param isLastUserMsg Whether this is the last user message (for edit button)
    */
+  private static showGeneratedMediaViewer(
+    doc: Document,
+    media: GeneratedMedia,
+    source: string,
+  ): void {
+    doc.getElementById("seerai-generated-media-viewer")?.remove();
+    const overlay = doc.createElement("div");
+    overlay.id = "seerai-generated-media-viewer";
+    overlay.style.cssText = `
+      position: fixed; inset: 0; z-index: 300000; padding: 24px;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.78); box-sizing: border-box;
+    `;
+    const panel = doc.createElement("div");
+    panel.style.cssText = `
+      width: min(1100px, 96vw); max-height: 94vh; overflow: auto;
+      display: flex; flex-direction: column; gap: 12px; padding: 16px;
+      border-radius: 10px; border: 1px solid var(--border-primary);
+      background: var(--background-primary); color: var(--text-primary);
+      box-shadow: 0 16px 48px rgba(0,0,0,0.4); box-sizing: border-box;
+    `;
+    const header = doc.createElement("div");
+    header.style.cssText =
+      "display:flex;align-items:center;justify-content:space-between;gap:12px;";
+    const title = doc.createElement("strong");
+    title.textContent =
+      media.type === "image" ? "Generated Image" : "Generated Video";
+    const close = doc.createElement("button");
+    close.type = "button";
+    close.style.cssText = `
+      width: 30px; height: 30px; display: inline-flex; align-items: center;
+      justify-content: center; border: 1px solid var(--border-primary);
+      border-radius: 6px; background: var(--background-secondary);
+      color: var(--text-primary); cursor: pointer;
+    `;
+    setButtonIcon(close, "close", "Close", 15);
+    header.append(title, close);
+    panel.appendChild(header);
+    if (media.type === "image") {
+      const image = doc.createElement("img");
+      image.src = source;
+      image.alt = media.description || media.originalPrompt;
+      image.style.cssText =
+        "max-width:100%;max-height:70vh;object-fit:contain;align-self:center;border-radius:8px;";
+      panel.appendChild(image);
+    } else {
+      const video = doc.createElement("video");
+      video.src = source;
+      video.controls = true;
+      video.autoplay = false;
+      if (media.thumbnailUrl) video.poster = media.thumbnailUrl;
+      video.style.cssText =
+        "width:100%;max-height:70vh;object-fit:contain;border-radius:8px;background:#000;";
+      panel.appendChild(video);
+    }
+    const addPrompt = (label: string, value: string) => {
+      const block = doc.createElement("div");
+      block.style.cssText = `
+        padding: 10px; border: 1px solid var(--border-primary);
+        border-radius: 6px; background: var(--background-secondary);
+      `;
+      const heading = doc.createElement("div");
+      heading.textContent = label;
+      heading.style.cssText =
+        "font-size:10px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;";
+      const valueElement = doc.createElement("div");
+      valueElement.textContent = value;
+      valueElement.style.cssText =
+        "font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;";
+      block.append(heading, valueElement);
+      panel.appendChild(block);
+    };
+    addPrompt("Original request", media.originalPrompt);
+    if (media.prompt !== media.originalPrompt) {
+      addPrompt("Generation prompt", media.prompt);
+    }
+    if (media.description) addPrompt("Description", media.description);
+    overlay.appendChild(panel);
+    const dismiss = () => overlay.remove();
+    close.addEventListener("click", dismiss);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) dismiss();
+    });
+    (doc.body || doc.documentElement)?.appendChild(overlay);
+  }
+
+  private static renderGeneratedMedia(
+    messageElement: HTMLElement,
+    mediaItems: GeneratedMedia[],
+  ): void {
+    const content = messageElement.querySelector(
+      "[data-content]",
+    ) as HTMLElement;
+    if (!content || mediaItems.length === 0) return;
+    const doc = messageElement.ownerDocument!;
+    const conversationId = getMessageStore().getConversationId();
+    const gallery = doc.createElement("div");
+    gallery.className = "seerai-generated-media-gallery";
+    gallery.style.cssText =
+      "display:flex;flex-direction:column;gap:8px;margin-top:8px;max-width:100%;";
+    content.appendChild(gallery);
+    for (const media of mediaItems) {
+      const card = doc.createElement("div");
+      card.style.cssText =
+        "display:flex;flex-direction:column;gap:6px;max-width:100%;";
+      const status = doc.createElement("div");
+      status.textContent = "Loading generated media…";
+      status.style.cssText =
+        "font-size:11px;color:var(--text-secondary);font-style:italic;";
+      card.appendChild(status);
+      gallery.appendChild(card);
+      const mount = (source: string) => {
+        status.remove();
+        let preview: HTMLImageElement | HTMLVideoElement;
+        if (media.type === "image") {
+          const image = doc.createElement("img");
+          image.src = source;
+          image.alt = media.description || media.originalPrompt;
+          image.style.cssText = `
+            max-width:100%;max-height:400px;object-fit:contain;border-radius:8px;
+            border:1px solid var(--border-primary);cursor:zoom-in;
+          `;
+          preview = image;
+        } else {
+          const video = doc.createElement("video");
+          video.src = source;
+          video.controls = true;
+          video.preload = "metadata";
+          if (media.thumbnailUrl) video.poster = media.thumbnailUrl;
+          video.style.cssText = `
+            width:100%;max-height:400px;border-radius:8px;
+            border:1px solid var(--border-primary);cursor:zoom-in;background:#000;
+          `;
+          preview = video;
+        }
+        preview.title = "Click to enlarge and view the generation prompt";
+        preview.addEventListener("click", (event: MouseEvent) => {
+          event.preventDefault();
+          event.stopPropagation();
+          this.showGeneratedMediaViewer(doc, media, source);
+        });
+        card.appendChild(preview);
+        const prompt = doc.createElement("div");
+        prompt.textContent = media.originalPrompt;
+        prompt.style.cssText = `
+          font-size:10px;color:var(--text-secondary);overflow:hidden;
+          text-overflow:ellipsis;white-space:nowrap;
+        `;
+        card.appendChild(prompt);
+      };
+      if (media.path) {
+        getMessageStore()
+          .readGeneratedMedia(media.path, conversationId)
+          .then((bytes) => {
+            const blob = new Blob([bytes], {
+              type:
+                media.mimeType ||
+                (media.type === "image" ? "image/png" : "video/mp4"),
+            });
+            mount(URL.createObjectURL(blob));
+          })
+          .catch((error) => {
+            if (media.url) mount(media.url);
+            else status.textContent = `Generated media unavailable: ${error}`;
+          });
+      } else if (media.url) {
+        mount(media.url);
+      } else {
+        status.textContent = "Generated media file is unavailable.";
+      }
+    }
+  }
+
   private static appendMessage(
     container: HTMLElement,
     sender: string,
@@ -32445,7 +32774,7 @@ Note: Context was automatically reduced using stricter semantic search due to si
       );
     }
 
-    this.appendMessage(
+    const messageElement = this.appendMessage(
       container,
       sender,
       msg.content,
@@ -32455,6 +32784,9 @@ Note: Context was automatically reduced using stricter semantic search due to si
       msg.iterationCount,
       msg.ragStats,
     );
+    if (msg.generatedMedia?.length) {
+      this.renderGeneratedMedia(messageElement, msg.generatedMedia);
+    }
   }
 
   /**

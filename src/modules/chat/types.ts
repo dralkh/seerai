@@ -149,6 +149,19 @@ export interface ChatMessage {
   isToolDetailsOpen?: boolean; // Persisted tool process expand/collapse state
   iterationCount?: number; // Total reasoning turns/iterations
   ragStats?: RAGStats;
+  generatedMedia?: GeneratedMedia[];
+}
+
+export interface GeneratedMedia {
+  type: "image" | "video";
+  path?: string;
+  url?: string;
+  mimeType?: string;
+  originalPrompt: string;
+  prompt: string;
+  description?: string;
+  thumbnailUrl?: string;
+  cost?: number;
 }
 
 // Model type categories for different API capabilities

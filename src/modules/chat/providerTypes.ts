@@ -40,6 +40,7 @@ export interface DiscoveredModel {
 
 export type ProviderAdapterId =
   | "openai-compatible"
+  | "openrouter"
   | "anthropic"
   | "azure-openai"
   | "nanogpt";
@@ -49,6 +50,16 @@ export type ProviderModelPolicy = "automatic" | "scoped";
 export interface ModelRef {
   providerId: string;
   localModelId: string;
+}
+
+export interface ModelRoutingPreset {
+  id: string;
+  name: string;
+  models: Partial<
+    Record<"chat" | "embedding" | "image" | "video" | "tts" | "stt", ModelRef>
+  >;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ProviderModel {
@@ -114,6 +125,7 @@ export interface ProviderRegistryState {
   defaults: Partial<
     Record<"chat" | "embedding" | "image" | "video" | "tts" | "stt", ModelRef>
   >;
+  routingPresets?: ModelRoutingPreset[];
   migratedAt?: string;
 }
 

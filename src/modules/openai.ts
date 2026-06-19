@@ -845,7 +845,13 @@ export class OpenAIService {
     const ttsModel = resolved.model.modelId;
     const apiKey = resolved.provider.apiKey;
     const endpoint = resolved.endpoint;
-    const voice = options?.voice || resolved.model.voice;
+    const voice =
+      options?.voice ||
+      resolved.model.voice ||
+      (ttsModel.toLowerCase().includes("kokoro") ? "af_alloy" : "alloy");
+    const isOpenRouter =
+      resolved.adapterId === "openrouter" ||
+      resolved.provider.presetId === "openrouter";
 
     Zotero.debug(
       `[seerai] TTS request: model=${ttsModel}, voice=${voice || "(default)"}, endpoint=${endpoint}, text length=${text.length}`,
@@ -867,7 +873,8 @@ export class OpenAIService {
         model: ttsModel,
         input: text,
         text: text,
-        ...(voice && { voice }),
+        voice,
+        ...(isOpenRouter && { response_format: "mp3" }),
       }),
     });
 
@@ -919,6 +926,16 @@ export class OpenAIService {
         );
       }
       return audioResponse.arrayBuffer();
+    }
+
+    if (
+      !contentType.startsWith("audio/") &&
+      !contentType.includes("application/octet-stream")
+    ) {
+      const responseText = await response.text();
+      throw new Error(
+        `TTS returned unsupported content type ${contentType || "(missing)"}: ${responseText.substring(0, 200)}`,
+      );
     }
 
     // Binary audio response (OpenAI standard, NanoGPT OpenAI models)
@@ -1363,15 +1380,25 @@ export class OpenAIService {
     const resolved = requireResolvedModel("image");
     const imageModel = options?.model || resolved.model.modelId;
     const endpoint = resolved.endpoint;
+    const isOpenRouter =
+      resolved.adapterId === "openrouter" ||
+      resolved.provider.presetId === "openrouter";
 
     // Build request body
-    const body: Record<string, unknown> = {
-      model: imageModel,
-      prompt,
-      n: options?.n ?? 1,
-      size: options?.size ?? "1024x1024",
-      response_format: options?.response_format ?? "url",
-    };
+    const body: Record<string, unknown> = isOpenRouter
+      ? {
+          model: imageModel,
+          messages: [{ role: "user", content: prompt }],
+          modalities: ["image", "text"],
+          stream: false,
+        }
+      : {
+          model: imageModel,
+          prompt,
+          n: options?.n ?? 1,
+          size: options?.size ?? "1024x1024",
+          response_format: options?.response_format ?? "url",
+        };
     if (options?.imageDataUrl) body.imageDataUrl = options.imageDataUrl;
     if (options?.strength !== undefined) body.strength = options.strength;
     if (options?.guidance_scale !== undefined)
@@ -1415,6 +1442,19 @@ export class OpenAIService {
           b64_json: item.b64_json as string | undefined,
           url: item.url as string | undefined,
         });
+      }
+    }
+    if (isOpenRouter && Array.isArray(data.choices)) {
+      const choice = data.choices[0] as Record<string, unknown> | undefined;
+      const message = choice?.message as Record<string, unknown> | undefined;
+      if (Array.isArray(message?.images)) {
+        for (const item of message.images as Record<string, unknown>[]) {
+          const imageUrl = item.image_url as
+            | Record<string, unknown>
+            | undefined;
+          const url = imageUrl?.url;
+          if (typeof url === "string") images.push({ url });
+        }
       }
     }
 
@@ -1475,13 +1515,20 @@ export class OpenAIService {
     const videoModel = options?.model || resolved.model.modelId;
     const apiKey = resolved.provider.apiKey;
     const endpoint = resolved.endpoint;
+    const isOpenRouter =
+      resolved.adapterId === "openrouter" ||
+      resolved.provider.presetId === "openrouter";
 
     // Build request body
     const body: Record<string, unknown> = {
       model: videoModel,
       prompt,
     };
-    if (options?.duration) body.duration = options.duration;
+    if (options?.duration) {
+      body.duration = isOpenRouter
+        ? Number.parseInt(options.duration, 10)
+        : options.duration;
+    }
     if (options?.aspect_ratio) body.aspect_ratio = options.aspect_ratio;
     if (options?.resolution) body.resolution = options.resolution;
     if (options?.negative_prompt)
@@ -1529,12 +1576,93 @@ export class OpenAIService {
     );
 
     // Poll for completion
+    if (isOpenRouter) {
+      const pollingUrl = data.polling_url as string | undefined;
+      return this._pollOpenRouterVideoResult(
+        runId,
+        pollingUrl,
+        resolved.provider.apiURL,
+        resolved.headers,
+        onStatusUpdate,
+      );
+    }
+
     return this._pollVideoResult(
       runId,
       videoModel,
       apiKey,
       resolved.provider.apiURL,
       onStatusUpdate,
+    );
+  }
+
+  private async _pollOpenRouterVideoResult(
+    runId: string,
+    pollingUrl: string | undefined,
+    apiURL: string,
+    headers: Record<string, string>,
+    onStatusUpdate?: (
+      status: string,
+      attempt: number,
+      maxAttempts: number,
+    ) => void,
+    maxAttempts = 120,
+    intervalMs = 3000,
+  ): Promise<{
+    videoUrl?: string;
+    thumbnailUrl?: string;
+    runId: string;
+    cost?: number;
+    remainingBalance?: number;
+    status: string;
+    metadata?: Record<string, unknown>;
+  }> {
+    const baseUrl = apiURL.replace(/\/+$/, "");
+    const statusUrl = pollingUrl
+      ? new URL(pollingUrl, `${baseUrl}/`).toString()
+      : `${baseUrl}/videos/${encodeURIComponent(runId)}`;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      const response = await fetch(statusUrl, { headers });
+      if (!response.ok) {
+        Zotero.debug(
+          `[seerai] OpenRouter video poll error: ${response.status} (attempt ${attempt + 1}/${maxAttempts})`,
+        );
+        continue;
+      }
+
+      const data = (await response.json()) as unknown as Record<
+        string,
+        unknown
+      >;
+      const status = String(data.status || "pending").toLowerCase();
+      onStatusUpdate?.(status, attempt + 1, maxAttempts);
+
+      if (status === "completed") {
+        const urls = data.unsigned_urls;
+        const usage = data.usage as Record<string, unknown> | undefined;
+        return {
+          videoUrl:
+            (Array.isArray(urls) && typeof urls[0] === "string"
+              ? urls[0]
+              : undefined) ||
+            `${baseUrl}/videos/${encodeURIComponent(runId)}/content`,
+          runId,
+          cost: usage?.cost as number | undefined,
+          status,
+          metadata: data,
+        };
+      }
+      if (["failed", "error", "canceled", "cancelled"].includes(status)) {
+        throw new Error(
+          `Video generation failed: ${String(data.error || "unknown error")}`,
+        );
+      }
+    }
+
+    throw new Error(
+      `Video generation timed out after ${(maxAttempts * intervalMs) / 1000}s. runId=${runId}`,
     );
   }
 

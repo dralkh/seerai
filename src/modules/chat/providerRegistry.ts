@@ -5,6 +5,7 @@ import {
   inferCapabilities,
   type ModelCapability,
   type ModelRef,
+  type ModelRoutingPreset,
   type ProviderConfig,
   type ProviderModel,
   type ProviderRegistryState,
@@ -33,7 +34,7 @@ function generateId(): string {
 }
 
 function emptyState(): ProviderRegistryState {
-  return { version: 2, providers: [], defaults: {} };
+  return { version: 2, providers: [], defaults: {}, routingPresets: [] };
 }
 
 function normalizeProvider(provider: ProviderConfig): ProviderConfig {
@@ -253,6 +254,7 @@ export async function initProviderConfigs(): Promise<void> {
         loaded = {
           ...parsed,
           providers: parsed.providers.map(normalizeProvider),
+          routingPresets: parsed.routingPresets || [],
         };
       }
     } else {
@@ -286,6 +288,7 @@ export function replaceProviderRegistryState(
     version: 2,
     providers: value.providers.map(normalizeProvider),
     defaults: { ...value.defaults },
+    routingPresets: [...(value.routingPresets || [])],
     migratedAt: value.migratedAt || new Date().toISOString(),
   };
   changed();
@@ -350,6 +353,13 @@ export function deleteProviderConfig(id: string): boolean {
       delete registry.defaults[capability];
     }
   }
+  for (const preset of registry.routingPresets || []) {
+    for (const capability of Object.keys(preset.models) as ModelType[]) {
+      if (preset.models[capability]?.providerId === id) {
+        delete preset.models[capability];
+      }
+    }
+  }
   changed();
   return true;
 }
@@ -376,6 +386,121 @@ export function setDefaultModelRef(
   if (ref) defaults[capability] = ref;
   else delete defaults[capability];
   changed();
+}
+
+export function getModelRoutingPresets(): ModelRoutingPreset[] {
+  return getProviderRegistryState().routingPresets || [];
+}
+
+export function saveModelRoutingPreset(
+  name: string,
+  models: ModelRoutingPreset["models"] = {
+    ...getProviderRegistryState().defaults,
+  },
+): ModelRoutingPreset {
+  const registry = getProviderRegistryState();
+  const now = new Date().toISOString();
+  const existing = getModelRoutingPresets().find(
+    (preset) => preset.name.toLowerCase() === name.trim().toLowerCase(),
+  );
+  if (existing) {
+    existing.models = { ...models };
+    existing.updatedAt = now;
+    changed();
+    return existing;
+  }
+  const preset: ModelRoutingPreset = {
+    id: generateId(),
+    name: name.trim(),
+    models: { ...models },
+    createdAt: now,
+    updatedAt: now,
+  };
+  registry.routingPresets = [...getModelRoutingPresets(), preset];
+  changed();
+  return preset;
+}
+
+export function applyModelRoutingPreset(id: string): boolean {
+  const preset = getModelRoutingPresets().find((item) => item.id === id);
+  if (!preset) return false;
+  const defaults: ProviderRegistryState["defaults"] = {};
+  for (const capability of Object.keys(preset.models) as ModelType[]) {
+    const ref = preset.models[capability];
+    const provider = ref ? getProviderConfig(ref.providerId) : undefined;
+    const model = provider
+      ? getConfiguredProviderModels(provider).find(
+          (item) =>
+            item.id === ref?.localModelId &&
+            item.capabilities.includes(capability),
+        )
+      : undefined;
+    if (ref && provider?.enabled !== false && model) {
+      defaults[capability] = ref;
+    }
+  }
+  getProviderRegistryState().defaults = defaults;
+  changed();
+  return true;
+}
+
+export function updateModelRoutingPreset(
+  id: string,
+  models: ModelRoutingPreset["models"],
+): ModelRoutingPreset | undefined {
+  const preset = getModelRoutingPresets().find((item) => item.id === id);
+  if (!preset) return undefined;
+  preset.models = { ...models };
+  preset.updatedAt = new Date().toISOString();
+  changed();
+  return preset;
+}
+
+export function renameModelRoutingPreset(
+  id: string,
+  name: string,
+): ModelRoutingPreset | undefined {
+  const preset = renameModelRoutingPresetInState(
+    getProviderRegistryState(),
+    id,
+    name,
+  );
+  if (preset) changed();
+  return preset;
+}
+
+export function renameModelRoutingPresetInState(
+  registry: ProviderRegistryState,
+  id: string,
+  name: string,
+): ModelRoutingPreset | undefined {
+  const normalizedName = name.trim();
+  if (!normalizedName) return undefined;
+  const presets = registry.routingPresets || [];
+  if (
+    presets.some(
+      (item) =>
+        item.id !== id &&
+        item.name.toLowerCase() === normalizedName.toLowerCase(),
+    )
+  ) {
+    return undefined;
+  }
+  const preset = presets.find((item) => item.id === id);
+  if (!preset) return undefined;
+  preset.name = normalizedName;
+  preset.updatedAt = new Date().toISOString();
+  return preset;
+}
+
+export function deleteModelRoutingPreset(id: string): boolean {
+  const registry = getProviderRegistryState();
+  const presets = getModelRoutingPresets();
+  const next = presets.filter((preset) => preset.id !== id);
+  if (next.length === presets.length) return false;
+  registry.routingPresets = next;
+  changed();
+  return true;
 }
 
 export function getConfiguredProviderModels(
@@ -429,16 +554,42 @@ export function updateProviderModel(
   updates: Partial<Omit<ProviderModel, "id" | "createdAt">>,
 ): ProviderModel | undefined {
   const provider = getProviderConfig(providerId);
-  const index = provider?.configuredModels?.findIndex(
+  if (!provider) return undefined;
+  const updated = mergeProviderModelUpdate(provider, localModelId, updates);
+  if (!updated) return undefined;
+  changed();
+  return updated;
+}
+
+export function mergeProviderModelUpdate(
+  provider: ProviderConfig,
+  localModelId: string,
+  updates: Partial<Omit<ProviderModel, "id" | "createdAt">>,
+): ProviderModel | undefined {
+  const index = provider.configuredModels?.findIndex(
     (model) => model.id === localModelId,
   );
-  if (!provider || index === undefined || index < 0) return undefined;
+  if (index === undefined || index < 0) {
+    const discovered = getConfiguredProviderModels(provider).find(
+      (model) => model.id === localModelId,
+    );
+    if (!discovered) return undefined;
+    const configured = {
+      ...discovered,
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    };
+    provider.configuredModels = [
+      ...(provider.configuredModels || []),
+      configured,
+    ];
+    return configured;
+  }
   provider.configuredModels![index] = {
     ...provider.configuredModels![index],
     ...updates,
     updatedAt: new Date().toISOString(),
   };
-  changed();
   return provider.configuredModels![index];
 }
 
@@ -457,6 +608,14 @@ export function deleteProviderModel(
     const ref = registry.defaults[capability];
     if (ref?.providerId === providerId && ref.localModelId === localModelId) {
       delete registry.defaults[capability];
+    }
+  }
+  for (const preset of registry.routingPresets || []) {
+    for (const capability of Object.keys(preset.models) as ModelType[]) {
+      const ref = preset.models[capability];
+      if (ref?.providerId === providerId && ref.localModelId === localModelId) {
+        delete preset.models[capability];
+      }
     }
   }
   changed();

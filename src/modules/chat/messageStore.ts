@@ -95,6 +95,79 @@ export class FileMessageStore extends MessageStore {
     );
   }
 
+  public async persistGeneratedMedia(
+    source: string,
+    fileStem: string,
+    fallbackMimeType: string,
+  ): Promise<{ path: string; mimeType: string }> {
+    const mediaDir = PathUtils.join(
+      this.conversationsDir,
+      this.currentConversationId,
+      "media",
+    );
+    await this.ensureDirectory(mediaDir);
+    let bytes: Uint8Array;
+    let mimeType = fallbackMimeType;
+    if (source.startsWith("data:")) {
+      const match = source.match(/^data:([^;,]+)?(;base64)?,(.*)$/s);
+      if (!match) throw new Error("Invalid generated media data URL");
+      mimeType = match[1] || fallbackMimeType;
+      if (match[2]) {
+        const binary = atob(match[3]);
+        bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index++) {
+          bytes[index] = binary.charCodeAt(index);
+        }
+      } else {
+        bytes = new TextEncoder().encode(decodeURIComponent(match[3]));
+      }
+    } else {
+      const response = await fetch(source);
+      if (!response.ok) {
+        throw new Error(`Generated media download failed (${response.status})`);
+      }
+      mimeType =
+        response.headers.get("Content-Type")?.split(";")[0] || fallbackMimeType;
+      bytes = new Uint8Array(await response.arrayBuffer());
+    }
+    const extensions: Record<string, string> = {
+      "image/png": "png",
+      "image/jpeg": "jpg",
+      "image/webp": "webp",
+      "image/gif": "gif",
+      "video/mp4": "mp4",
+      "video/webm": "webm",
+      "video/quicktime": "mov",
+    };
+    const extension =
+      extensions[mimeType] ||
+      (fallbackMimeType.startsWith("video/") ? "mp4" : "png");
+    const safeStem = fileStem.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const relativePath = `media/${safeStem}.${extension}`;
+    await IOUtils.write(
+      PathUtils.join(
+        this.conversationsDir,
+        this.currentConversationId,
+        relativePath,
+      ),
+      bytes,
+    );
+    return { path: relativePath, mimeType };
+  }
+
+  public async readGeneratedMedia(
+    path: string,
+    conversationId = this.currentConversationId,
+  ): Promise<Uint8Array> {
+    const normalized = path.replace(/\\/g, "/");
+    if (!normalized.startsWith("media/") || normalized.includes("..")) {
+      throw new Error("Invalid generated media path");
+    }
+    return IOUtils.read(
+      PathUtils.join(this.conversationsDir, conversationId, normalized),
+    );
+  }
+
   public setConversationId(id: string): void {
     this.currentConversationId = id;
   }
@@ -673,6 +746,16 @@ export class FileMessageStore extends MessageStore {
         }
       } catch {
         // Workspace copy is best-effort
+      }
+
+      const oldMediaDir = PathUtils.join(this.conversationsDir, id, "media");
+      const newMediaDir = PathUtils.join(this.conversationsDir, newId, "media");
+      try {
+        if (await IOUtils.exists(oldMediaDir)) {
+          await this.copyDirRecursive(oldMediaDir, newMediaDir);
+        }
+      } catch {
+        Zotero.debug("[seerai] Generated media copy failed during clone");
       }
 
       return newId;

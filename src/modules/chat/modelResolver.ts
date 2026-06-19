@@ -31,6 +31,18 @@ function endpointFor(
 ): string {
   const override = model.endpointOverrides?.[capability];
   if (override) return override;
+  const isOpenRouter =
+    provider.adapterId === "openrouter" || provider.presetId === "openrouter";
+  if (isOpenRouter) {
+    const openRouterPaths: Partial<Record<ModelType, string>> = {
+      image: "/chat/completions",
+      video: "/videos",
+    };
+    const openRouterPath = openRouterPaths[capability];
+    if (openRouterPath) {
+      return `${provider.apiURL.replace(/\/+$/, "")}${openRouterPath}`;
+    }
+  }
   if (provider.adapterId === "nanogpt") {
     const nanoPaths: Partial<Record<ModelType, string>> = {
       tts: "/api/tts",
@@ -85,7 +97,19 @@ export function resolveModelFromState(
     return { provider, model, ref };
   };
   const selected =
-    resolveRef(override) || resolveRef(state.defaults[capability]);
+    resolveRef(override) ||
+    resolveRef(state.defaults[capability]) ||
+    state.providers
+      .filter((provider) => provider.enabled !== false)
+      .flatMap((provider) =>
+        getConfiguredProviderModels(provider)
+          .filter((model) => model.capabilities.includes(capability))
+          .map((model) => ({
+            provider,
+            model,
+            ref: { providerId: provider.id, localModelId: model.id },
+          })),
+      )[0];
   if (!selected) return undefined;
   const { provider, model, ref } = selected;
   const headers = buildAuthHeaders(provider);

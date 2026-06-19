@@ -7,6 +7,7 @@ import { getEmbeddingService } from "../rag/embeddingService";
 import { getRAGConfig } from "../rag/retrievalEngine";
 import { resolveModel } from "../modelResolver";
 import { createSvgIcon, setButtonIcon, type IconName } from "./icons";
+import { createOcrSettingsSection } from "./serviceSettings";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -32,6 +33,11 @@ export function showChatSettings(
 
   const rect = anchor.getBoundingClientRect();
   const win = doc.defaultView as Window;
+  const popoverWidth = 240;
+  const popoverLeft = Math.min(
+    Math.max(8, rect.left),
+    Math.max(8, win.innerWidth - popoverWidth - 8),
+  );
 
   const container = doc.createElement("div");
   container.id = "chat-settings-popover-portal";
@@ -39,8 +45,8 @@ export function showChatSettings(
     position: "fixed",
     // Position above the anchor (sidebar footer usually)
     bottom: `${win.innerHeight - rect.top + 8}px`,
-    left: `${rect.left}px`,
-    width: "240px",
+    left: `${popoverLeft}px`,
+    width: `${popoverWidth}px`,
     backgroundColor: "var(--background-primary, #fff)",
     border: "1px solid var(--border-primary, #d1d1d1)",
     borderRadius: "8px",
@@ -545,6 +551,7 @@ export function showChatSettings(
   }
 
   body.appendChild(configSection);
+  body.appendChild(createOcrSettingsSection(doc));
 
   const terminalSection = doc.createElement("div");
   terminalSection.style.borderTop = "1px solid var(--border-primary)";

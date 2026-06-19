@@ -475,3 +475,1226 @@ body.dark {
     grid-template-columns: 1fr;
   }
 }
+
+#seerai-ai-settings {
+  margin-block: 0 12px;
+}
+
+#seerai-ai-settings > description {
+  max-width: 720px;
+  margin-bottom: 8px;
+  color: var(--text-secondary, #6f6f75);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.seerai-provider-surface,
+.seerai-defaults-surface {
+  border-radius: 10px;
+}
+
+.seerai-settings-divider {
+  height: 10px;
+}
+
+.seerai-settings-section-header {
+  min-height: 54px;
+  padding: 10px 12px;
+}
+
+.seerai-settings-section-header h3 {
+  font-size: 12px;
+}
+
+.seerai-settings-section-header p {
+  max-width: 560px;
+  margin-top: 2px;
+  font-size: 10px;
+}
+
+.seerai-primary-button,
+.seerai-secondary-button,
+.seerai-danger-button,
+.seerai-icon-button {
+  min-height: 28px;
+  padding: 4px 8px;
+  border-radius: 7px;
+  font-size: 10px;
+}
+
+.seerai-provider-card {
+  min-height: 62px;
+  gap: 10px;
+  padding: 9px 12px;
+}
+
+.seerai-provider-icon {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+  border-radius: 8px;
+}
+
+.seerai-provider-meta {
+  gap: 7px;
+  padding-left: 41px;
+  margin-top: 4px;
+}
+
+.seerai-capability-badge {
+  padding: 1px 5px;
+}
+
+.seerai-settings-empty {
+  padding: 18px 16px;
+  font-size: 10px;
+}
+
+.seerai-default-bulk {
+  grid-template-columns: minmax(170px, 1fr) minmax(170px, 230px) auto;
+  padding: 8px 12px;
+}
+
+.seerai-default-bulk-copy span {
+  display: none;
+}
+
+.seerai-default-rows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.seerai-default-row {
+  grid-template-columns: 1fr;
+  gap: 7px;
+  min-height: 0;
+  padding: 9px 12px;
+  border-right: 1px solid var(--seerai-line);
+}
+
+.seerai-default-row:nth-child(2n) {
+  border-right: 0;
+}
+
+.seerai-default-row > div:first-child {
+  grid-template-columns: 27px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.seerai-default-icon {
+  width: 27px;
+  height: 27px;
+  border-radius: 7px;
+}
+
+.seerai-default-copy strong {
+  font-size: 10px;
+}
+
+.seerai-default-copy span {
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seerai-default-row select,
+.seerai-default-bulk select {
+  min-height: 30px;
+  font-size: 10px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-provider-dialog-header {
+  min-height: 56px;
+  padding: 10px 12px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-provider-dialog-header h2 {
+  font-size: 14px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-provider-dialog-header p {
+  font-size: 10px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-provider-dialog-body {
+  grid-template-columns: minmax(220px, 0.78fr) minmax(300px, 1.22fr);
+}
+
+.seerai-provider-dialog.is-inline .seerai-provider-section {
+  padding: 12px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-provider-dialog-footer {
+  min-height: 48px;
+  padding: 8px 12px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-field {
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-field input,
+.seerai-provider-dialog.is-inline .seerai-field select,
+.seerai-provider-dialog.is-inline .seerai-field textarea,
+.seerai-provider-dialog.is-inline .seerai-policy-row select,
+.seerai-provider-dialog.is-inline .seerai-add-model-row input {
+  min-height: 30px;
+  padding: 4px 6px;
+  font-size: 10px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-policy-row {
+  padding: 7px 8px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-capability-lanes {
+  gap: 4px;
+}
+
+.seerai-capability-lane {
+  padding: 0;
+  overflow: hidden;
+  background: var(--seerai-surface, var(--background-primary));
+}
+
+.seerai-capability-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  margin: 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.seerai-capability-header::-webkit-details-marker {
+  display: none;
+}
+
+.seerai-capability-header::after {
+  color: var(--text-secondary, #6f6f75);
+  content: "+";
+  font-size: 13px;
+}
+
+.seerai-capability-lane[open] > .seerai-capability-header::after {
+  content: "−";
+}
+
+.seerai-capability-header span {
+  margin-left: auto;
+  color: var(--text-secondary, #6f6f75);
+  font-size: 9px;
+  font-weight: 400;
+}
+
+.seerai-capability-lane > .seerai-model-chips,
+.seerai-capability-lane > .seerai-add-model-row {
+  margin-right: 8px;
+  margin-left: 8px;
+}
+
+.seerai-capability-lane > .seerai-add-model-row {
+  padding-bottom: 8px;
+}
+
+@media (max-width: 760px) {
+  .seerai-default-rows {
+    grid-template-columns: 1fr;
+  }
+
+  .seerai-default-row {
+    border-right: 0;
+  }
+
+  .seerai-provider-dialog.is-inline .seerai-provider-dialog-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+#seerai-ai-settings .seerai-provider-surface,
+#seerai-ai-settings .seerai-defaults-surface,
+#seerai-ai-settings .seerai-provider-inline-editor {
+  --seerai-accent: var(--text-primary, light-dark(#111111, #f4f4f4));
+  --seerai-accent-soft: var(
+    --background-secondary,
+    light-dark(#f1f1f1, #2c2c2c)
+  );
+  --seerai-line: var(--border-secondary, light-dark(#d8d8d8, #474747));
+}
+
+#seerai-ai-settings .seerai-primary-button {
+  border-color: var(--text-primary, light-dark(#111111, #f4f4f4));
+  background: var(--text-primary, light-dark(#111111, #f4f4f4));
+  color: var(--background-primary, light-dark(#ffffff, #181818));
+  box-shadow: none;
+}
+
+#seerai-ai-settings .seerai-provider-icon,
+#seerai-ai-settings .seerai-default-icon {
+  border-color: var(--seerai-line);
+  background: transparent;
+  color: var(--text-primary, light-dark(#111111, #f4f4f4));
+}
+
+#seerai-ai-settings .seerai-status-pill,
+#seerai-ai-settings .seerai-status-pill.is-disabled {
+  color: var(--text-secondary, #6f6f75);
+}
+
+#seerai-ai-settings .seerai-status-dot {
+  box-shadow: none;
+}
+
+#seerai-ai-settings .seerai-status-pill:not(.is-disabled) .seerai-status-dot {
+  background: #18864b;
+}
+
+#seerai-ai-settings .seerai-capability-badge,
+#seerai-ai-settings .seerai-model-chip {
+  border: 1px solid var(--seerai-line);
+  background: transparent;
+  color: var(--text-secondary, #6f6f75);
+}
+
+#seerai-ai-settings .seerai-settings-empty {
+  background: transparent;
+}
+
+.seerai-routing-presets {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto auto auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--seerai-line, var(--border-secondary));
+  background: var(--background-secondary);
+}
+
+.seerai-routing-presets select {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 28px;
+  border: 1px solid var(--seerai-line, var(--border-primary));
+  border-radius: 7px;
+  background: var(--background-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 10px;
+}
+
+.seerai-routing-preset-name {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px 7px;
+  border: 1px solid var(--seerai-line, var(--border-primary));
+  border-radius: 7px;
+  background: var(--background-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 10px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-provider-dialog-header p {
+  display: none;
+}
+
+.seerai-provider-dialog.is-inline .seerai-add-model-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.8fr) minmax(130px, 1.2fr) auto;
+}
+
+.seerai-defaults-surface .seerai-default-row {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.seerai-default-control {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.seerai-default-control select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.seerai-default-search {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid var(--seerai-line, var(--border-primary));
+  border-radius: 7px;
+  background: var(--background-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 10px;
+}
+
+.seerai-settings-model-picker {
+  position: fixed;
+  z-index: 200100;
+  max-height: 240px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border-primary, #ccc);
+  border-radius: 8px;
+  background: var(--background-primary, #fff);
+  color: var(--text-primary, #111);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.seerai-settings-model-choice {
+  padding: 7px 8px;
+  overflow: hidden;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seerai-settings-model-choice:hover,
+.seerai-settings-model-choice:focus-visible {
+  background: var(--background-secondary, #f3f3f3);
+  outline: none;
+}
+
+.seerai-configure-model {
+  min-height: 28px;
+  padding: 4px 7px;
+  border: 1px solid var(--seerai-line, var(--border-secondary));
+  border-radius: 7px;
+  background: var(--background-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+}
+
+.seerai-routing-presets {
+  gap: 10px;
+}
+
+.seerai-routing-presets > button {
+  margin: 0;
+}
+
+.seerai-model-access-help {
+  margin: -8px 0 10px;
+  color: var(--text-secondary, #6f6f75);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.seerai-preferences-root {
+  --seerai-accent: light-dark(#635bff, #9c96ff);
+  --seerai-accent-soft: light-dark(
+    rgba(99, 91, 255, 0.09),
+    rgba(156, 150, 255, 0.13)
+  );
+  --seerai-surface: var(--background-primary, light-dark(#ffffff, #202124));
+  --seerai-surface-raised: var(
+    --background-secondary,
+    light-dark(#f7f7f9, #292a2d)
+  );
+  --seerai-line: var(--border-secondary, light-dark(#e4e4e9, #3b3c40));
+  box-sizing: border-box;
+  max-width: 1040px;
+  padding: 4px 18px 48px;
+  color: var(--text-primary, light-dark(#18181b, #f4f4f5));
+}
+
+.seerai-preferences-root *,
+.seerai-preferences-root *::before,
+.seerai-preferences-root *::after {
+  box-sizing: border-box;
+}
+
+.seerai-settings-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 2px 20px;
+}
+
+.seerai-settings-hero-mark {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  place-items: center;
+  border-radius: 13px;
+  background: linear-gradient(145deg, #6d63ff, #4940d4);
+  color: #fff;
+  box-shadow: 0 8px 22px rgba(79, 70, 229, 0.22);
+  font-size: 18px;
+  font-weight: 720;
+  letter-spacing: -0.04em;
+}
+
+.seerai-settings-hero h2,
+.seerai-ai-section-intro h2 {
+  margin: 2px 0 0;
+  color: var(--text-primary, light-dark(#18181b, #f4f4f5));
+  font-size: 22px;
+  font-weight: 680;
+  letter-spacing: -0.025em;
+}
+
+.seerai-settings-hero p,
+.seerai-ai-section-intro p {
+  max-width: 650px;
+  margin: 4px 0 0;
+  color: var(--text-secondary, light-dark(#71717a, #a1a1aa));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.seerai-settings-eyebrow {
+  color: var(--seerai-accent);
+  font-size: 9px;
+  font-weight: 720;
+  letter-spacing: 0.14em;
+}
+
+.seerai-settings-nav {
+  top: 0;
+  gap: 2px;
+  padding: 4px;
+  margin: 0 0 22px;
+  border: 0;
+  border-bottom: 1px solid var(--seerai-line);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--seerai-surface) 94%, transparent);
+  backdrop-filter: blur(16px);
+}
+
+.seerai-settings-nav button {
+  position: relative;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 8px 8px 0 0;
+  font-size: 11px;
+  font-weight: 560;
+}
+
+.seerai-settings-nav button[aria-current="page"] {
+  background: var(--seerai-accent-soft);
+  color: var(--seerai-accent);
+}
+
+.seerai-settings-nav button[aria-current="page"]::after {
+  position: absolute;
+  right: 10px;
+  bottom: -5px;
+  left: 10px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--seerai-accent);
+  content: "";
+}
+
+.seerai-settings-card {
+  padding: 0;
+  margin-bottom: 28px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.seerai-ai-section-intro {
+  padding: 2px 2px 22px;
+}
+
+.seerai-ai-section-intro h2 {
+  font-size: 19px;
+}
+
+.seerai-provider-surface,
+.seerai-defaults-surface {
+  --seerai-accent: light-dark(#635bff, #9c96ff);
+  --seerai-accent-soft: light-dark(
+    rgba(99, 91, 255, 0.09),
+    rgba(156, 150, 255, 0.13)
+  );
+  --seerai-surface: var(--background-primary, light-dark(#ffffff, #202124));
+  --seerai-surface-raised: var(
+    --background-secondary,
+    light-dark(#f7f7f9, #292a2d)
+  );
+  --seerai-line: var(--border-secondary, light-dark(#e4e4e9, #3b3c40));
+  overflow: hidden;
+  border: 1px solid var(--seerai-line);
+  border-radius: 14px;
+  background: var(--seerai-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.025);
+}
+
+.seerai-settings-divider {
+  height: 18px;
+  margin: 0;
+  background: transparent;
+}
+
+.seerai-settings-section-header {
+  min-height: 72px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--seerai-line);
+}
+
+.seerai-settings-section-header h3 {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.seerai-settings-section-header p {
+  max-width: 600px;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.seerai-primary-button,
+.seerai-secondary-button,
+.seerai-danger-button,
+.seerai-icon-button {
+  min-height: 32px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 570;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    transform 140ms ease;
+}
+
+.seerai-primary-button {
+  border-color: var(--seerai-accent);
+  background: var(--seerai-accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.seerai-primary-button:hover {
+  filter: brightness(1.06);
+}
+
+.seerai-primary-button:active,
+.seerai-secondary-button:active {
+  transform: translateY(1px);
+}
+
+.seerai-provider-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+}
+
+.seerai-provider-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  min-height: 88px;
+  padding: 14px 18px;
+  border: 0;
+  border-bottom: 1px solid var(--seerai-line);
+  border-radius: 0;
+  background: transparent;
+  transition: background 130ms ease;
+}
+
+.seerai-provider-card:last-child {
+  border-bottom: 0;
+}
+
+.seerai-provider-card:hover {
+  background: var(--seerai-surface-raised);
+}
+
+.seerai-provider-card-main {
+  min-width: 0;
+}
+
+.seerai-provider-card-header {
+  justify-content: flex-start;
+}
+
+.seerai-provider-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--seerai-accent) 20%, transparent);
+  border-radius: 10px;
+  background: var(--seerai-accent-soft);
+  color: var(--seerai-accent);
+}
+
+.seerai-provider-identity {
+  gap: 11px;
+}
+
+.seerai-provider-identity strong {
+  font-size: 12px;
+  font-weight: 640;
+}
+
+.seerai-provider-identity span:not(.seerai-provider-icon) {
+  margin-top: 1px;
+  font-size: 10px;
+}
+
+.seerai-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  margin-left: 2px;
+  background: transparent;
+  color: light-dark(#18864b, #5fce8b);
+  font-size: 9px;
+}
+
+.seerai-status-pill.is-disabled {
+  color: var(--text-secondary, #777);
+}
+
+.seerai-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 13%, transparent);
+}
+
+.seerai-provider-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 45px;
+  margin-top: 7px;
+}
+
+.seerai-provider-model-count {
+  flex: 0 0 auto;
+  font-size: 10px;
+}
+
+.seerai-provider-capabilities {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.seerai-capability-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--seerai-surface-raised);
+  color: var(--text-secondary, #71717a);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.seerai-capability-empty {
+  color: var(--text-secondary, #71717a);
+  font-size: 10px;
+}
+
+.seerai-provider-card > .seerai-inline-actions {
+  opacity: 0.72;
+  transition: opacity 130ms ease;
+}
+
+.seerai-provider-card:hover > .seerai-inline-actions,
+.seerai-provider-card:focus-within > .seerai-inline-actions {
+  opacity: 1;
+}
+
+.seerai-provider-card .seerai-danger-button {
+  padding-right: 7px;
+  padding-left: 7px;
+  border-color: transparent;
+}
+
+.seerai-settings-empty {
+  padding: 42px 24px;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(
+    135deg,
+    transparent,
+    color-mix(in srgb, var(--seerai-accent) 5%, transparent)
+  );
+}
+
+.seerai-default-bulk {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(180px, 0.65fr) auto;
+  gap: 10px;
+  padding: 12px 18px;
+  margin: 0;
+  border-bottom: 1px solid var(--seerai-line);
+  border-radius: 0;
+  background: var(--seerai-surface-raised);
+}
+
+.seerai-default-bulk-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.seerai-default-bulk-copy strong {
+  font-size: 11px;
+}
+
+.seerai-default-bulk-copy span {
+  color: var(--text-secondary, #71717a);
+  font-size: 10px;
+}
+
+.seerai-default-bulk select {
+  width: 100%;
+  margin: 0;
+}
+
+.seerai-default-rows {
+  gap: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.seerai-default-row {
+  grid-template-columns: minmax(200px, 1fr) minmax(240px, 0.9fr);
+  min-height: 67px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--seerai-line);
+  background: transparent;
+}
+
+.seerai-default-row:last-child {
+  border-bottom: 0;
+}
+
+.seerai-default-row:hover {
+  background: var(--seerai-surface-raised);
+}
+
+.seerai-default-row > div:first-child {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+}
+
+.seerai-default-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--seerai-accent-soft);
+  color: var(--seerai-accent);
+}
+
+.seerai-default-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.seerai-default-copy strong {
+  font-size: 11px;
+}
+
+.seerai-default-copy span {
+  font-size: 10px;
+}
+
+.seerai-default-row select,
+.seerai-default-bulk select {
+  min-height: 34px;
+  border-color: var(--seerai-line);
+  border-radius: 8px;
+  background: var(--seerai-surface);
+  font-size: 11px;
+}
+
+.seerai-provider-overlay {
+  background: rgba(10, 10, 14, 0.58);
+  backdrop-filter: blur(5px);
+}
+
+.seerai-provider-dialog {
+  width: min(820px, calc(100vw - 40px));
+  border-color: var(--seerai-line, var(--border-primary));
+  border-radius: 17px;
+  box-shadow:
+    0 28px 80px rgba(0, 0, 0, 0.35),
+    0 2px 8px rgba(0, 0, 0, 0.14);
+}
+
+.seerai-provider-dialog-header {
+  min-height: 76px;
+  padding: 16px 20px;
+}
+
+.seerai-provider-dialog-header h2 {
+  font-size: 17px;
+  font-weight: 670;
+  letter-spacing: -0.02em;
+}
+
+.seerai-provider-dialog-body {
+  grid-template-columns: minmax(260px, 0.82fr) minmax(360px, 1.18fr);
+  gap: 0;
+  padding: 0;
+}
+
+.seerai-provider-section {
+  padding: 20px;
+}
+
+.seerai-provider-section + .seerai-provider-section {
+  border-left: 1px solid var(--seerai-line, var(--border-secondary));
+  background: var(--seerai-surface-raised, var(--background-secondary));
+}
+
+.seerai-provider-section h3 {
+  margin-bottom: 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.seerai-field {
+  margin-top: 13px;
+  font-size: 10px;
+  font-weight: 620;
+}
+
+.seerai-field input,
+.seerai-field select,
+.seerai-field textarea,
+.seerai-policy-row select,
+.seerai-add-model-row input {
+  min-height: 36px;
+  border-color: var(--seerai-line, var(--border-primary));
+  border-radius: 8px;
+  font-size: 11px;
+}
+
+.seerai-field input:focus,
+.seerai-field select:focus,
+.seerai-field textarea:focus,
+.seerai-add-model-row input:focus {
+  border-color: var(--seerai-accent, var(--accent-blue));
+  outline: 2px solid
+    color-mix(in srgb, var(--seerai-accent, #635bff) 18%, transparent);
+  outline-offset: 0;
+}
+
+.seerai-policy-row {
+  align-items: center;
+  padding: 11px 12px;
+  margin-top: 0;
+  border: 1px solid var(--seerai-line, var(--border-secondary));
+  background: var(--seerai-surface, var(--background-primary));
+}
+
+.seerai-capability-lanes {
+  gap: 6px;
+}
+
+.seerai-capability-lane {
+  padding: 10px;
+  border-color: var(--seerai-line, var(--border-secondary));
+  background: var(--seerai-surface, var(--background-primary));
+}
+
+.seerai-provider-dialog-footer {
+  min-height: 62px;
+  padding: 13px 20px;
+}
+
+.seerai-provider-inline-editor {
+  --seerai-accent: light-dark(#635bff, #9c96ff);
+  --seerai-accent-soft: light-dark(
+    rgba(99, 91, 255, 0.09),
+    rgba(156, 150, 255, 0.13)
+  );
+  --seerai-surface: var(--background-primary, light-dark(#ffffff, #202124));
+  --seerai-surface-raised: var(
+    --background-secondary,
+    light-dark(#f7f7f9, #292a2d)
+  );
+  --seerai-line: var(--border-secondary, light-dark(#e4e4e9, #3b3c40));
+  width: 100%;
+  background: var(--seerai-surface);
+}
+
+.seerai-provider-dialog.is-inline {
+  width: 100%;
+  max-height: none;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+@media (max-width: 720px) {
+  .seerai-preferences-root {
+    padding-right: 10px;
+    padding-left: 10px;
+  }
+
+  .seerai-settings-hero {
+    align-items: flex-start;
+  }
+
+  .seerai-settings-nav {
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+
+  .seerai-settings-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .seerai-settings-section-header {
+    align-items: flex-start;
+  }
+
+  .seerai-provider-card {
+    grid-template-columns: 1fr;
+  }
+
+  .seerai-provider-card > .seerai-inline-actions {
+    padding-left: 45px;
+    opacity: 1;
+  }
+
+  .seerai-default-bulk,
+  .seerai-default-row {
+    grid-template-columns: 1fr;
+  }
+
+  .seerai-provider-section + .seerai-provider-section {
+    border-top: 1px solid var(--seerai-line, var(--border-secondary));
+    border-left: 0;
+  }
+}
+
+#seerai-ai-settings {
+  margin-block: 0 12px;
+}
+
+#seerai-ai-settings > description {
+  max-width: 720px;
+  margin-bottom: 8px;
+  color: var(--text-secondary, #6f6f75);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.seerai-provider-surface,
+.seerai-defaults-surface {
+  border-radius: 10px;
+}
+
+.seerai-settings-divider {
+  height: 10px;
+}
+
+.seerai-provider-surface .seerai-settings-section-header,
+.seerai-defaults-surface .seerai-settings-section-header {
+  min-height: 54px;
+  padding: 10px 12px;
+}
+
+.seerai-provider-surface .seerai-settings-section-header h3,
+.seerai-defaults-surface .seerai-settings-section-header h3 {
+  font-size: 12px;
+}
+
+.seerai-provider-surface .seerai-settings-section-header p,
+.seerai-defaults-surface .seerai-settings-section-header p {
+  margin-top: 2px;
+  font-size: 10px;
+}
+
+.seerai-provider-surface .seerai-provider-card {
+  min-height: 62px;
+  gap: 10px;
+  padding: 9px 12px;
+}
+
+.seerai-provider-surface .seerai-provider-icon {
+  width: 30px;
+  height: 30px;
+  flex-basis: 30px;
+  border-radius: 8px;
+}
+
+.seerai-provider-surface .seerai-provider-meta {
+  gap: 7px;
+  padding-left: 41px;
+  margin-top: 4px;
+}
+
+.seerai-provider-surface .seerai-settings-empty {
+  padding: 18px 16px;
+  font-size: 10px;
+}
+
+.seerai-defaults-surface .seerai-default-bulk {
+  grid-template-columns: minmax(170px, 1fr) minmax(170px, 230px) auto;
+  padding: 8px 12px;
+}
+
+.seerai-defaults-surface .seerai-default-bulk-copy span {
+  display: none;
+}
+
+.seerai-defaults-surface .seerai-default-rows {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.seerai-defaults-surface .seerai-default-row {
+  grid-template-columns: 1fr;
+  gap: 7px;
+  min-height: 0;
+  padding: 9px 12px;
+  border-right: 1px solid var(--seerai-line);
+}
+
+.seerai-defaults-surface .seerai-default-row:nth-child(2n) {
+  border-right: 0;
+}
+
+.seerai-defaults-surface .seerai-default-row > div:first-child {
+  grid-template-columns: 27px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.seerai-defaults-surface .seerai-default-icon {
+  width: 27px;
+  height: 27px;
+  border-radius: 7px;
+}
+
+.seerai-defaults-surface .seerai-default-copy strong {
+  font-size: 10px;
+}
+
+.seerai-defaults-surface .seerai-default-copy span {
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seerai-defaults-surface .seerai-default-row select,
+.seerai-defaults-surface .seerai-default-bulk select {
+  min-height: 30px;
+  font-size: 10px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-provider-dialog-header {
+  min-height: 56px;
+  padding: 10px 12px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-provider-dialog-header h2 {
+  font-size: 14px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-provider-dialog-header p {
+  font-size: 10px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-provider-dialog-body {
+  grid-template-columns: minmax(220px, 0.78fr) minmax(300px, 1.22fr);
+}
+
+.seerai-provider-dialog.is-inline .seerai-provider-section {
+  padding: 12px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-provider-dialog-footer {
+  min-height: 48px;
+  padding: 8px 12px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-field {
+  gap: 3px;
+  margin-top: 8px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-field input,
+.seerai-provider-dialog.is-inline .seerai-field select,
+.seerai-provider-dialog.is-inline .seerai-field textarea,
+.seerai-provider-dialog.is-inline .seerai-policy-row select,
+.seerai-provider-dialog.is-inline .seerai-add-model-row input {
+  min-height: 30px;
+  padding: 4px 6px;
+  font-size: 10px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-policy-row {
+  padding: 7px 8px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-capability-lanes {
+  gap: 4px;
+}
+
+.seerai-provider-dialog.is-inline .seerai-capability-lane {
+  padding: 0;
+  overflow: hidden;
+}
+
+.seerai-provider-dialog.is-inline .seerai-capability-header {
+  padding: 7px 8px;
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .seerai-defaults-surface .seerai-default-rows {
+    grid-template-columns: 1fr;
+  }
+
+  .seerai-defaults-surface .seerai-default-row {
+    border-right: 0;
+  }
+
+  .seerai-provider-dialog.is-inline .seerai-provider-dialog-body {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,6 +1,10 @@
 import { assert } from "chai";
 import { resolveModelFromState } from "../src/modules/chat/modelResolver";
-import { migrateLegacyModels } from "../src/modules/chat/providerRegistry";
+import {
+  mergeProviderModelUpdate,
+  migrateLegacyModels,
+  renameModelRoutingPresetInState,
+} from "../src/modules/chat/providerRegistry";
 import type { AIModelConfig } from "../src/modules/chat/types";
 import type {
   ProviderConfig,
@@ -50,6 +54,39 @@ function provider(
 }
 
 describe("Provider model routing", function () {
+  it("renames routing presets while enforcing unique names", function () {
+    const state: ProviderRegistryState = {
+      version: 2,
+      providers: [],
+      defaults: {},
+      routingPresets: [
+        {
+          id: "research",
+          name: "Research",
+          models: {},
+          createdAt: now,
+          updatedAt: now,
+        },
+        {
+          id: "coding",
+          name: "Coding",
+          models: {},
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+    };
+    const renamed = renameModelRoutingPresetInState(
+      state,
+      "research",
+      "Evidence Review",
+    );
+    assert.equal(renamed?.name, "Evidence Review");
+    assert.isUndefined(
+      renameModelRoutingPresetInState(state, "research", "Coding"),
+    );
+  });
+
   it("migrates legacy capability models and active defaults without flattening settings", function () {
     const legacy: AIModelConfig = {
       id: "legacy",
@@ -159,6 +196,31 @@ describe("Provider model routing", function () {
     };
     const resolved = resolveModelFromState(state, "chat");
     assert.equal(resolved?.model.modelId, "discovered-chat");
+  });
+
+  it("persists RAG metadata for an automatically discovered model", function () {
+    const automatic = provider("auto", "Automatic", [], {
+      modelPolicy: "automatic",
+      models: [
+        {
+          id: "deepseek-v4-flash",
+          object: "model",
+          capabilities: ["chat"],
+        },
+      ],
+    });
+    const updated = mergeProviderModelUpdate(
+      automatic,
+      "discovered:deepseek-v4-flash",
+      { ragAlwaysUse: true },
+    );
+    assert.isTrue(updated?.ragAlwaysUse);
+    assert.equal(automatic.modelPolicy, "automatic");
+    assert.isTrue(
+      automatic.configuredModels?.find(
+        (item) => item.modelId === "deepseek-v4-flash",
+      )?.ragAlwaysUse,
+    );
   });
 
   it("does not resolve disabled providers or mismatched capabilities", function () {

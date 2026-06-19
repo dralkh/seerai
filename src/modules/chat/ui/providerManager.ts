@@ -2,12 +2,19 @@ import { discoverModels } from "../modelDiscovery";
 import { getAvailableModels } from "../modelResolver";
 import {
   addProviderConfig,
+  applyModelRoutingPreset,
+  deleteModelRoutingPreset,
   deleteProviderConfig,
   getDefaultModelRef,
   getProviderConfig,
   getProviderConfigs,
+  getProviderRegistryState,
+  getModelRoutingPresets,
   replaceDiscoveredModels,
+  renameModelRoutingPreset,
+  saveModelRoutingPreset,
   setDefaultModelRef,
+  updateModelRoutingPreset,
   updateProviderConfig,
 } from "../providerRegistry";
 import { getProviderPresets, getPresetById } from "../providerPresets";
@@ -15,12 +22,14 @@ import type {
   AuthMethod,
   DiscoveredModel,
   ModelCapability,
+  ModelRef,
   ProviderConfig,
   ProviderModel,
 } from "../providerTypes";
 import { MODEL_TYPE_ENDPOINTS, type ModelType } from "../types";
 import type { ChatStateManager } from "../stateManager";
 import { createSvgIcon } from "./icons";
+import type { IconName } from "./icons";
 
 const CAPABILITIES: ModelType[] = [
   "chat",
@@ -30,13 +39,14 @@ const CAPABILITIES: ModelType[] = [
   "tts",
   "stt",
 ];
+const HTML_NS = "http://www.w3.org/1999/xhtml";
 
 function element<K extends keyof HTMLElementTagNameMap>(
   doc: Document,
   tag: K,
   className?: string,
 ): HTMLElementTagNameMap[K] {
-  const value = doc.createElement(tag);
+  const value = doc.createElementNS(HTML_NS, tag) as HTMLElementTagNameMap[K];
   if (className) value.className = className;
   return value;
 }
@@ -59,6 +69,36 @@ function capabilityLabel(capability: ModelType): string {
     stt: "Transcription",
   };
   return labels[capability];
+}
+
+function capabilityIcon(capability: ModelType): IconName {
+  const icons: Record<ModelType, IconName> = {
+    chat: "message",
+    embedding: "database",
+    image: "image",
+    video: "video",
+    tts: "tts",
+    stt: "sparkles",
+  };
+  return icons[capability];
+}
+
+function compactLabel(value: string, maxLength = 40): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function matchingRoutingPreset(models: Partial<Record<ModelType, ModelRef>>) {
+  return getModelRoutingPresets().find((preset) =>
+    CAPABILITIES.every((capability) => {
+      const current = models[capability];
+      const saved = preset.models[capability];
+      return (
+        current?.providerId === saved?.providerId &&
+        current?.localModelId === saved?.localModelId
+      );
+    }),
+  );
 }
 
 function normalizedProvider(
@@ -90,9 +130,155 @@ function normalizedProvider(
   };
 }
 
+function createRoutingPresetBar(
+  doc: Document,
+  currentModels: () => Partial<Record<ModelType, ModelRef>>,
+  onApply: (models: Partial<Record<ModelType, ModelRef>>) => void,
+): HTMLElement {
+  const bar = element(doc, "div", "seerai-routing-presets");
+  const select = element(doc, "select");
+  const placeholder = element(doc, "option");
+  placeholder.value = "";
+  placeholder.textContent = "Routing preset";
+  select.appendChild(placeholder);
+  for (const preset of getModelRoutingPresets()) {
+    const option = element(doc, "option");
+    option.value = preset.id;
+    option.textContent = preset.name;
+    select.appendChild(option);
+  }
+  select.value = matchingRoutingPreset(currentModels())?.id || "";
+  const apply = element(doc, "button", "seerai-secondary-button");
+  apply.type = "button";
+  apply.textContent = "Save";
+  apply.disabled = !select.value;
+  const save = element(doc, "button", "seerai-secondary-button");
+  save.type = "button";
+  save.textContent = "Save new preset";
+  const rename = element(doc, "button", "seerai-icon-button");
+  rename.type = "button";
+  rename.title = "Rename preset";
+  rename.appendChild(createSvgIcon(doc, "edit", { size: 12 }));
+  const remove = element(doc, "button", "seerai-icon-button");
+  remove.type = "button";
+  remove.title = "Delete preset";
+  remove.appendChild(createSvgIcon(doc, "trash", { size: 12 }));
+  const applySelected = () => {
+    const preset = getModelRoutingPresets().find(
+      (item) => item.id === select.value,
+    );
+    if (!preset) return;
+    applyModelRoutingPreset(preset.id);
+    onApply(preset.models);
+  };
+  select.addEventListener("change", () => {
+    apply.disabled = !select.value;
+    applySelected();
+  });
+  apply.addEventListener("click", () => {
+    if (!select.value) return;
+    const preset = updateModelRoutingPreset(select.value, currentModels());
+    if (preset) onApply(preset.models);
+  });
+  save.addEventListener("click", () => {
+    const name = element(doc, "input", "seerai-routing-preset-name");
+    name.placeholder = "Preset name";
+    const confirm = element(doc, "button", "seerai-primary-button");
+    confirm.type = "button";
+    confirm.textContent = "Save";
+    const cancel = element(doc, "button", "seerai-secondary-button");
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    const restore = () =>
+      bar.replaceChildren(select, apply, save, rename, remove);
+    confirm.addEventListener("click", () => {
+      const value = name.value.trim();
+      if (!value) {
+        name.focus();
+        return;
+      }
+      const preset = saveModelRoutingPreset(value, currentModels());
+      const existingOption = Array.from(select.options).find(
+        (option) => (option as HTMLOptionElement).value === preset.id,
+      ) as HTMLOptionElement | undefined;
+      if (existingOption) {
+        existingOption.textContent = preset.name;
+      } else {
+        const option = element(doc, "option");
+        option.value = preset.id;
+        option.textContent = preset.name;
+        select.appendChild(option);
+      }
+      select.value = preset.id;
+      apply.disabled = false;
+      restore();
+      onApply(preset.models);
+    });
+    cancel.addEventListener("click", restore);
+    name.addEventListener("keydown", (event) => {
+      const keyEvent = event as KeyboardEvent;
+      if (keyEvent.key === "Enter") confirm.click();
+      if (keyEvent.key === "Escape") restore();
+    });
+    bar.replaceChildren(name, confirm, cancel);
+    name.focus();
+  });
+  rename.addEventListener("click", () => {
+    const preset = getModelRoutingPresets().find(
+      (item) => item.id === select.value,
+    );
+    if (!preset) return;
+    const name = element(doc, "input", "seerai-routing-preset-name");
+    name.value = preset.name;
+    name.placeholder = "Preset name";
+    const confirm = element(doc, "button", "seerai-primary-button");
+    confirm.type = "button";
+    confirm.textContent = "Rename";
+    const cancel = element(doc, "button", "seerai-secondary-button");
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    const restore = () =>
+      bar.replaceChildren(select, apply, save, rename, remove);
+    const commit = () => {
+      const updated = renameModelRoutingPreset(preset.id, name.value);
+      if (!updated) {
+        name.setCustomValidity("Enter a unique preset name.");
+        name.reportValidity();
+        return;
+      }
+      const option = Array.from(select.options).find(
+        (item) => (item as HTMLOptionElement).value === updated.id,
+      ) as HTMLOptionElement | undefined;
+      if (option) option.textContent = updated.name;
+      restore();
+    };
+    confirm.addEventListener("click", commit);
+    cancel.addEventListener("click", restore);
+    name.addEventListener("input", () => name.setCustomValidity(""));
+    name.addEventListener("keydown", (event) => {
+      const keyEvent = event as KeyboardEvent;
+      if (keyEvent.key === "Enter") commit();
+      if (keyEvent.key === "Escape") restore();
+    });
+    bar.replaceChildren(name, confirm, cancel);
+    name.focus();
+    name.select();
+  });
+  remove.addEventListener("click", () => {
+    if (!select.value || !deleteModelRoutingPreset(select.value)) return;
+    select.querySelector(`option[value="${select.value}"]`)?.remove();
+    select.value = "";
+    apply.disabled = true;
+  });
+  bar.append(select, apply, save, rename, remove);
+  return bar;
+}
+
 export interface ProviderManagerOptions {
   providerId?: string;
   onChange?: () => void;
+  inlineHost?: HTMLElement;
+  onCancel?: () => void;
 }
 
 export function showProviderManagerDialog(
@@ -103,11 +289,18 @@ export function showProviderManagerDialog(
   const existing = options.providerId
     ? getProviderConfig(options.providerId)
     : undefined;
-  const overlay = element(doc, "div", "seerai-provider-overlay");
+  const overlay = element(
+    doc,
+    "div",
+    options.inlineHost
+      ? "seerai-provider-inline-editor"
+      : "seerai-provider-overlay",
+  );
   overlay.id = "seerai-provider-dialog";
   const dialog = element(doc, "div", "seerai-provider-dialog");
+  if (options.inlineHost) dialog.classList.add("is-inline");
   dialog.setAttribute("role", "dialog");
-  dialog.setAttribute("aria-modal", "true");
+  dialog.setAttribute("aria-modal", options.inlineHost ? "false" : "true");
   dialog.setAttribute("aria-labelledby", "seerai-provider-dialog-title");
 
   const header = element(doc, "div", "seerai-provider-dialog-header");
@@ -129,7 +322,7 @@ export function showProviderManagerDialog(
   const body = element(doc, "div", "seerai-provider-dialog-body");
   const connection = element(doc, "section", "seerai-provider-section");
   const connectionTitle = element(doc, "h3");
-  connectionTitle.textContent = "1. Connection";
+  connectionTitle.textContent = "Connection";
   connection.appendChild(connectionTitle);
 
   const presetField = element(doc, "label", "seerai-field");
@@ -222,7 +415,7 @@ export function showProviderManagerDialog(
   const connectionActions = element(doc, "div", "seerai-inline-actions");
   const testButton = element(doc, "button", "seerai-secondary-button");
   testButton.type = "button";
-  testButton.textContent = "Test and discover models";
+  testButton.textContent = "Test connection";
   const connectionStatus = element(doc, "span", "seerai-connection-status");
   connectionActions.append(testButton, connectionStatus);
   connection.append(
@@ -235,45 +428,36 @@ export function showProviderManagerDialog(
 
   const modelsSection = element(doc, "section", "seerai-provider-section");
   const modelsTitle = element(doc, "h3");
-  modelsTitle.textContent = "2. Models";
-  const policyRow = element(doc, "div", "seerai-policy-row");
-  const policyText = element(doc, "div");
-  const policyName = element(doc, "strong");
-  policyName.textContent = "Available models";
-  const policyHelp = element(doc, "span");
-  policyHelp.textContent =
-    "Automatic uses all discovered models. Adding a model below switches to Selected only.";
-  policyText.append(policyName, policyHelp);
-  const policySelect = element(doc, "select");
-  for (const [value, label] of [
-    ["automatic", "All discovered"],
-    ["scoped", "Selected only"],
-  ]) {
-    const option = element(doc, "option");
-    option.value = value;
-    option.textContent = label;
-    policySelect.appendChild(option);
-  }
-  policySelect.value = existing?.modelPolicy || "automatic";
-  policyRow.append(policyText, policySelect);
-  modelsSection.append(modelsTitle, policyRow);
+  modelsTitle.textContent = "Model access";
+  const modelsHelp = element(doc, "p", "seerai-model-access-help");
+  modelsHelp.textContent =
+    "Models are discovered automatically when you save. Add entries only for custom capability or endpoint overrides.";
+  modelsSection.append(modelsTitle, modelsHelp);
 
   let discovered: DiscoveredModel[] = [...(existing?.models || [])];
   let configured: ProviderModel[] = [...(existing?.configuredModels || [])];
+  let modelPolicy = existing?.modelPolicy || "automatic";
   const lanes = element(doc, "div", "seerai-capability-lanes");
 
   const renderLanes = () => {
     lanes.replaceChildren();
     for (const capability of CAPABILITIES) {
-      const lane = element(doc, "div", "seerai-capability-lane");
-      const laneHeader = element(doc, "div", "seerai-capability-header");
+      const lane = element(doc, "details", "seerai-capability-lane");
+      const configuredForCapability = configured.filter((item) =>
+        item.capabilities.includes(capability),
+      );
+      lane.open = capability === "chat" || configuredForCapability.length > 0;
+      const laneHeader = element(doc, "summary", "seerai-capability-header");
       const laneTitle = element(doc, "strong");
       laneTitle.textContent = capabilityLabel(capability);
-      laneHeader.appendChild(laneTitle);
+      const laneCount = element(doc, "span");
+      laneCount.textContent =
+        configuredForCapability.length === 0
+          ? "Add model"
+          : `${configuredForCapability.length} configured`;
+      laneHeader.append(laneTitle, laneCount);
       const chips = element(doc, "div", "seerai-model-chips");
-      for (const model of configured.filter((item) =>
-        item.capabilities.includes(capability),
-      )) {
+      for (const model of configuredForCapability) {
         const chip = element(doc, "span", "seerai-model-chip");
         const label = element(doc, "span");
         label.textContent = model.displayName;
@@ -306,6 +490,9 @@ export function showProviderManagerDialog(
         option.value = model.id;
         suggestions.appendChild(option);
       }
+      const endpointInput = element(doc, "input");
+      endpointInput.type = "url";
+      endpointInput.placeholder = "Custom endpoint URL (optional)";
       const add = element(doc, "button", "seerai-secondary-button");
       add.type = "button";
       add.appendChild(createSvgIcon(doc, "add", { size: 13 }));
@@ -313,12 +500,29 @@ export function showProviderManagerDialog(
       add.addEventListener("click", () => {
         const modelId = modelInput.value.trim();
         if (!modelId) return;
+        const endpoint = endpointInput.value.trim();
+        if (endpoint) {
+          try {
+            new URL(endpoint);
+            endpointInput.setCustomValidity("");
+          } catch {
+            endpointInput.setCustomValidity("Enter a valid absolute URL.");
+            endpointInput.reportValidity();
+            return;
+          }
+        }
         const existingModel = configured.find(
           (item) => item.modelId === modelId,
         );
         if (existingModel) {
           if (!existingModel.capabilities.includes(capability)) {
             existingModel.capabilities.push(capability);
+          }
+          if (endpoint) {
+            existingModel.endpointOverrides = {
+              ...existingModel.endpointOverrides,
+              [capability]: endpoint,
+            };
           }
         } else {
           const now = new Date().toISOString();
@@ -329,15 +533,19 @@ export function showProviderManagerDialog(
               discovered.find((item) => item.id === modelId)?.displayName ||
               modelId,
             capabilities: [capability],
+            ...(endpoint && {
+              endpointOverrides: { [capability]: endpoint },
+            }),
             createdAt: now,
             updatedAt: now,
           });
         }
-        policySelect.value = "scoped";
+        modelPolicy = "scoped";
         modelInput.value = "";
+        endpointInput.value = "";
         renderLanes();
       });
-      addRow.append(modelInput, suggestions, add);
+      addRow.append(modelInput, suggestions, endpointInput, add);
       lane.append(laneHeader, chips, addRow);
       lanes.appendChild(lane);
     }
@@ -356,9 +564,31 @@ export function showProviderManagerDialog(
   save.type = "button";
   save.textContent = existing ? "Save changes" : "Connect provider";
   footer.append(cancel, save);
-  dialog.append(body, error, footer);
+  const compactChatEditor = !!options.inlineHost?.closest(
+    ".seerai-chat-model-popover",
+  );
+  let externalFooter = false;
+  if (compactChatEditor) {
+    footer.classList.add("is-compact-top");
+    const toolbar = options.inlineHost
+      ?.closest(".seerai-chat-model-popover")
+      ?.querySelector(".seerai-provider-picker-toolbar");
+    if (toolbar) {
+      toolbar.appendChild(footer);
+      externalFooter = true;
+    } else {
+      dialog.prepend(footer);
+    }
+    dialog.append(body, error);
+  } else {
+    dialog.append(body, error, footer);
+  }
   overlay.appendChild(dialog);
-  (doc.body || doc.documentElement)?.appendChild(overlay);
+  if (options.inlineHost) {
+    options.inlineHost.replaceChildren(overlay);
+  } else {
+    (doc.body || doc.documentElement)?.appendChild(overlay);
+  }
 
   const applyPreset = () => {
     const preset = getPresetById(presetSelect.value);
@@ -417,12 +647,18 @@ export function showProviderManagerDialog(
     }
   });
 
-  const dismiss = () => overlay.remove();
+  const dismiss = () => {
+    overlay.remove();
+    if (externalFooter) footer.remove();
+    options.onCancel?.();
+  };
   close.addEventListener("click", dismiss);
   cancel.addEventListener("click", dismiss);
-  overlay.addEventListener("click", (event) => {
-    if (event.target === overlay) dismiss();
-  });
+  if (!options.inlineHost) {
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) dismiss();
+    });
+  }
   const onKey = (event: KeyboardEvent) => {
     if (event.key === "Escape") {
       dismiss();
@@ -431,8 +667,9 @@ export function showProviderManagerDialog(
   };
   doc.defaultView?.addEventListener("keydown", onKey);
 
-  save.addEventListener("click", () => {
+  save.addEventListener("click", async () => {
     error.hidden = true;
+    save.disabled = true;
     try {
       const draft = draftConnection();
       if (!draft.name) throw new Error("Display name is required.");
@@ -441,6 +678,11 @@ export function showProviderManagerDialog(
       if (preset?.requiresApiKey && !draft.apiKey) {
         throw new Error("This provider requires an API key.");
       }
+      try {
+        discovered = await discoverModels(draft);
+      } catch (reason) {
+        if (configured.length === 0) throw reason;
+      }
       const value = {
         ...draft,
         adapterId: existing?.adapterId || draft.adapterId,
@@ -448,8 +690,8 @@ export function showProviderManagerDialog(
         enabled: existing?.enabled ?? draft.enabled,
         isActive: existing?.isActive ?? draft.isActive,
         models: discovered,
-        configuredModels: policySelect.value === "scoped" ? configured : [],
-        modelPolicy: policySelect.value as "automatic" | "scoped",
+        configuredModels: modelPolicy === "scoped" ? configured : [],
+        modelPolicy,
       };
       let provider: ProviderConfig;
       if (existing) {
@@ -466,12 +708,15 @@ export function showProviderManagerDialog(
       if (!getDefaultModelRef("chat") && chatModels[0]) {
         setDefaultModelRef("chat", chatModels[0].ref);
       }
-      dismiss();
+      overlay.remove();
+      if (externalFooter) footer.remove();
       options.onChange?.();
     } catch (reason) {
       error.textContent =
         reason instanceof Error ? reason.message : String(reason);
       error.hidden = false;
+    } finally {
+      save.disabled = false;
     }
   });
   nameInput.focus();
@@ -512,9 +757,11 @@ export function renderProviderSettings(
     const preset = provider.presetId
       ? getPresetById(provider.presetId)
       : undefined;
-    identity.appendChild(
+    const providerIcon = element(doc, "span", "seerai-provider-icon");
+    providerIcon.appendChild(
       createSvgIcon(doc, preset?.icon || "server", { size: 18 }),
     );
+    identity.appendChild(providerIcon);
     const identityText = element(doc, "div");
     const name = element(doc, "strong");
     name.textContent = provider.name;
@@ -527,7 +774,10 @@ export function renderProviderSettings(
     identityText.append(name, endpoint);
     identity.appendChild(identityText);
     const status = element(doc, "span", "seerai-status-pill");
-    status.textContent = provider.enabled === false ? "Disabled" : "Enabled";
+    const statusDot = element(doc, "span", "seerai-status-dot");
+    status.appendChild(statusDot);
+    status.append(provider.enabled === false ? "Disabled" : "Connected");
+    if (provider.enabled === false) status.classList.add("is-disabled");
     cardHeader.append(identity, status);
     const meta = element(doc, "div", "seerai-provider-meta");
     const available = CAPABILITIES.filter((capability) =>
@@ -535,7 +785,29 @@ export function renderProviderSettings(
         (item) => item.provider.id === provider.id,
       ),
     );
-    meta.textContent = `${provider.modelPolicy === "scoped" ? provider.configuredModels?.length || 0 : provider.models.length} models · ${available.map(capabilityLabel).join(", ") || "No capabilities"}`;
+    const modelCount = element(doc, "span", "seerai-provider-model-count");
+    const count =
+      provider.modelPolicy === "scoped"
+        ? provider.configuredModels?.length || 0
+        : provider.models.length;
+    modelCount.textContent = `${count} ${count === 1 ? "model" : "models"}`;
+    meta.appendChild(modelCount);
+    const capabilityList = element(doc, "div", "seerai-provider-capabilities");
+    for (const capability of available) {
+      const badge = element(doc, "span", "seerai-capability-badge");
+      badge.title = capabilityLabel(capability);
+      badge.appendChild(
+        createSvgIcon(doc, capabilityIcon(capability), { size: 13 }),
+      );
+      badge.append(capabilityLabel(capability));
+      capabilityList.appendChild(badge);
+    }
+    if (available.length === 0) {
+      const empty = element(doc, "span", "seerai-capability-empty");
+      empty.textContent = "No model capabilities configured";
+      capabilityList.appendChild(empty);
+    }
+    meta.appendChild(capabilityList);
     const actions = element(doc, "div", "seerai-inline-actions");
     const edit = element(doc, "button", "seerai-secondary-button");
     edit.type = "button";
@@ -547,12 +819,16 @@ export function renderProviderSettings(
     remove.type = "button";
     remove.textContent = "Delete";
     actions.append(edit, toggle, remove);
-    card.append(cardHeader, meta, actions);
+    const cardMain = element(doc, "div", "seerai-provider-card-main");
+    cardMain.append(cardHeader, meta);
+    card.append(cardMain, actions);
     list.appendChild(card);
     edit.addEventListener("click", () =>
       showProviderManagerDialog(doc, {
         providerId: provider.id,
+        inlineHost: container,
         onChange: () => renderProviderSettings(doc, container),
+        onCancel: () => renderProviderSettings(doc, container),
       }),
     );
     toggle.addEventListener("click", () => {
@@ -590,7 +866,9 @@ export function renderProviderSettings(
   container.appendChild(list);
   add.addEventListener("click", () =>
     showProviderManagerDialog(doc, {
+      inlineHost: container,
       onChange: () => renderProviderSettings(doc, container),
+      onCancel: () => renderProviderSettings(doc, container),
     }),
   );
 }
@@ -600,92 +878,136 @@ export function renderModelDefaults(
   container: HTMLElement,
 ): void {
   container.replaceChildren();
+  const enabledProviders = getProviderConfigs().filter(
+    (provider) => provider.enabled !== false,
+  );
+  if (enabledProviders.length === 0) {
+    container.hidden = true;
+    return;
+  }
+  container.hidden = false;
   const header = element(doc, "div", "seerai-settings-section-header");
   const heading = element(doc, "div");
   const title = element(doc, "h3");
   title.textContent = "Default models";
   const subtitle = element(doc, "p");
   subtitle.textContent =
-    "Choose each capability independently, or assign one provider in bulk.";
+    "Choose explicit defaults, or leave a capability unset to use the first compatible discovered model.";
   heading.append(title, subtitle);
   header.appendChild(heading);
   container.appendChild(header);
 
-  const bulk = element(doc, "div", "seerai-default-bulk");
-  const bulkLabel = element(doc, "span");
-  bulkLabel.textContent = "Use one provider where compatible";
-  const bulkSelect = element(doc, "select");
-  const placeholder = element(doc, "option");
-  placeholder.value = "";
-  placeholder.textContent = "Choose provider";
-  bulkSelect.appendChild(placeholder);
-  for (const provider of getProviderConfigs().filter(
-    (item) => item.enabled !== false,
-  )) {
-    const option = element(doc, "option");
-    option.value = provider.id;
-    option.textContent = provider.name;
-    bulkSelect.appendChild(option);
-  }
-  const apply = element(doc, "button", "seerai-secondary-button");
-  apply.type = "button";
-  apply.textContent = "Apply";
-  bulk.append(bulkLabel, bulkSelect, apply);
-  container.appendChild(bulk);
+  container.appendChild(
+    createRoutingPresetBar(
+      doc,
+      () => ({ ...getProviderRegistryState().defaults }),
+      () => renderModelDefaults(doc, container),
+    ),
+  );
 
   const rows = element(doc, "div", "seerai-default-rows");
   for (const capability of CAPABILITIES) {
-    const row = element(doc, "label", "seerai-default-row");
+    const row = element(doc, "div", "seerai-default-row");
     const info = element(doc, "div");
+    const icon = element(doc, "span", "seerai-default-icon");
+    icon.appendChild(
+      createSvgIcon(doc, capabilityIcon(capability), { size: 16 }),
+    );
+    const copy = element(doc, "div", "seerai-default-copy");
     const label = element(doc, "strong");
     label.textContent = capabilityLabel(capability);
     const description = element(doc, "span");
     description.textContent = MODEL_TYPE_ENDPOINTS[capability].description;
-    info.append(label, description);
-    const select = element(doc, "select");
-    select.dataset.capability = capability;
-    const none = element(doc, "option");
-    none.value = "";
-    none.textContent =
-      capability === "chat" ? "Select a model" : "Not configured";
-    none.disabled = capability === "chat";
-    select.appendChild(none);
-    for (const item of getAvailableModels(capability)) {
-      const option = element(doc, "option");
-      option.value = refValue(item.provider.id, item.model.id);
-      option.textContent = `${item.provider.name} · ${item.model.displayName}`;
-      select.appendChild(option);
-    }
+    copy.append(label, description);
+    info.append(icon, copy);
+    const control = element(doc, "div", "seerai-default-control");
+    const search = element(doc, "input", "seerai-default-search");
+    search.type = "search";
+    search.placeholder = "Automatic · search models";
+    const availableModels = getAvailableModels(capability);
     const current = getDefaultModelRef(capability);
-    if (current)
-      select.value = refValue(current.providerId, current.localModelId);
-    select.addEventListener("change", () => {
-      if (!select.value) {
-        if (capability === "chat") {
-          select.value = current
-            ? refValue(current.providerId, current.localModelId)
-            : "";
-          return;
+    const currentItem = availableModels.find(
+      (item) =>
+        item.ref.providerId === current?.providerId &&
+        item.ref.localModelId === current.localModelId,
+    );
+    let committedLabel = currentItem
+      ? `${currentItem.provider.name} — ${currentItem.model.displayName}`
+      : "";
+    search.value = committedLabel;
+    const showChoices = () => {
+      doc.getElementById("seerai-settings-model-picker")?.remove();
+      const picker = element(doc, "div", "seerai-settings-model-picker");
+      picker.id = "seerai-settings-model-picker";
+      const renderChoices = () => {
+        picker.replaceChildren();
+        const query = search.value.trim().toLowerCase();
+        const automatic = element(doc, "div", "seerai-settings-model-choice");
+        automatic.textContent = "Automatic · first compatible model";
+        automatic.tabIndex = 0;
+        automatic.addEventListener("mousedown", (event) =>
+          event.preventDefault(),
+        );
+        automatic.addEventListener("click", () => {
+          committedLabel = "";
+          search.value = "";
+          setDefaultModelRef(capability, undefined);
+          picker.remove();
+        });
+        picker.appendChild(automatic);
+        for (const item of availableModels
+          .filter((model) => {
+            const value =
+              `${model.provider.name} ${model.model.displayName} ${model.model.modelId}`.toLowerCase();
+            return !query || value.includes(query);
+          })
+          .slice(0, 40)) {
+          const choice = element(doc, "div", "seerai-settings-model-choice");
+          const value = `${item.provider.name} — ${item.model.displayName}`;
+          choice.textContent = value;
+          choice.title = value;
+          choice.tabIndex = 0;
+          choice.addEventListener("mousedown", (event) =>
+            event.preventDefault(),
+          );
+          choice.addEventListener("click", () => {
+            committedLabel = value;
+            search.value = value;
+            setDefaultModelRef(capability, item.ref);
+            picker.remove();
+          });
+          picker.appendChild(choice);
         }
-        setDefaultModelRef(capability, undefined);
+      };
+      (doc.body || doc.documentElement)?.appendChild(picker);
+      const rect = search.getBoundingClientRect();
+      const viewportWidth = doc.defaultView?.innerWidth || 0;
+      const viewportHeight = doc.defaultView?.innerHeight || 0;
+      const width = Math.min(360, Math.max(240, rect.width));
+      picker.style.width = `${width}px`;
+      picker.style.left = `${Math.max(8, Math.min(rect.left, viewportWidth - width - 8))}px`;
+      const below = viewportHeight - rect.bottom - 8;
+      if (below >= 180) {
+        picker.style.top = `${rect.bottom + 4}px`;
       } else {
-        setDefaultModelRef(capability, JSON.parse(select.value));
+        picker.style.bottom = `${viewportHeight - rect.top + 4}px`;
       }
+      renderChoices();
+    };
+    search.addEventListener("focus", showChoices);
+    search.addEventListener("input", showChoices);
+    search.addEventListener("blur", () => {
+      search.value = committedLabel;
+      setTimeout(
+        () => doc.getElementById("seerai-settings-model-picker")?.remove(),
+        0,
+      );
     });
-    row.append(info, select);
+    control.appendChild(search);
+    row.append(info, control);
     rows.appendChild(row);
   }
   container.appendChild(rows);
-  apply.addEventListener("click", () => {
-    if (!bulkSelect.value) return;
-    for (const capability of CAPABILITIES) {
-      const match = getAvailableModels(capability).find(
-        (item) => item.provider.id === bulkSelect.value,
-      );
-      if (match) setDefaultModelRef(capability, match.ref);
-    }
-    renderModelDefaults(doc, container);
-  });
 }
 
 export function createChatModelPicker(
@@ -699,6 +1021,16 @@ export function createChatModelPicker(
   const arrow = createSvgIcon(doc, "chevron-down", { size: 12 });
   const refreshLabel = () => {
     const options = stateManager.getOptions();
+    const activeRoutes = {
+      ...getProviderRegistryState().defaults,
+      ...(options.modelRef && { chat: options.modelRef }),
+    };
+    const activePreset = matchingRoutingPreset(activeRoutes);
+    if (activePreset) {
+      label.textContent = activePreset.name;
+      button.title = `Active routing preset: ${activePreset.name}`;
+      return;
+    }
     const resolved = getAvailableModels("chat").find(
       (item) =>
         item.ref.providerId === options.modelRef?.providerId &&
@@ -729,82 +1061,228 @@ export function createChatModelPicker(
     const rect = button.getBoundingClientRect();
     const popup = element(doc, "div", "seerai-chat-model-popover");
     popup.id = "seerai-chat-model-popover";
+    popup.addEventListener("mousedown", (popupEvent) => {
+      popupEvent.stopPropagation();
+    });
+    popup.addEventListener("click", (popupEvent) => {
+      popupEvent.stopPropagation();
+    });
     popup.style.left = `${Math.max(8, rect.left)}px`;
     popup.style.bottom = `${Math.max(8, (doc.defaultView?.innerHeight || 0) - rect.top + 6)}px`;
-    const search = element(doc, "input");
-    search.type = "search";
-    search.placeholder = "Search providers and models";
-    const results = element(doc, "div", "seerai-chat-model-results");
-    const render = () => {
-      results.replaceChildren();
-      const query = search.value.trim().toLowerCase();
-      const inherited = element(doc, "button", "seerai-chat-model-option");
-      inherited.type = "button";
-      inherited.textContent = "Use app default";
-      inherited.addEventListener("click", () => {
-        stateManager.setOptions({ modelRef: undefined });
+    const positionPopup = () => {
+      const viewportWidth = doc.defaultView?.innerWidth || 0;
+      const viewportHeight = doc.defaultView?.innerHeight || 0;
+      const left = Math.min(
+        Math.max(8, rect.left),
+        Math.max(8, viewportWidth - popup.offsetWidth - 8),
+      );
+      const above = rect.top - popup.offsetHeight - 6;
+      const top =
+        above >= 8
+          ? above
+          : Math.min(
+              rect.bottom + 6,
+              Math.max(8, viewportHeight - popup.offsetHeight - 8),
+            );
+      popup.style.left = `${left}px`;
+      popup.style.top = `${top}px`;
+      popup.style.bottom = "auto";
+    };
+    const routes = element(doc, "div", "seerai-capability-routes");
+    let openCapability: ModelType | undefined;
+    const renderRoutes = () => {
+      routes.replaceChildren();
+      for (const capability of CAPABILITIES) {
+        const available = getAvailableModels(capability);
+        const explicitRef =
+          capability === "chat"
+            ? stateManager.getOptions().modelRef
+            : getDefaultModelRef(capability);
+        const effectiveRef = explicitRef || getDefaultModelRef(capability);
+        const active = available.find(
+          (item) =>
+            item.ref.providerId === effectiveRef?.providerId &&
+            item.ref.localModelId === effectiveRef.localModelId,
+        );
+        const route = element(doc, "section", "seerai-capability-route");
+        const header = element(doc, "div", "seerai-capability-route-header");
+        const routeLabel = element(doc, "strong");
+        routeLabel.textContent = capabilityLabel(capability);
+        const current = element(doc, "button", "seerai-route-current");
+        current.type = "button";
+        current.textContent = active
+          ? compactLabel(
+              `${active.provider.name} — ${active.model.displayName}`,
+              34,
+            )
+          : "Automatic";
+        current.title = active
+          ? `${active.provider.name} — ${active.model.displayName}`
+          : "Use the first compatible discovered model";
+        current.appendChild(createSvgIcon(doc, "chevron-down", { size: 11 }));
+        current.addEventListener("click", () => {
+          openCapability =
+            openCapability === capability ? undefined : capability;
+          renderRoutes();
+        });
+        header.append(routeLabel, current);
+        route.appendChild(header);
+        if (openCapability === capability) {
+          const chooser = element(doc, "div", "seerai-route-chooser");
+          const search = element(doc, "input", "seerai-route-search");
+          search.type = "search";
+          search.placeholder = `Search ${available.length} models`;
+          const choices = element(doc, "div", "seerai-route-choices");
+          const renderChoices = () => {
+            choices.replaceChildren();
+            const query = search.value.trim().toLowerCase();
+            if (capability === "chat") {
+              const inherited = element(doc, "div", "seerai-model-choice");
+              inherited.tabIndex = 0;
+              inherited.setAttribute("role", "option");
+              const inheritedLabel = element(
+                doc,
+                "span",
+                "seerai-model-choice-label",
+              );
+              inheritedLabel.textContent = "Use app default";
+              inherited.appendChild(inheritedLabel);
+              if (!stateManager.getOptions().modelRef) {
+                inherited.classList.add("is-selected");
+                inherited.appendChild(
+                  createSvgIcon(doc, "check", { size: 13 }),
+                );
+              }
+              const useDefault = () => {
+                stateManager.setOptions({ modelRef: undefined });
+                refreshLabel();
+                onChange();
+                openCapability = undefined;
+                renderRoutes();
+              };
+              inherited.addEventListener("click", useDefault);
+              choices.appendChild(inherited);
+            }
+            const matches = available.filter((item) => {
+              const haystack =
+                `${item.provider.name} ${item.model.displayName} ${item.model.modelId}`.toLowerCase();
+              return !query || haystack.includes(query);
+            });
+            for (const item of matches.slice(0, 24)) {
+              const choice = element(doc, "div", "seerai-model-choice");
+              choice.tabIndex = 0;
+              choice.setAttribute("role", "option");
+              const choiceLabel = element(
+                doc,
+                "span",
+                "seerai-model-choice-label",
+              );
+              choiceLabel.textContent = `${item.provider.name} — ${item.model.displayName}`;
+              choice.appendChild(choiceLabel);
+              if (
+                item.ref.providerId === effectiveRef?.providerId &&
+                item.ref.localModelId === effectiveRef.localModelId
+              ) {
+                choice.classList.add("is-selected");
+                choice.appendChild(createSvgIcon(doc, "check", { size: 13 }));
+              }
+              const choose = () => {
+                if (capability === "chat") {
+                  stateManager.setOptions({ modelRef: item.ref });
+                  onChange();
+                } else {
+                  setDefaultModelRef(capability, item.ref);
+                }
+                refreshLabel();
+                openCapability = undefined;
+                renderRoutes();
+              };
+              choice.addEventListener("click", choose);
+              choice.addEventListener("keydown", (event) => {
+                const keyEvent = event as KeyboardEvent;
+                if (keyEvent.key === "Enter" || keyEvent.key === " ") choose();
+              });
+              choices.appendChild(choice);
+            }
+            if (matches.length === 0) {
+              const empty = element(
+                doc,
+                "button",
+                "seerai-chat-model-configure",
+              );
+              empty.type = "button";
+              empty.textContent = "No matching models · Manage providers";
+              empty.addEventListener("click", () => manage.click());
+              choices.appendChild(empty);
+            } else if (matches.length > 24) {
+              const limit = element(doc, "div", "seerai-chat-model-limit");
+              limit.textContent = `${matches.length - 24} more · refine your search`;
+              choices.appendChild(limit);
+            }
+          };
+          search.addEventListener("input", renderChoices);
+          chooser.append(search, choices);
+          route.appendChild(chooser);
+          renderChoices();
+          setTimeout(() => search.focus(), 0);
+        }
+        routes.appendChild(route);
+      }
+      if (popup.isConnected) setTimeout(positionPopup, 0);
+    };
+    const presets = createRoutingPresetBar(
+      doc,
+      () => ({
+        ...getProviderRegistryState().defaults,
+        ...(stateManager.getOptions().modelRef && {
+          chat: stateManager.getOptions().modelRef,
+        }),
+      }),
+      (models) => {
+        stateManager.setOptions({ modelRef: models.chat });
         refreshLabel();
         onChange();
-        popup.remove();
-      });
-      results.appendChild(inherited);
-      const grouped = new Map<string, ReturnType<typeof getAvailableModels>>();
-      for (const item of getAvailableModels("chat")) {
-        const haystack =
-          `${item.provider.name} ${item.model.displayName} ${item.model.modelId}`.toLowerCase();
-        if (query && !haystack.includes(query)) continue;
-        const values = grouped.get(item.provider.id) || [];
-        values.push(item);
-        grouped.set(item.provider.id, values);
-      }
-      for (const values of grouped.values()) {
-        const group = element(doc, "div", "seerai-chat-model-group");
-        group.textContent = values[0].provider.name;
-        results.appendChild(group);
-        for (const item of values) {
-          const option = element(doc, "button", "seerai-chat-model-option");
-          option.type = "button";
-          const name = element(doc, "strong");
-          name.textContent = item.model.displayName;
-          const id = element(doc, "span");
-          id.textContent = item.model.modelId;
-          option.append(name, id);
-          option.addEventListener("click", () => {
-            stateManager.setOptions({ modelRef: item.ref });
-            refreshLabel();
-            onChange();
-            popup.remove();
-          });
-          results.appendChild(option);
-        }
-      }
-    };
+        renderRoutes();
+      },
+    );
     const manage = element(doc, "button", "seerai-chat-model-manage");
     manage.type = "button";
     manage.appendChild(createSvgIcon(doc, "settings", { size: 13 }));
     manage.append(" Add or manage providers");
     manage.addEventListener("click", () => {
-      popup.remove();
-      showProviderManagerDialog(doc, {
-        onChange: () => {
-          refreshLabel();
-          onChange();
-        },
+      popup.classList.add("is-managing");
+      popup.replaceChildren();
+      const toolbar = element(doc, "div", "seerai-provider-picker-toolbar");
+      const back = element(doc, "button", "seerai-provider-picker-back");
+      back.type = "button";
+      back.appendChild(createSvgIcon(doc, "chevron-left", { size: 13 }));
+      back.append(" Back to models");
+      back.addEventListener("click", () => {
+        popup.remove();
+        button.click();
       });
+      const providerHost = element(doc, "div", "seerai-provider-surface");
+      toolbar.appendChild(back);
+      popup.append(toolbar, providerHost);
+      renderProviderSettings(doc, providerHost);
+      positionPopup();
     });
-    search.addEventListener("input", render);
-    popup.append(search, results, manage);
+    popup.append(presets, routes, manage);
     (doc.body || doc.documentElement)?.appendChild(popup);
-    render();
-    search.focus();
+    renderRoutes();
+    positionPopup();
     const closePopup = (closeEvent: MouseEvent) => {
       if (
-        !popup.contains(closeEvent.target as Node) &&
-        closeEvent.target !== button
-      ) {
+        popup.contains(closeEvent.target as Node) ||
+        closeEvent.target === button
+      )
+        return;
+      setTimeout(() => {
+        const activeElement = doc.activeElement;
+        if (activeElement && popup.contains(activeElement)) return;
         popup.remove();
         doc.removeEventListener("mousedown", closePopup);
-      }
+      }, 0);
     };
     setTimeout(() => doc.addEventListener("mousedown", closePopup), 0);
   });
