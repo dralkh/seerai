@@ -1698,3 +1698,131 @@ body.dark {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- Unified integration settings sections ---- */
+.seerai-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 18px;
+}
+
+.seerai-settings-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.seerai-settings-subheading {
+  margin: 4px 0 -4px;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary, var(--model-item-text-secondary));
+}
+
+/* Tighten the divider between stacked integration cards. */
+#seerai-ai-settings .seerai-provider-surface {
+  margin-bottom: 16px;
+}
+
+.seerai-check-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary, var(--modal-title-color));
+  cursor: pointer;
+}
+
+.seerai-check-field input {
+  margin: 0;
+  flex: none;
+}
+
+.seerai-settings-help {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-tertiary, var(--model-item-text-secondary));
+}
+
+.seerai-settings-link {
+  font-size: 12px;
+  color: var(--accent-blue, #0066cc);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.seerai-settings-code {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 120px;
+  margin-top: 4px;
+  padding: 8px;
+  resize: vertical;
+  border: 1px solid var(--border-secondary, var(--modal-input-border));
+  border-radius: 7px;
+  background: var(--background-secondary);
+  color: var(--text-primary);
+  font-family: monospace;
+  font-size: 11px;
+}
+
+.seerai-settings-body .seerai-inline-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Make the bottom border of the last header-less divider invisible so the card
+   reads as one surface. */
+.seerai-settings-body > .seerai-field span {
+  font-weight: 550;
+}
+
+/* ---- Dark-mode theming for the unified settings pane ----
+   The prefpane does not define --background-primary/--text-primary, so the
+   shared field styles fall back to light values (white inputs, dark titles).
+   These light-dark() overrides are scoped to the pane so the chat tab (which
+   defines its own theme vars) is unaffected. */
+#seerai-ai-settings input,
+#seerai-ai-settings select,
+#seerai-ai-settings textarea {
+  background: light-dark(#ffffff, #2a2b2e);
+  color: light-dark(#111111, #f4f4f4);
+  border-color: light-dark(#d8d8d8, #45464a);
+}
+
+#seerai-ai-settings input:focus,
+#seerai-ai-settings select:focus,
+#seerai-ai-settings textarea:focus {
+  border-color: light-dark(#635bff, #9c96ff);
+}
+
+#seerai-ai-settings input::placeholder,
+#seerai-ai-settings textarea::placeholder {
+  color: light-dark(#8a8a8a, #8b8c90);
+}
+
+#seerai-ai-settings .seerai-settings-section-header h3 {
+  color: light-dark(#111111, #f4f4f4);
+}
+
+#seerai-ai-settings .seerai-settings-section-header p,
+#seerai-ai-settings .seerai-settings-help {
+  color: light-dark(#5a5a5a, #b5b6ba);
+}
+
+#seerai-ai-settings .seerai-settings-subheading {
+  color: light-dark(#5a5a5a, #c4c5c9);
+}
+
+#seerai-ai-settings .seerai-check-field {
+  color: light-dark(#111111, #f4f4f4);
+}
+
+#seerai-ai-settings .seerai-settings-code {
+  background: light-dark(#f5f5f7, #232427);
+}

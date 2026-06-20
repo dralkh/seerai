@@ -4,7 +4,7 @@
 </linkset>
 <groupbox
   id="seerai-ai-settings"
-  data-search-strings-raw="AI, models, providers, OpenAI, Anthropic, Gemini, embeddings, image, video, speech, transcription"
+  data-search-strings-raw="AI, models, providers, OpenAI, Anthropic, Gemini, embeddings, image, video, speech, transcription, MCP, Claude Desktop, export, import, OCR, DataLab, Mistral, Semantic Scholar, web search, Firecrawl, Tavily, NanoGPT, You.com, table, RAG, reranker, Jina, Cohere, retrieval, evaluation, cloud storage, Google Drive, Dropbox, OneDrive, Box, Nextcloud"
   onload="Zotero.__addonInstance__.hooks.onPrefsEvent('load', { window })"
 >
   <label><html:h2>Models &amp; Providers</html:h2></label>
@@ -21,1275 +21,528 @@
     id="__addonRef__-model-defaults"
     class="seerai-defaults-surface"
   ></html:div>
+
+  <!-- Styled integration sections (rendered from integrationSettings.ts) -->
+  <html:div
+    id="__addonRef__-mcp-settings"
+    class="seerai-provider-surface"
+  ></html:div>
+  <html:div
+    id="__addonRef__-data-settings"
+    class="seerai-provider-surface"
+  ></html:div>
+  <html:div
+    id="__addonRef__-ocr-settings"
+    class="seerai-provider-surface"
+  ></html:div>
+  <html:div
+    id="__addonRef__-semanticscholar-settings"
+    class="seerai-provider-surface"
+  ></html:div>
+  <html:div
+    id="__addonRef__-websearch-settings"
+    class="seerai-provider-surface"
+  ></html:div>
+  <html:div
+    id="__addonRef__-aitable-settings"
+    class="seerai-provider-surface"
+  ></html:div>
+  <html:div
+    id="__addonRef__-ragreranker-settings"
+    class="seerai-provider-surface"
+  ></html:div>
+  <html:div
+    id="__addonRef__-advancedretrieval-settings"
+    class="seerai-provider-surface"
+  ></html:div>
+  <html:div
+    id="__addonRef__-evaluation-settings"
+    class="seerai-provider-surface"
+  ></html:div>
+
+  <!-- Cloud Storage Integration -->
+  <html:div id="__addonRef__-cloud-settings" class="seerai-provider-surface">
+    <html:div class="seerai-settings-section-header">
+      <html:div>
+        <html:h3 id="seerai-cloud-settings">Cloud Storage Integration</html:h3>
+        <html:p>
+          Connect a cloud provider to sync attachments and stored data.
+        </html:p>
+      </html:div>
+    </html:div>
+
+    <vbox class="seerai-settings-body">
+      <!-- Provider Selector -->
+      <hbox align="center" style="margin-bottom: 12px">
+        <label style="width: 100px; font-weight: bold">Provider:</label>
+        <menulist id="seerai-cloud-provider-select" style="min-width: 200px">
+          <menupopup>
+            <menuitem value="nextcloud" label="Nextcloud" />
+            <menuitem value="google" label="Google Drive" />
+            <menuitem value="onedrive" label="OneDrive" />
+            <menuitem value="dropbox" label="Dropbox" />
+            <menuitem value="box" label="Box" />
+          </menupopup>
+        </menulist>
+      </hbox>
+
+      <!-- === Google Drive Settings === -->
+      <vbox id="seerai-cloud-settings-google">
+        <hbox align="center" style="margin-bottom: 8px">
+          <html:span
+            id="seerai-drive-status-icon"
+            style="margin-right: 6px"
+          ></html:span>
+          <html:span id="seerai-drive-status-text">Not connected</html:span>
+        </hbox>
+        <button
+          id="seerai-drive-signin-btn"
+          label="Sign In with Google Drive"
+        />
+        <hbox
+          id="seerai-drive-paste-area"
+          align="center"
+          style="margin-top: 8px; gap: 6px"
+          hidden="true"
+        >
+          <html:input
+            type="text"
+            id="seerai-drive-paste-input"
+            placeholder="Paste auth code or redirect URL"
+            style="flex: 1"
+          />
+          <button id="seerai-drive-paste-verify" label="Verify" />
+          <html:span
+            id="seerai-drive-paste-status"
+            style="font-size: 10px; color: var(--text-secondary); display: none"
+          />
+        </hbox>
+        <html:a
+          id="seerai-drive-custom-oauth-toggle"
+          style="
+            font-size: 11px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            margin-top: 12px;
+            display: inline-block;
+            text-decoration: underline;
+          "
+          >Set Custom OAuth credentials...</html:a
+        >
+        <vbox
+          id="seerai-drive-custom-oauth"
+          hidden="true"
+          style="
+            margin-top: 8px;
+            padding: 10px;
+            background: var(--background-secondary);
+            border-radius: 4px;
+          "
+        >
+          <hbox align="center" style="margin-bottom: 6px">
+            <html:label style="width: 120px">Client ID:</html:label>
+            <html:input
+              type="text"
+              id="seerai-drive-client-id"
+              style="flex: 1"
+              placeholder="Default: 22680022759-6e2lk...apps.googleusercontent.com"
+            />
+          </hbox>
+          <hbox align="center" style="margin-bottom: 10px">
+            <html:label style="width: 120px">Client Secret:</html:label>
+            <html:input
+              type="password"
+              id="seerai-drive-client-secret"
+              style="flex: 1"
+              placeholder="(Required - if empty default used)"
+            />
+          </hbox>
+          <button id="seerai-drive-save-btn" label="Save" disabled="true" />
+        </vbox>
+        <html:p
+          style="
+            font-size: 10px;
+            color: var(--text-tertiary);
+            margin-top: 8px;
+            line-height: 1.4;
+          "
+        >
+          Redirect URI:
+          <html:code>http://localhost:23119/seerai/google/callback</html:code>
+          <br />Need credentials?
+          <html:a
+            href="https://console.cloud.google.com/apis/credentials"
+            style="color: #0066cc; text-decoration: underline; cursor: pointer"
+            onclick="
+              Zotero.launchURL(this.href);
+              return false;
+            "
+            >Google Cloud Console</html:a
+          >
+        </html:p>
+        <button
+          id="seerai-drive-clear-btn"
+          label="Disconnect &amp; Clear"
+          style="margin-top: 12px"
+        />
+      </vbox>
+
+      <!-- === Dropbox Settings === -->
+      <vbox id="seerai-cloud-settings-dropbox" hidden="true">
+        <hbox align="center" style="margin-bottom: 8px">
+          <html:span
+            id="seerai-dropbox-status-icon"
+            style="margin-right: 6px"
+          ></html:span>
+          <html:span id="seerai-dropbox-status-text">Not connected</html:span>
+        </hbox>
+        <button id="seerai-dropbox-signin-btn" label="Sign In with Dropbox" />
+        <hbox
+          id="seerai-dropbox-paste-area"
+          align="center"
+          style="margin-top: 8px; gap: 6px"
+          hidden="true"
+        >
+          <html:input
+            type="text"
+            id="seerai-dropbox-paste-input"
+            placeholder="Paste auth code or redirect URL"
+            style="flex: 1"
+          />
+          <button id="seerai-dropbox-paste-verify" label="Verify" />
+          <html:span
+            id="seerai-dropbox-paste-status"
+            style="font-size: 10px; color: var(--text-secondary); display: none"
+          />
+        </hbox>
+        <html:a
+          id="seerai-dropbox-custom-oauth-toggle"
+          style="
+            font-size: 11px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            margin-top: 12px;
+            display: inline-block;
+            text-decoration: underline;
+          "
+          >Set Custom App Key...</html:a
+        >
+        <vbox
+          id="seerai-dropbox-custom-oauth"
+          hidden="true"
+          style="
+            margin-top: 8px;
+            padding: 10px;
+            background: var(--background-secondary);
+            border-radius: 4px;
+          "
+        >
+          <hbox align="center" style="margin-bottom: 6px">
+            <html:label style="width: 120px">App Key:</html:label>
+            <html:input
+              type="text"
+              id="seerai-dropbox-client-id"
+              style="flex: 1"
+              placeholder="Default: i91subs0zer8bi1"
+            />
+          </hbox>
+          <button id="seerai-dropbox-save-btn" label="Save" disabled="true" />
+        </vbox>
+        <html:p
+          style="
+            font-size: 10px;
+            color: var(--text-tertiary);
+            margin-top: 8px;
+            line-height: 1.4;
+          "
+        >
+          Redirect URI:
+          <html:code>http://localhost:23119/seerai/dropbox/callback</html:code>
+          <br />Permissions: In the Dropbox App Console, check ALL checkboxes
+          under <b>Files and folders</b> (read/write). <br />Need an app?
+          <html:a
+            href="https://www.dropbox.com/developers/apps"
+            style="color: #0066cc; text-decoration: underline; cursor: pointer"
+            onclick="
+              Zotero.launchURL(this.href);
+              return false;
+            "
+            >Dropbox App Console</html:a
+          >
+        </html:p>
+        <button
+          id="seerai-dropbox-clear-btn"
+          label="Disconnect &amp; Clear"
+          style="margin-top: 12px"
+        />
+      </vbox>
+
+      <!-- === Box Settings === -->
+      <vbox id="seerai-cloud-settings-box" hidden="true">
+        <hbox align="center" style="margin-bottom: 8px">
+          <html:span
+            id="seerai-box-status-icon"
+            style="margin-right: 6px"
+          ></html:span>
+          <html:span id="seerai-box-status-text">Not connected</html:span>
+        </hbox>
+        <button id="seerai-box-signin-btn" label="Sign In with Box" />
+        <hbox
+          id="seerai-box-paste-area"
+          align="center"
+          style="margin-top: 8px; gap: 6px"
+          hidden="true"
+        >
+          <html:input
+            type="text"
+            id="seerai-box-paste-input"
+            placeholder="Paste auth code or redirect URL"
+            style="flex: 1"
+          />
+          <button id="seerai-box-paste-verify" label="Verify" />
+          <html:span
+            id="seerai-box-paste-status"
+            style="font-size: 10px; color: var(--text-secondary); display: none"
+          />
+        </hbox>
+        <html:a
+          id="seerai-box-custom-oauth-toggle"
+          style="
+            font-size: 11px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            margin-top: 12px;
+            display: inline-block;
+            text-decoration: underline;
+          "
+          >Set Custom OAuth credentials...</html:a
+        >
+        <vbox
+          id="seerai-box-custom-oauth"
+          hidden="true"
+          style="
+            margin-top: 8px;
+            padding: 10px;
+            background: var(--background-secondary);
+            border-radius: 4px;
+          "
+        >
+          <hbox align="center" style="margin-bottom: 6px">
+            <html:label style="width: 120px">Client ID:</html:label>
+            <html:input
+              type="text"
+              id="seerai-box-client-id"
+              style="flex: 1"
+              placeholder="Default: ozyt20t94vkvr3eu..."
+            />
+          </hbox>
+          <hbox align="center" style="margin-bottom: 10px">
+            <html:label style="width: 120px">Client Secret:</html:label>
+            <html:input
+              type="password"
+              id="seerai-box-client-secret"
+              style="flex: 1"
+              placeholder="(Required - if empty default used)"
+            />
+          </hbox>
+          <button id="seerai-box-save-btn" label="Save" disabled="true" />
+        </vbox>
+        <html:p
+          style="
+            font-size: 10px;
+            color: var(--text-tertiary);
+            margin-top: 8px;
+            line-height: 1.4;
+          "
+        >
+          Redirect URI:
+          <html:code>http://localhost:23119/seerai/box/callback</html:code>
+          <br />Need credentials?
+          <html:a
+            href="https://app.box.com/developers/console"
+            style="color: #0066cc; text-decoration: underline; cursor: pointer"
+            onclick="
+              Zotero.launchURL(this.href);
+              return false;
+            "
+            >Box Developer Console</html:a
+          >
+        </html:p>
+        <button
+          id="seerai-box-clear-btn"
+          label="Disconnect &amp; Clear"
+          style="margin-top: 12px"
+        />
+      </vbox>
+
+      <!-- === OneDrive Settings === -->
+      <vbox id="seerai-cloud-settings-onedrive" hidden="true">
+        <hbox align="center" style="margin-bottom: 8px">
+          <html:span
+            id="seerai-onedrive-status-icon"
+            style="margin-right: 6px"
+          ></html:span>
+          <html:span id="seerai-onedrive-status-text">Not connected</html:span>
+        </hbox>
+        <button id="seerai-onedrive-signin-btn" label="Sign In with OneDrive" />
+        <hbox
+          id="seerai-onedrive-paste-area"
+          align="center"
+          style="margin-top: 8px; gap: 6px"
+          hidden="true"
+        >
+          <html:input
+            type="text"
+            id="seerai-onedrive-paste-input"
+            placeholder="Paste auth code or redirect URL"
+            style="flex: 1"
+          />
+          <button id="seerai-onedrive-paste-verify" label="Verify" />
+          <html:span
+            id="seerai-onedrive-paste-status"
+            style="font-size: 10px; color: var(--text-secondary); display: none"
+          />
+        </hbox>
+        <html:a
+          id="seerai-onedrive-custom-oauth-toggle"
+          style="
+            font-size: 11px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            margin-top: 12px;
+            display: inline-block;
+            text-decoration: underline;
+          "
+          >Set Custom OAuth credentials...</html:a
+        >
+        <vbox
+          id="seerai-onedrive-custom-oauth"
+          hidden="true"
+          style="
+            margin-top: 8px;
+            padding: 10px;
+            background: var(--background-secondary);
+            border-radius: 4px;
+          "
+        >
+          <hbox align="center" style="margin-bottom: 6px">
+            <html:label style="width: 120px">Client ID:</html:label>
+            <html:input
+              type="text"
+              id="seerai-onedrive-client-id"
+              style="flex: 1"
+              placeholder="Default: c1cf27ad-234e-4c44-b233-973eb32846fa"
+            />
+          </hbox>
+          <hbox align="center" style="margin-bottom: 10px">
+            <html:label style="width: 120px">SharePoint Site ID:</html:label>
+            <html:input
+              type="text"
+              id="seerai-onedrive-site-id"
+              style="flex: 1"
+              placeholder="(Leave empty for personal OneDrive)"
+            />
+          </hbox>
+          <button id="seerai-onedrive-save-btn" label="Save" disabled="true" />
+        </vbox>
+        <html:p
+          style="
+            font-size: 10px;
+            color: var(--text-tertiary);
+            margin-top: 8px;
+            line-height: 1.4;
+          "
+        >
+          Redirect URI:
+          <html:code>http://localhost:23119/seerai/onedrive/callback</html:code>
+          <br />Need an app registration?
+          <html:a
+            href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
+            style="color: #0066cc; text-decoration: underline; cursor: pointer"
+            onclick="
+              Zotero.launchURL(this.href);
+              return false;
+            "
+            >Azure App Registrations</html:a
+          >
+          <br />Scopes: Files.Read.All, offline_access
+        </html:p>
+        <button
+          id="seerai-onedrive-clear-btn"
+          label="Disconnect &amp; Clear"
+          style="margin-top: 12px"
+        />
+      </vbox>
+
+      <!-- === Nextcloud Settings === -->
+      <vbox id="seerai-cloud-settings-nextcloud" hidden="true">
+        <hbox align="center" style="margin-bottom: 8px">
+          <html:span
+            id="seerai-nextcloud-status-icon"
+            style="margin-right: 6px"
+          ></html:span>
+          <html:span id="seerai-nextcloud-status-text">Not connected</html:span>
+        </hbox>
+        <hbox align="center" style="margin-bottom: 6px">
+          <html:label style="width: 120px">Server URL:</html:label>
+          <html:input
+            type="text"
+            id="seerai-nextcloud-server-url"
+            style="flex: 1"
+            placeholder="https://cloud.example.com"
+          />
+        </hbox>
+        <hbox align="center" style="margin-bottom: 6px">
+          <html:label style="width: 120px">Username:</html:label>
+          <html:input
+            type="text"
+            id="seerai-nextcloud-username"
+            style="flex: 1"
+          />
+        </hbox>
+        <hbox align="center" style="margin-bottom: 10px">
+          <html:label style="width: 120px">App Password:</html:label>
+          <html:input
+            type="password"
+            id="seerai-nextcloud-app-password"
+            style="flex: 1"
+          />
+        </hbox>
+        <button
+          id="seerai-nextcloud-connect-btn"
+          label="Connect"
+          disabled="true"
+        />
+        <html:p
+          style="
+            font-size: 10px;
+            color: var(--text-tertiary);
+            margin-top: 8px;
+            line-height: 1.4;
+          "
+        >
+          Generate an App Password in your Nextcloud
+          <html:a
+            href="https://docs.nextcloud.com/server/latest/user_manual/en/session_management.html"
+            style="color: #0066cc; text-decoration: underline; cursor: pointer"
+            onclick="
+              Zotero.launchURL(this.href);
+              return false;
+            "
+            >Security Settings</html:a
+          >
+          (Profile → Security → App Passwords).
+          <br />No OAuth -- credentials are used directly for WebDAV access.
+        </html:p>
+        <button
+          id="seerai-nextcloud-clear-btn"
+          label="Disconnect &amp; Clear"
+          style="margin-top: 12px"
+        />
+      </vbox>
+    </vbox>
+  </html:div>
 </groupbox>
-
-<groupbox>
-  <html:hr style="margin: 16px 0" />
-
-  <!-- MCP Server Integration -->
-  <label>
-    <html:h3 id="seerai-integration-settings"
-      >MCP Server Integration (Claude Desktop)</html:h3
-    >
-  </label>
-  <vbox
-    style="
-      margin-bottom: 12px;
-      padding: 10px;
-      background: rgba(0, 0, 0, 0.03);
-      border-radius: 4px;
-    "
-  >
-    <hbox align="center" style="margin-bottom: 8px; gap: 16px">
-      <button
-        label="GitHub Repo"
-        oncommand="Zotero.launchURL('https://github.com/dralkh/seerai')"
-      />
-      <button
-        label="Download Release"
-        oncommand="
-          Zotero.launchURL('https://github.com/dralkh/seerai/releases')
-        "
-      />
-    </hbox>
-
-    <description style="margin-bottom: 4px; font-weight: bold"
-      >Configuration (mcp_config.json):</description
-    >
-    <hbox style="margin-bottom: 4px">
-      <html:textarea
-        id="zotero-prefpane-__addonRef__-mcpConfigJson"
-        readonly="true"
-        style="
-          width: 100%;
-          height: 120px;
-          font-family: monospace;
-          font-size: 11px;
-          padding: 8px;
-          border: 1px solid #ccc;
-          border-radius: 4px;
-          resize: vertical;
-        "
-      />
-    </hbox>
-
-    <hbox pack="end">
-      <button
-        id="zotero-prefpane-__addonRef__-copyMcpConfig"
-        label="Copy Config to Clipboard"
-      />
-    </hbox>
-  </vbox>
-
-  <html:hr style="margin: 16px 0" />
-
-  <!-- Advanced Data Management -->
-  <label>
-    <html:h3>Advanced Data Management</html:h3>
-  </label>
-  <description style="margin-bottom: 8px; font-size: 11px; color: #666">
-    Export or import your entire Seer-AI configuration, including models,
-    prompts, tables, and API keys.
-  </description>
-  <hbox align="center" style="gap: 12px; margin-bottom: 12px">
-    <button
-      id="zotero-prefpane-__addonRef__-exportConfig"
-      label="Export Configuration"
-    />
-    <button
-      id="zotero-prefpane-__addonRef__-importConfig"
-      label="Import Configuration"
-    />
-  </hbox>
-
-  <html:hr style="margin: 16px 0" />
-
-  <!-- OCR Configurations -->
-  <label>
-    <html:h3 id="seerai-research-settings" data-l10n-id="pref-datalab-title"
-      >OCR Configurations</html:h3
-    >
-  </label>
-
-  <!-- Service Selection with Menulist Dropdown -->
-  <hbox align="center" style="margin-bottom: 12px">
-    <label style="width: 120px; font-weight: bold">OCR Service:</label>
-    <menulist
-      id="zotero-prefpane-__addonRef__-datalabMode"
-      style="min-width: 200px"
-    >
-      <menupopup>
-        <menuitem value="local" label="Local Marker Server" />
-        <menuitem value="cloud" label="Cloud (DataLab.to)" />
-        <menuitem value="mistral" label="Mistral OCR" />
-      </menupopup>
-    </menulist>
-  </hbox>
-
-  <!-- Local Server Settings -->
-  <vbox
-    id="zotero-prefpane-__addonRef__-localSettings"
-    style="
-      margin-left: 20px;
-      margin-bottom: 12px;
-      padding: 10px;
-      background: rgba(0, 0, 0, 0.03);
-      border-radius: 4px;
-    "
-  >
-    <hbox align="center" style="margin-bottom: 8px">
-      <label style="width: 100px">Server URL:</label>
-      <html:input
-        type="text"
-        id="zotero-prefpane-__addonRef__-datalabUrl"
-        placeholder="http://localhost:8001"
-        style="flex: 1; min-width: 200px"
-      ></html:input>
-    </hbox>
-    <hbox align="center" style="margin-bottom: 8px">
-      <checkbox
-        id="zotero-prefpane-__addonRef__-localForceOcr"
-        label="Force OCR"
-        checked="true"
-      />
-    </hbox>
-    <hbox align="center">
-      <html:a
-        href="https://github.com/dralkh/seerai#option-b-local-marker-server"
-        style="
-          color: #0066cc;
-          text-decoration: underline;
-          cursor: pointer;
-          font-size: 12px;
-        "
-        onclick="
-          Zotero.launchURL(this.href);
-          return false;
-        "
-      >
-        Setup Tutorial
-      </html:a>
-    </hbox>
-  </vbox>
-
-  <!-- Cloud DataLab Settings -->
-  <vbox
-    id="zotero-prefpane-__addonRef__-cloudSettings"
-    style="
-      margin-left: 20px;
-      margin-bottom: 12px;
-      padding: 10px;
-      background: rgba(0, 0, 0, 0.03);
-      border-radius: 4px;
-    "
-  >
-    <hbox align="center" style="margin-bottom: 8px">
-      <label style="width: 100px">API Key:</label>
-      <html:input
-        type="password"
-        id="zotero-prefpane-__addonRef__-datalabApiKey"
-        placeholder="Token from datalab.to"
-        style="flex: 1; min-width: 200px"
-      ></html:input>
-    </hbox>
-    <hbox align="center" style="margin-bottom: 6px">
-      <checkbox
-        id="zotero-prefpane-__addonRef__-cloudForceOcr"
-        label="Force OCR"
-      />
-    </hbox>
-    <hbox align="center">
-      <checkbox
-        id="zotero-prefpane-__addonRef__-cloudUseLlm"
-        label="Use LLM (AI-enhanced extraction)"
-      />
-    </hbox>
-  </vbox>
-
-  <!-- Mistral OCR Settings -->
-  <vbox
-    id="zotero-prefpane-__addonRef__-mistralSettings"
-    style="
-      margin-left: 20px;
-      margin-bottom: 12px;
-      padding: 10px;
-      background: rgba(0, 0, 0, 0.03);
-      border-radius: 4px;
-    "
-  >
-    <hbox align="center" style="margin-bottom: 8px">
-      <label style="width: 100px">API Key:</label>
-      <html:input
-        type="password"
-        id="zotero-prefpane-__addonRef__-mistralApiKey"
-        placeholder="Mistral API Key"
-        style="flex: 1; min-width: 200px"
-      ></html:input>
-    </hbox>
-    <hbox align="center">
-      <html:a
-        href="https://docs.mistral.ai/capabilities/document/"
-        style="
-          color: #0066cc;
-          text-decoration: underline;
-          cursor: pointer;
-          font-size: 12px;
-        "
-        onclick="
-          Zotero.launchURL(this.href);
-          return false;
-        "
-      >
-        Mistral OCR Docs
-      </html:a>
-    </hbox>
-  </vbox>
-
-  <html:hr style="margin: 16px 0" />
-
-  <!-- Semantic Scholar Settings -->
-  <label>
-    <html:h3>Semantic Scholar Integration</html:h3>
-  </label>
-  <vbox
-    style="
-      margin-left: 20px;
-      padding: 10px;
-      background: rgba(0, 0, 0, 0.03);
-      border-radius: 4px;
-    "
-  >
-    <hbox align="center" style="margin-bottom: 8px">
-      <label style="width: 100px">API Key:</label>
-      <html:input
-        type="password"
-        id="zotero-prefpane-__addonRef__-semanticScholarApiKey"
-        placeholder="S2 API Key"
-        style="flex: 1; min-width: 200px"
-      ></html:input>
-    </hbox>
-    <hbox align="center">
-      <html:a
-        href="https://www.semanticscholar.org/product/api#api-key"
-        style="
-          color: #0066cc;
-          text-decoration: underline;
-          cursor: pointer;
-          font-size: 12px;
-        "
-        onclick="
-          Zotero.launchURL(this.href);
-          return false;
-        "
-      >
-        Get API Key
-      </html:a>
-    </hbox>
-  </vbox>
-
-  <html:hr style="margin: 16px 0" />
-
-  <!-- Web Search Integration -->
-  <label>
-    <html:h3>Web Search Integration (PDF Discovery &amp; AI Context)</html:h3>
-  </label>
-
-  <!-- Provider Selection -->
-  <hbox align="center" style="margin-bottom: 12px">
-    <label style="width: 120px; font-weight: bold">Search Provider:</label>
-    <menulist
-      id="zotero-prefpane-__addonRef__-webSearchProvider"
-      style="min-width: 150px"
-    >
-      <menupopup>
-        <menuitem value="firecrawl" label="Firecrawl" />
-        <menuitem value="tavily" label="Tavily" />
-        <menuitem value="youdotcom" label="You.com" />
-      </menupopup>
-    </menulist>
-  </hbox>
-
-  <!-- Firecrawl Settings -->
-  <vbox
-    id="zotero-prefpane-__addonRef__-firecrawlSettings"
-    style="
-      margin-left: 20px;
-      margin-bottom: 12px;
-      padding: 10px;
-      background: rgba(0, 0, 0, 0.03);
-      border-radius: 4px;
-    "
-  >
-    <hbox align="center" style="margin-bottom: 8px">
-      <label style="width: 100px">API Key:</label>
-      <html:input
-        type="password"
-        id="zotero-prefpane-__addonRef__-firecrawlApiKey"
-        placeholder="fc-YOUR-API-KEY"
-        style="flex: 1; min-width: 200px"
-      ></html:input>
-    </hbox>
-    <hbox align="center" style="margin-bottom: 8px">
-      <label style="width: 100px">API URL:</label>
-      <html:input
-        type="text"
-        id="zotero-prefpane-__addonRef__-firecrawlApiUrl"
-        placeholder="https://api.firecrawl.dev/v2 or http://localhost:3002/v2"
-        style="flex: 1; min-width: 200px"
-      >
-      </html:input>
-    </hbox>
-    <hbox align="center" style="margin-bottom: 8px">
-      <label style="width: 100px">Search Limit:</label>
-      <html:input
-        type="number"
-        id="zotero-prefpane-__addonRef__-firecrawlSearchLimit"
-        placeholder="3"
-        min="1"
-        max="10"
-        style="width: 60px"
-      ></html:input>
-      <label style="margin-left: 8px; font-size: 11px; color: #666"
-        >Results per query (1-10)</label
-      >
-    </hbox>
-    <hbox align="center" style="margin-bottom: 8px">
-      <label style="width: 100px">Max Concurrent:</label>
-      <html:input
-        type="number"
-        id="zotero-prefpane-__addonRef__-firecrawlMaxConcurrent"
-        placeholder="3"
-        min="1"
-        max="10"
-        style="width: 60px"
-      ></html:input>
-      <label style="margin-left: 8px; font-size: 11px; color: #666"
-        >Parallel requests (1-10)</label
-      >
-    </hbox>
-    <hbox align="center" style="gap: 16px">
-      <html:a
-        href="https://firecrawl.dev"
-        style="
-          color: #0066cc;
-          text-decoration: underline;
-          cursor: pointer;
-          font-size: 12px;
-        "
-        onclick="
-          Zotero.launchURL(this.href);
-          return false;
-        "
-      >
-        Get Firecrawl API Key
-      </html:a>
-      <html:a
-        href="https://github.com/mendableai/firecrawl"
-        style="
-          color: #0066cc;
-          text-decoration: underline;
-          cursor: pointer;
-          font-size: 12px;
-        "
-        onclick="
-          Zotero.launchURL(this.href);
-          return false;
-        "
-      >
-        Setup Firecrawl Locally
-      </html:a>
-    </hbox>
-  </vbox>
-
-  <!-- Tavily Settings -->
-  <vbox
-    id="zotero-prefpane-__addonRef__-tavilySettings"
-    style="
-      margin-left: 20px;
-      margin-bottom: 12px;
-      padding: 10px;
-      background: rgba(0, 0, 0, 0.03);
-      border-radius: 4px;
-    "
-  >
-    <hbox align="center" style="margin-bottom: 8px">
-      <label style="width: 100px">API Key:</label>
-      <html:input
-        type="password"
-        id="zotero-prefpane-__addonRef__-tavilyApiKey"
-        placeholder="tvly-YOUR-API-KEY"
-        style="flex: 1; min-width: 200px"
-      ></html:input>
-    </hbox>
-    <hbox align="center" style="margin-bottom: 8px">
-      <label style="width: 100px">Search Depth:</label>
-      <menulist
-        id="zotero-prefpane-__addonRef__-tavilySearchDepth"
-        style="min-width: 120px"
-      >
-        <menupopup>
-          <menuitem value="basic" label="Basic (faster)" />
-          <menuitem value="advanced" label="Advanced (deeper)" />
-        </menupopup>
-      </menulist>
-    </hbox>
-    <hbox align="center" style="margin-bottom: 8px">
-      <label style="width: 100px">Search Limit:</label>
-      <html:input
-        type="number"
-        id="zotero-prefpane-__addonRef__-tavilySearchLimit"
-        placeholder="5"
-        min="1"
-        max="20"
-        style="width: 60px"
-      ></html:input>
-      <label style="margin-left: 8px; font-size: 11px; color: #666"
-        >Results per query (1-20)</label
-      >
-    </hbox>
-    <hbox align="center" style="gap: 16px">
-      <html:a
-        href="https://app.tavily.com"
-        style="
-          color: #0066cc;
-          text-decoration: underline;
-          cursor: pointer;
-          font-size: 12px;
-        "
-        onclick="
-          Zotero.launchURL(this.href);
-          return false;
-        "
-      >
-        Get Tavily API Key
-      </html:a>
-      <html:a
-        href="https://docs.tavily.com"
-        style="
-          color: #0066cc;
-          text-decoration: underline;
-          cursor: pointer;
-          font-size: 12px;
-        "
-        onclick="
-          Zotero.launchURL(this.href);
-          return false;
-        "
-      >
-        Tavily Documentation
-      </html:a>
-    </hbox>
-  </vbox>
-
-  <!-- You.com Settings -->
-  <vbox
-    id="zotero-prefpane-__addonRef__-youdotcomSettings"
-    style="
-      margin-left: 20px;
-      margin-bottom: 12px;
-      padding: 10px;
-      background: rgba(0, 0, 0, 0.03);
-      border-radius: 4px;
-    "
-  >
-    <hbox align="center" style="margin-bottom: 8px">
-      <label style="width: 100px">API Key:</label>
-      <html:input
-        type="password"
-        id="zotero-prefpane-__addonRef__-youdotcomApiKey"
-        placeholder="YOUR-YOU-API-KEY"
-        style="flex: 1; min-width: 200px"
-      ></html:input>
-    </hbox>
-    <hbox align="center" style="margin-bottom: 8px">
-      <label style="width: 100px">Search Mode:</label>
-      <menulist
-        id="zotero-prefpane-__addonRef__-youdotcomSearchMode"
-        style="min-width: 120px"
-      >
-        <menupopup>
-          <menuitem value="normal" label="Normal" />
-          <menuitem value="research" label="Research" />
-        </menupopup>
-      </menulist>
-    </hbox>
-    <hbox align="center" style="margin-bottom: 8px">
-      <label style="width: 100px">Search Limit:</label>
-      <html:input
-        type="number"
-        id="zotero-prefpane-__addonRef__-youdotcomSearchLimit"
-        placeholder="5"
-        min="1"
-        max="20"
-        style="width: 60px"
-      ></html:input>
-      <label style="margin-left: 8px; font-size: 11px; color: #666"
-        >Results per query (1-20)</label
-      >
-    </hbox>
-    <hbox align="center" style="gap: 16px">
-      <html:a
-        href="https://api.you.com"
-        style="
-          color: #0066cc;
-          text-decoration: underline;
-          cursor: pointer;
-          font-size: 12px;
-        "
-        onclick="
-          Zotero.launchURL(this.href);
-          return false;
-        "
-      >
-        Get You.com API Key
-      </html:a>
-    </hbox>
-  </vbox>
-</groupbox>
-
-<html:hr style="margin: 16px 0" />
-
-<label>
-  <html:h3 id="seerai-retrieval-settings">AI &amp; Table Settings</html:h3>
-</label>
-<vbox
-  style="
-    margin-left: 20px;
-    padding: 10px;
-    background: rgba(0, 0, 0, 0.03);
-    border-radius: 4px;
-  "
->
-  <hbox align="center" style="margin-bottom: 8px">
-    <label style="width: 150px">Max Concurrent AI:</label>
-    <html:input
-      type="number"
-      id="zotero-prefpane-__addonRef__-aiMaxConcurrent"
-      placeholder="5"
-      min="1"
-      max="20"
-      style="width: 60px"
-    ></html:input>
-    <label style="margin-left: 8px; font-size: 11px; color: #666"
-      >Parallel AI requests (1-20)</label
-    >
-  </hbox>
-  <hbox align="center" style="margin-bottom: 8px">
-    <checkbox
-      id="zotero-prefpane-__addonRef__-tableGenerationSound"
-      label="Sound notification on table generation complete"
-      checked="true"
-    />
-  </hbox>
-</vbox>
-
-<html:hr style="margin: 16px 0" />
-
-<label>
-  <html:h3>RAG &amp; Reranker Settings</html:h3>
-</label>
-<vbox
-  style="
-    margin-left: 20px;
-    padding: 10px;
-    background: rgba(0, 0, 0, 0.03);
-    border-radius: 4px;
-  "
->
-  <html:h4 style="margin: 0 0 6px 0; color: var(--text-secondary)"
-    >Cross-encoder Reranker</html:h4
-  >
-
-  <hbox align="center" style="margin-bottom: 8px">
-    <label style="width: 90px; font-weight: bold">Provider:</label>
-    <menulist
-      id="zotero-prefpane-__addonRef__-ragRerankerProvider"
-      style="min-width: 160px"
-    >
-      <menupopup>
-        <menuitem value="none" label="None (local only)" />
-        <menuitem value="jina" label="Jina Reranker v3" />
-        <menuitem value="cohere" label="Cohere Rerank 4" />
-      </menupopup>
-    </menulist>
-  </hbox>
-
-  <hbox align="center" style="margin-bottom: 8px">
-    <label style="width: 90px; font-weight: bold">API Key:</label>
-    <html:input
-      type="password"
-      id="zotero-prefpane-__addonRef__-ragRerankerApiKey"
-      placeholder="Optional — required for Jina or Cohere"
-      style="flex: 1; min-width: 200px"
-    ></html:input>
-  </hbox>
-
-  <hbox align="center" style="margin-bottom: 8px">
-    <label style="width: 90px; font-weight: bold">Model:</label>
-    <html:input
-      type="text"
-      id="zotero-prefpane-__addonRef__-ragRerankerModel"
-      placeholder="jina-reranker-v3 (auto)"
-      style="flex: 1; min-width: 160px"
-    ></html:input>
-  </hbox>
-
-  <hbox align="center" style="margin-bottom: 12px">
-    <label style="width: 90px; font-weight: bold">Top N:</label>
-    <html:input
-      type="number"
-      id="zotero-prefpane-__addonRef__-ragRerankerTopN"
-      placeholder="10"
-      min="1"
-      max="100"
-      style="width: 60px"
-    ></html:input>
-    <label style="margin-left: 8px; font-size: 11px; color: #666"
-      >Candidates sent to reranker (1-100)</label
-    >
-  </hbox>
-
-  <html:h4 style="margin: 8px 0 6px 0; color: var(--text-secondary)"
-    >Hybrid Rank Fusion (RRF)</html:h4
-  >
-
-  <hbox align="center" style="margin-bottom: 8px">
-    <label style="width: 90px; font-weight: bold">RRF Alpha:</label>
-    <html:input
-      type="number"
-      id="zotero-prefpane-__addonRef__-ragRrfAlpha"
-      placeholder="55"
-      min="1"
-      max="99"
-      style="width: 60px"
-    ></html:input>
-    <label style="margin-left: 8px; font-size: 11px; color: #666"
-      >Dense weight 0–100 (default 55). Higher = favor semantic over keyword
-      results.</label
-    >
-  </hbox>
-
-  <html:h4 style="margin: 8px 0 6px 0; color: var(--text-secondary)"
-    >Diversity Selection (MMR)</html:h4
-  >
-
-  <hbox align="center" style="margin-bottom: 8px">
-    <checkbox
-      id="zotero-prefpane-__addonRef__-ragMmrEnabled"
-      label="Enable MMR diversity"
-      checked="true"
-    />
-  </hbox>
-
-  <hbox align="center" style="margin-bottom: 8px">
-    <label style="width: 90px; font-weight: bold">MMR Lambda:</label>
-    <html:input
-      type="number"
-      id="zotero-prefpane-__addonRef__-ragMmrLambda"
-      placeholder="70"
-      min="1"
-      max="99"
-      style="width: 60px"
-    ></html:input>
-    <label style="margin-left: 8px; font-size: 11px; color: #666"
-      >Relevance vs diversity 0–100 (default 70). Higher = more relevance, lower
-      = more diverse.</label
-    >
-  </hbox>
-</vbox>
-
-<html:hr style="margin: 8px 0" />
-
-<label>
-  <html:h4 style="margin: 0 0 6px 0; color: var(--text-secondary)"
-    >Advanced Retrieval</html:h4
-  >
-</label>
-<vbox
-  style="
-    margin-left: 20px;
-    padding: 10px;
-    background: rgba(0, 0, 0, 0.03);
-    border-radius: 4px;
-  "
->
-  <hbox align="center" style="margin-bottom: 6px">
-    <checkbox
-      id="zotero-prefpane-__addonRef__-ragContextualRetrieval"
-      label="Contextual Retrieval — generate chunk context via LLM at index time"
-    />
-  </hbox>
-  <hbox align="center" style="margin-bottom: 6px">
-    <checkbox
-      id="zotero-prefpane-__addonRef__-ragSentenceWindow"
-      label="Sentence-Window Retrieval — embed child chunks, retrieve parent windows"
-    />
-  </hbox>
-  <hbox align="center" style="margin-bottom: 6px">
-    <label style="width: 130px; font-weight: bold">Window Size:</label>
-    <html:input
-      type="number"
-      id="zotero-prefpane-__addonRef__-ragSentenceWindowSize"
-      placeholder="3"
-      min="1"
-      max="10"
-      style="width: 60px"
-    ></html:input>
-    <label style="margin-left: 8px; font-size: 11px; color: #666"
-      >Number of sentences before/after (1-10)</label
-    >
-  </hbox>
-  <hbox align="center" style="margin-bottom: 6px">
-    <checkbox
-      id="zotero-prefpane-__addonRef__-ragMultiQueryExpansion"
-      label="Multi-Query — generate variant queries for broader retrieval"
-    />
-  </hbox>
-  <hbox align="center" style="margin-bottom: 6px">
-    <checkbox
-      id="zotero-prefpane-__addonRef__-ragQueryDecomposition"
-      label="Query Decomposition — split complex queries into sub-queries"
-    />
-  </hbox>
-  <hbox align="center" style="margin-bottom: 6px">
-    <label style="width: 130px; font-weight: bold">Citation Graph Hops:</label>
-    <html:input
-      type="number"
-      id="zotero-prefpane-__addonRef__-ragCitationGraphHops"
-      placeholder="0"
-      min="0"
-      max="3"
-      style="width: 60px"
-    ></html:input>
-    <label style="margin-left: 8px; font-size: 11px; color: #666"
-      >Follow citation links 0-3 hops (0 = disabled)</label
-    >
-  </hbox>
-  <hbox align="center" style="margin-bottom: 6px">
-    <checkbox
-      id="zotero-prefpane-__addonRef__-ragCorrectiveEnabled"
-      label="Corrective RAG — evaluate + rewrite + re-retrieve on insufficient context"
-    />
-  </hbox>
-</vbox>
-
-<html:hr style="margin: 8px 0" />
-
-<label>
-  <html:h4 style="margin: 0 0 6px 0; color: var(--text-secondary)"
-    >Evaluation</html:h4
-  >
-</label>
-<vbox
-  style="
-    margin-left: 20px;
-    padding: 10px;
-    background: rgba(0, 0, 0, 0.03);
-    border-radius: 4px;
-  "
->
-  <hbox align="center" style="margin-bottom: 6px">
-    <checkbox
-      id="zotero-prefpane-__addonRef__-ragEvalEnabled"
-      label="Enable RAG evaluation (requires ground truth data)"
-    />
-  </hbox>
-  <hbox align="center" style="margin-bottom: 6px">
-    <label style="width: 100px; font-weight: bold">Ground Truth Path:</label>
-    <html:input
-      type="text"
-      id="zotero-prefpane-__addonRef__-ragEvalGroundTruth"
-      placeholder="evaluation/ground_truth.json"
-      style="flex: 1; min-width: 200px"
-    ></html:input>
-  </hbox>
-  <hbox align="center" style="margin-bottom: 6px">
-    <label style="width: 100px; font-weight: bold">Embedding Model:</label>
-    <html:input
-      type="text"
-      id="zotero-prefpane-__addonRef__-ragEvalEmbeddingModel"
-      placeholder="text-embedding-3-small"
-      style="width: 200px"
-    ></html:input>
-  </hbox>
-  <hbox align="center" style="margin-top: 8px">
-    <button id="zotero-prefpane-__addonRef__-clearRagCache" style="color: #c00">
-      Clear RAG Vector Cache
-    </button>
-  </hbox>
-</vbox>
-
-<html:hr style="margin: 16px 0" />
-
-<label>
-  <html:h3 id="seerai-cloud-settings">Cloud Storage Integration</html:h3>
-</label>
-<vbox
-  style="
-    margin-left: 20px;
-    padding: 10px;
-    background: rgba(0, 0, 0, 0.03);
-    border-radius: 4px;
-  "
->
-  <!-- Provider Selector -->
-  <hbox align="center" style="margin-bottom: 12px">
-    <label style="width: 100px; font-weight: bold">Provider:</label>
-    <menulist id="seerai-cloud-provider-select" style="min-width: 200px">
-      <menupopup>
-        <menuitem value="nextcloud" label="Nextcloud" />
-        <menuitem value="google" label="Google Drive" />
-        <menuitem value="onedrive" label="OneDrive" />
-        <menuitem value="dropbox" label="Dropbox" />
-        <menuitem value="box" label="Box" />
-      </menupopup>
-    </menulist>
-  </hbox>
-
-  <!-- === Google Drive Settings === -->
-  <vbox id="seerai-cloud-settings-google">
-    <hbox align="center" style="margin-bottom: 8px">
-      <html:span
-        id="seerai-drive-status-icon"
-        style="margin-right: 6px"
-      ></html:span>
-      <html:span id="seerai-drive-status-text">Not connected</html:span>
-    </hbox>
-    <button id="seerai-drive-signin-btn" label="Sign In with Google Drive" />
-    <hbox
-      id="seerai-drive-paste-area"
-      align="center"
-      style="margin-top: 8px; gap: 6px"
-      hidden="true"
-    >
-      <html:input
-        type="text"
-        id="seerai-drive-paste-input"
-        placeholder="Paste auth code or redirect URL"
-        style="flex: 1"
-      />
-      <button id="seerai-drive-paste-verify" label="Verify" />
-      <html:span
-        id="seerai-drive-paste-status"
-        style="font-size: 10px; color: var(--text-secondary); display: none"
-      />
-    </hbox>
-    <html:a
-      id="seerai-drive-custom-oauth-toggle"
-      style="
-        font-size: 11px;
-        cursor: pointer;
-        color: var(--text-secondary);
-        margin-top: 12px;
-        display: inline-block;
-        text-decoration: underline;
-      "
-      >Set Custom OAuth credentials...</html:a
-    >
-    <vbox
-      id="seerai-drive-custom-oauth"
-      hidden="true"
-      style="
-        margin-top: 8px;
-        padding: 10px;
-        background: var(--background-secondary);
-        border-radius: 4px;
-      "
-    >
-      <hbox align="center" style="margin-bottom: 6px">
-        <html:label style="width: 120px">Client ID:</html:label>
-        <html:input
-          type="text"
-          id="seerai-drive-client-id"
-          style="flex: 1"
-          placeholder="Default: 22680022759-6e2lk...apps.googleusercontent.com"
-        />
-      </hbox>
-      <hbox align="center" style="margin-bottom: 10px">
-        <html:label style="width: 120px">Client Secret:</html:label>
-        <html:input
-          type="password"
-          id="seerai-drive-client-secret"
-          style="flex: 1"
-          placeholder="(Required - if empty default used)"
-        />
-      </hbox>
-      <button id="seerai-drive-save-btn" label="Save" disabled="true" />
-    </vbox>
-    <html:p
-      style="
-        font-size: 10px;
-        color: var(--text-tertiary);
-        margin-top: 8px;
-        line-height: 1.4;
-      "
-    >
-      Redirect URI:
-      <html:code>http://localhost:23119/seerai/google/callback</html:code>
-      <br />Need credentials?
-      <html:a
-        href="https://console.cloud.google.com/apis/credentials"
-        style="color: #0066cc; text-decoration: underline; cursor: pointer"
-        onclick="
-          Zotero.launchURL(this.href);
-          return false;
-        "
-        >Google Cloud Console</html:a
-      >
-    </html:p>
-    <button
-      id="seerai-drive-clear-btn"
-      label="Disconnect &amp; Clear"
-      style="margin-top: 12px"
-    />
-  </vbox>
-
-  <!-- === Dropbox Settings === -->
-  <vbox id="seerai-cloud-settings-dropbox" hidden="true">
-    <hbox align="center" style="margin-bottom: 8px">
-      <html:span
-        id="seerai-dropbox-status-icon"
-        style="margin-right: 6px"
-      ></html:span>
-      <html:span id="seerai-dropbox-status-text">Not connected</html:span>
-    </hbox>
-    <button id="seerai-dropbox-signin-btn" label="Sign In with Dropbox" />
-    <hbox
-      id="seerai-dropbox-paste-area"
-      align="center"
-      style="margin-top: 8px; gap: 6px"
-      hidden="true"
-    >
-      <html:input
-        type="text"
-        id="seerai-dropbox-paste-input"
-        placeholder="Paste auth code or redirect URL"
-        style="flex: 1"
-      />
-      <button id="seerai-dropbox-paste-verify" label="Verify" />
-      <html:span
-        id="seerai-dropbox-paste-status"
-        style="font-size: 10px; color: var(--text-secondary); display: none"
-      />
-    </hbox>
-    <html:a
-      id="seerai-dropbox-custom-oauth-toggle"
-      style="
-        font-size: 11px;
-        cursor: pointer;
-        color: var(--text-secondary);
-        margin-top: 12px;
-        display: inline-block;
-        text-decoration: underline;
-      "
-      >Set Custom App Key...</html:a
-    >
-    <vbox
-      id="seerai-dropbox-custom-oauth"
-      hidden="true"
-      style="
-        margin-top: 8px;
-        padding: 10px;
-        background: var(--background-secondary);
-        border-radius: 4px;
-      "
-    >
-      <hbox align="center" style="margin-bottom: 6px">
-        <html:label style="width: 120px">App Key:</html:label>
-        <html:input
-          type="text"
-          id="seerai-dropbox-client-id"
-          style="flex: 1"
-          placeholder="Default: i91subs0zer8bi1"
-        />
-      </hbox>
-      <button id="seerai-dropbox-save-btn" label="Save" disabled="true" />
-    </vbox>
-    <html:p
-      style="
-        font-size: 10px;
-        color: var(--text-tertiary);
-        margin-top: 8px;
-        line-height: 1.4;
-      "
-    >
-      Redirect URI:
-      <html:code>http://localhost:23119/seerai/dropbox/callback</html:code>
-      <br />Permissions: In the Dropbox App Console, check ALL checkboxes under
-      <b>Files and folders</b> (read/write). <br />Need an app?
-      <html:a
-        href="https://www.dropbox.com/developers/apps"
-        style="color: #0066cc; text-decoration: underline; cursor: pointer"
-        onclick="
-          Zotero.launchURL(this.href);
-          return false;
-        "
-        >Dropbox App Console</html:a
-      >
-    </html:p>
-    <button
-      id="seerai-dropbox-clear-btn"
-      label="Disconnect &amp; Clear"
-      style="margin-top: 12px"
-    />
-  </vbox>
-
-  <!-- === Box Settings === -->
-  <vbox id="seerai-cloud-settings-box" hidden="true">
-    <hbox align="center" style="margin-bottom: 8px">
-      <html:span
-        id="seerai-box-status-icon"
-        style="margin-right: 6px"
-      ></html:span>
-      <html:span id="seerai-box-status-text">Not connected</html:span>
-    </hbox>
-    <button id="seerai-box-signin-btn" label="Sign In with Box" />
-    <hbox
-      id="seerai-box-paste-area"
-      align="center"
-      style="margin-top: 8px; gap: 6px"
-      hidden="true"
-    >
-      <html:input
-        type="text"
-        id="seerai-box-paste-input"
-        placeholder="Paste auth code or redirect URL"
-        style="flex: 1"
-      />
-      <button id="seerai-box-paste-verify" label="Verify" />
-      <html:span
-        id="seerai-box-paste-status"
-        style="font-size: 10px; color: var(--text-secondary); display: none"
-      />
-    </hbox>
-    <html:a
-      id="seerai-box-custom-oauth-toggle"
-      style="
-        font-size: 11px;
-        cursor: pointer;
-        color: var(--text-secondary);
-        margin-top: 12px;
-        display: inline-block;
-        text-decoration: underline;
-      "
-      >Set Custom OAuth credentials...</html:a
-    >
-    <vbox
-      id="seerai-box-custom-oauth"
-      hidden="true"
-      style="
-        margin-top: 8px;
-        padding: 10px;
-        background: var(--background-secondary);
-        border-radius: 4px;
-      "
-    >
-      <hbox align="center" style="margin-bottom: 6px">
-        <html:label style="width: 120px">Client ID:</html:label>
-        <html:input
-          type="text"
-          id="seerai-box-client-id"
-          style="flex: 1"
-          placeholder="Default: ozyt20t94vkvr3eu..."
-        />
-      </hbox>
-      <hbox align="center" style="margin-bottom: 10px">
-        <html:label style="width: 120px">Client Secret:</html:label>
-        <html:input
-          type="password"
-          id="seerai-box-client-secret"
-          style="flex: 1"
-          placeholder="(Required - if empty default used)"
-        />
-      </hbox>
-      <button id="seerai-box-save-btn" label="Save" disabled="true" />
-    </vbox>
-    <html:p
-      style="
-        font-size: 10px;
-        color: var(--text-tertiary);
-        margin-top: 8px;
-        line-height: 1.4;
-      "
-    >
-      Redirect URI:
-      <html:code>http://localhost:23119/seerai/box/callback</html:code>
-      <br />Need credentials?
-      <html:a
-        href="https://app.box.com/developers/console"
-        style="color: #0066cc; text-decoration: underline; cursor: pointer"
-        onclick="
-          Zotero.launchURL(this.href);
-          return false;
-        "
-        >Box Developer Console</html:a
-      >
-    </html:p>
-    <button
-      id="seerai-box-clear-btn"
-      label="Disconnect &amp; Clear"
-      style="margin-top: 12px"
-    />
-  </vbox>
-
-  <!-- === OneDrive Settings === -->
-  <vbox id="seerai-cloud-settings-onedrive" hidden="true">
-    <hbox align="center" style="margin-bottom: 8px">
-      <html:span
-        id="seerai-onedrive-status-icon"
-        style="margin-right: 6px"
-      ></html:span>
-      <html:span id="seerai-onedrive-status-text">Not connected</html:span>
-    </hbox>
-    <button id="seerai-onedrive-signin-btn" label="Sign In with OneDrive" />
-    <hbox
-      id="seerai-onedrive-paste-area"
-      align="center"
-      style="margin-top: 8px; gap: 6px"
-      hidden="true"
-    >
-      <html:input
-        type="text"
-        id="seerai-onedrive-paste-input"
-        placeholder="Paste auth code or redirect URL"
-        style="flex: 1"
-      />
-      <button id="seerai-onedrive-paste-verify" label="Verify" />
-      <html:span
-        id="seerai-onedrive-paste-status"
-        style="font-size: 10px; color: var(--text-secondary); display: none"
-      />
-    </hbox>
-    <html:a
-      id="seerai-onedrive-custom-oauth-toggle"
-      style="
-        font-size: 11px;
-        cursor: pointer;
-        color: var(--text-secondary);
-        margin-top: 12px;
-        display: inline-block;
-        text-decoration: underline;
-      "
-      >Set Custom OAuth credentials...</html:a
-    >
-    <vbox
-      id="seerai-onedrive-custom-oauth"
-      hidden="true"
-      style="
-        margin-top: 8px;
-        padding: 10px;
-        background: var(--background-secondary);
-        border-radius: 4px;
-      "
-    >
-      <hbox align="center" style="margin-bottom: 6px">
-        <html:label style="width: 120px">Client ID:</html:label>
-        <html:input
-          type="text"
-          id="seerai-onedrive-client-id"
-          style="flex: 1"
-          placeholder="Default: c1cf27ad-234e-4c44-b233-973eb32846fa"
-        />
-      </hbox>
-      <hbox align="center" style="margin-bottom: 10px">
-        <html:label style="width: 120px">SharePoint Site ID:</html:label>
-        <html:input
-          type="text"
-          id="seerai-onedrive-site-id"
-          style="flex: 1"
-          placeholder="(Leave empty for personal OneDrive)"
-        />
-      </hbox>
-      <button id="seerai-onedrive-save-btn" label="Save" disabled="true" />
-    </vbox>
-    <html:p
-      style="
-        font-size: 10px;
-        color: var(--text-tertiary);
-        margin-top: 8px;
-        line-height: 1.4;
-      "
-    >
-      Redirect URI:
-      <html:code>http://localhost:23119/seerai/onedrive/callback</html:code>
-      <br />Need an app registration?
-      <html:a
-        href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
-        style="color: #0066cc; text-decoration: underline; cursor: pointer"
-        onclick="
-          Zotero.launchURL(this.href);
-          return false;
-        "
-        >Azure App Registrations</html:a
-      >
-      <br />Scopes: Files.Read.All, offline_access
-    </html:p>
-    <button
-      id="seerai-onedrive-clear-btn"
-      label="Disconnect &amp; Clear"
-      style="margin-top: 12px"
-    />
-  </vbox>
-
-  <!-- === Nextcloud Settings === -->
-  <vbox id="seerai-cloud-settings-nextcloud" hidden="true">
-    <hbox align="center" style="margin-bottom: 8px">
-      <html:span
-        id="seerai-nextcloud-status-icon"
-        style="margin-right: 6px"
-      ></html:span>
-      <html:span id="seerai-nextcloud-status-text">Not connected</html:span>
-    </hbox>
-    <hbox align="center" style="margin-bottom: 6px">
-      <html:label style="width: 120px">Server URL:</html:label>
-      <html:input
-        type="text"
-        id="seerai-nextcloud-server-url"
-        style="flex: 1"
-        placeholder="https://cloud.example.com"
-      />
-    </hbox>
-    <hbox align="center" style="margin-bottom: 6px">
-      <html:label style="width: 120px">Username:</html:label>
-      <html:input type="text" id="seerai-nextcloud-username" style="flex: 1" />
-    </hbox>
-    <hbox align="center" style="margin-bottom: 10px">
-      <html:label style="width: 120px">App Password:</html:label>
-      <html:input
-        type="password"
-        id="seerai-nextcloud-app-password"
-        style="flex: 1"
-      />
-    </hbox>
-    <button id="seerai-nextcloud-connect-btn" label="Connect" disabled="true" />
-    <html:p
-      style="
-        font-size: 10px;
-        color: var(--text-tertiary);
-        margin-top: 8px;
-        line-height: 1.4;
-      "
-    >
-      Generate an App Password in your Nextcloud
-      <html:a
-        href="https://docs.nextcloud.com/server/latest/user_manual/en/session_management.html"
-        style="color: #0066cc; text-decoration: underline; cursor: pointer"
-        onclick="
-          Zotero.launchURL(this.href);
-          return false;
-        "
-        >Security Settings</html:a
-      >
-      (Profile → Security → App Passwords).
-      <br />No OAuth -- credentials are used directly for WebDAV access.
-    </html:p>
-    <button
-      id="seerai-nextcloud-clear-btn"
-      label="Disconnect &amp; Clear"
-      style="margin-top: 12px"
-    />
-  </vbox>
-</vbox>
 
 <vbox style="margin-top: 16px">
   <html:label

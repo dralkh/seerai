@@ -13,6 +13,7 @@ const HTML_NS = "http://www.w3.org/1999/xhtml";
 
 export interface ChatSettingsOptions {
   onModeChange?: (mode: "lock" | "default" | "explore") => void;
+  onModelChange?: () => void;
   onClose?: () => void;
 }
 
@@ -33,7 +34,7 @@ export function showChatSettings(
 
   const rect = anchor.getBoundingClientRect();
   const win = doc.defaultView as Window;
-  const popoverWidth = 240;
+  const popoverWidth = 320;
   const popoverLeft = Math.min(
     Math.max(8, rect.left),
     Math.max(8, win.innerWidth - popoverWidth - 8),
@@ -85,6 +86,9 @@ export function showChatSettings(
     maxHeight: "350px",
     overflowY: "auto",
   });
+
+  // Model / provider / routing-preset selection lives in its own popover
+  // anchored to the model button in the toolbar (showModelRoutingPopover).
 
   // --- 1.5. Model Parameters (Temp & Max Tokens) ---
   const paramSection = doc.createElement("div");

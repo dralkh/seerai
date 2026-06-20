@@ -5,6 +5,17 @@ import {
   renderModelDefaults,
   renderProviderSettings,
 } from "./chat/ui/providerManager";
+import {
+  renderAdvancedRetrievalSettings,
+  renderAiTableSettings,
+  renderDataManagementSettings,
+  renderEvaluationSettings,
+  renderMcpSettings,
+  renderOcrSettings,
+  renderRagRerankerSettings,
+  renderSemanticScholarSettings,
+  renderWebSearchSettings,
+} from "./chat/ui/integrationSettings";
 import { subscribeProviderRegistry } from "./chat/providerRegistry";
 
 let unsubscribeProviderSettings: (() => void) | undefined;
@@ -46,8 +57,8 @@ export async function registerPrefsScripts(_window: Window) {
     addon.data.prefs.window = _window;
   }
   updatePrefsUI();
-  bindPrefEvents();
   initProviderSettingsUI();
+  initIntegrationSettingsUI();
   initDrivePrefsUI();
 }
 
@@ -71,6 +82,39 @@ function initProviderSettingsUI() {
       renderModelDefaults(doc, defaultsContainer);
     }
   });
+}
+
+// Renders the styled integration sections (MCP, data management, OCR, semantic
+// scholar, web search, AI & table, RAG & reranker, advanced retrieval,
+// evaluation) into their container divs. Cloud storage keeps its own wiring in
+// initDrivePrefsUI.
+function initIntegrationSettingsUI() {
+  const doc = addon.data.prefs!.window.document;
+  const sections: Array<
+    [string, (doc: Document, container: HTMLElement) => void]
+  > = [
+    ["mcp-settings", renderMcpSettings],
+    ["data-settings", renderDataManagementSettings],
+    ["ocr-settings", renderOcrSettings],
+    ["semanticscholar-settings", renderSemanticScholarSettings],
+    ["websearch-settings", renderWebSearchSettings],
+    ["aitable-settings", renderAiTableSettings],
+    ["ragreranker-settings", renderRagRerankerSettings],
+    ["advancedretrieval-settings", renderAdvancedRetrievalSettings],
+    ["evaluation-settings", renderEvaluationSettings],
+  ];
+  for (const [suffix, render] of sections) {
+    const container = doc.getElementById(
+      `${config.addonRef}-${suffix}`,
+    ) as HTMLElement | null;
+    if (container) {
+      try {
+        render(doc, container);
+      } catch (e) {
+        Zotero.debug(`[seerai] Failed to render ${suffix}: ${e}`);
+      }
+    }
+  }
 }
 
 async function updatePrefsUI() {
@@ -136,525 +180,6 @@ async function updatePrefsUI() {
     });
   await renderLock.promise;
   ztoolkit.log("Preference table rendered!");
-}
-
-function bindPrefEvents() {
-  const doc = addon.data.prefs!.window.document;
-  const prefPrefix = config.prefsPrefix;
-
-  // Helper to bind an input element to a preference
-  function bindInput(inputId: string, prefKey: string) {
-    const input = doc?.querySelector(`#${inputId}`) as HTMLInputElement | null;
-    if (!input) return;
-
-    // Load current value from preferences
-    const currentValue = Zotero.Prefs.get(`${prefPrefix}.${prefKey}`) as string;
-    input.value = currentValue ?? "";
-
-    // Save value when changed
-    input.addEventListener("change", () => {
-      Zotero.Prefs.set(`${prefPrefix}.${prefKey}`, input.value);
-      ztoolkit.log(`Saved ${prefKey}: ${input.value}`);
-    });
-  }
-
-  // Helper to bind a checkbox element to a boolean preference
-  function bindCheckbox(checkboxId: string, prefKey: string) {
-    const checkbox = doc?.querySelector(
-      `#${checkboxId}`,
-    ) as HTMLInputElement | null;
-    if (!checkbox) return;
-
-    // Load current value from preferences
-    const currentValue = Zotero.Prefs.get(
-      `${prefPrefix}.${prefKey}`,
-    ) as boolean;
-    checkbox.checked = currentValue ?? false;
-
-    // Save value when changed
-    checkbox.addEventListener("command", () => {
-      Zotero.Prefs.set(`${prefPrefix}.${prefKey}`, checkbox.checked);
-      ztoolkit.log(`Saved ${prefKey}: ${checkbox.checked}`);
-    });
-  }
-
-  // Function to show/hide settings based on mode selection
-  function updateModeVisibility(mode: string) {
-    const localSettings = doc?.querySelector(
-      `#zotero-prefpane-${config.addonRef}-localSettings`,
-    ) as HTMLElement;
-    const cloudSettings = doc?.querySelector(
-      `#zotero-prefpane-${config.addonRef}-cloudSettings`,
-    ) as HTMLElement;
-    const mistralSettings = doc?.querySelector(
-      `#zotero-prefpane-${config.addonRef}-mistralSettings`,
-    ) as HTMLElement;
-
-    if (localSettings) {
-      localSettings.style.display = mode === "local" ? "" : "none";
-    }
-    if (cloudSettings) {
-      cloudSettings.style.display = mode === "cloud" ? "" : "none";
-    }
-    if (mistralSettings) {
-      mistralSettings.style.display = mode === "mistral" ? "" : "none";
-    }
-  }
-
-  // Bind menulist for mode selection
-  const modeSelect = doc?.querySelector(
-    `#zotero-prefpane-${config.addonRef}-datalabMode`,
-  ) as XUL.MenuList;
-  if (modeSelect) {
-    // Load current value from preference (fallback to datalabUseLocal for backward compat)
-    let currentMode = Zotero.Prefs.get(`${prefPrefix}.datalabMode`) as string;
-    if (!currentMode) {
-      // Backward compatibility: check old boolean preference
-      const useLocal = Zotero.Prefs.get(
-        `${prefPrefix}.datalabUseLocal`,
-      ) as boolean;
-      currentMode = useLocal ? "local" : "cloud";
-    }
-    modeSelect.value = currentMode;
-    updateModeVisibility(currentMode);
-
-    // Save on change
-    modeSelect.addEventListener("command", () => {
-      const newMode = modeSelect.value;
-      Zotero.Prefs.set(`${prefPrefix}.datalabMode`, newMode);
-      // Also update boolean for backward compat
-      Zotero.Prefs.set(`${prefPrefix}.datalabUseLocal`, newMode === "local");
-      updateModeVisibility(newMode);
-      ztoolkit.log(`Saved datalabMode: ${newMode}`);
-    });
-  }
-
-  // Bind other DataLab settings
-  bindInput(`zotero-prefpane-${config.addonRef}-datalabUrl`, "datalabUrl");
-  bindInput(
-    `zotero-prefpane-${config.addonRef}-datalabApiKey`,
-    "datalabApiKey",
-  );
-  bindInput(
-    `zotero-prefpane-${config.addonRef}-mistralApiKey`,
-    "mistralApiKey",
-  );
-
-  // AI Insights settings
-  bindCheckbox(
-    `zotero-prefpane-${config.addonRef}-searchAutoAiInsights`,
-    "searchAutoAiInsights",
-  );
-  bindInput(
-    `zotero-prefpane-${config.addonRef}-searchAiInsightsPrompt`,
-    "searchAiInsightsPrompt",
-  );
-  bindInput(
-    `zotero-prefpane-${config.addonRef}-searchAiInsightsResponseLength`,
-    "searchAiInsightsResponseLength",
-  );
-
-  // Bind menulist for citation style
-  const styleSelect = doc?.querySelector(
-    `#zotero-prefpane-${config.addonRef}-searchAiInsightsCitationStyle`,
-  ) as XUL.MenuList;
-  if (styleSelect) {
-    styleSelect.value =
-      (Zotero.Prefs.get(
-        `${prefPrefix}.searchAiInsightsCitationStyle`,
-      ) as string) || "numbered";
-    styleSelect.addEventListener("command", () => {
-      Zotero.Prefs.set(
-        `${prefPrefix}.searchAiInsightsCitationStyle`,
-        styleSelect.value,
-      );
-    });
-  }
-
-  // Local-specific settings
-  bindCheckbox(
-    `zotero-prefpane-${config.addonRef}-localForceOcr`,
-    "localForceOcr",
-  );
-
-  // Cloud-specific settings
-  bindCheckbox(
-    `zotero-prefpane-${config.addonRef}-cloudForceOcr`,
-    "cloudForceOcr",
-  );
-  bindCheckbox(`zotero-prefpane-${config.addonRef}-cloudUseLlm`, "cloudUseLlm");
-
-  // Semantic Scholar settings
-  bindInput(
-    `zotero-prefpane-${config.addonRef}-semanticScholarApiKey`,
-    "semanticScholarApiKey",
-  );
-
-  // Firecrawl settings
-  bindInput(
-    `zotero-prefpane-${config.addonRef}-firecrawlApiKey`,
-    "firecrawlApiKey",
-  );
-  bindInput(
-    `zotero-prefpane-${config.addonRef}-firecrawlApiUrl`,
-    "firecrawlApiUrl",
-  );
-  bindInput(
-    `zotero-prefpane-${config.addonRef}-firecrawlSearchLimit`,
-    "firecrawlSearchLimit",
-  );
-
-  // Tavily settings
-  bindInput(`zotero-prefpane-${config.addonRef}-tavilyApiKey`, "tavilyApiKey");
-  bindInput(
-    `zotero-prefpane-${config.addonRef}-tavilySearchLimit`,
-    "tavilySearchLimit",
-  );
-
-  // Tavily search depth menulist
-  const tavilyDepthSelect = doc?.querySelector(
-    `#zotero-prefpane-${config.addonRef}-tavilySearchDepth`,
-  ) as XUL.MenuList;
-  if (tavilyDepthSelect) {
-    tavilyDepthSelect.value =
-      (Zotero.Prefs.get(`${prefPrefix}.tavilySearchDepth`) as string) ||
-      "basic";
-    tavilyDepthSelect.addEventListener("command", () => {
-      Zotero.Prefs.set(
-        `${prefPrefix}.tavilySearchDepth`,
-        tavilyDepthSelect.value,
-      );
-    });
-  }
-
-  // You.com settings
-  bindInput(
-    `zotero-prefpane-${config.addonRef}-youdotcomApiKey`,
-    "youdotcomApiKey",
-  );
-  bindInput(
-    `zotero-prefpane-${config.addonRef}-youdotcomSearchLimit`,
-    "youdotcomSearchLimit",
-  );
-
-  // You.com search mode menulist
-  const youdotcomModeSelect = doc?.querySelector(
-    `#zotero-prefpane-${config.addonRef}-youdotcomSearchMode`,
-  ) as XUL.MenuList;
-  if (youdotcomModeSelect) {
-    youdotcomModeSelect.value =
-      (Zotero.Prefs.get(`${prefPrefix}.youdotcomSearchMode`) as string) ||
-      "normal";
-    youdotcomModeSelect.addEventListener("command", () => {
-      Zotero.Prefs.set(
-        `${prefPrefix}.youdotcomSearchMode`,
-        youdotcomModeSelect.value,
-      );
-    });
-  }
-
-  // Web Search Provider selection with show/hide logic
-  function updateWebSearchProviderVisibility(provider: string) {
-    const firecrawlSettings = doc?.querySelector(
-      `#zotero-prefpane-${config.addonRef}-firecrawlSettings`,
-    ) as HTMLElement;
-    const tavilySettings = doc?.querySelector(
-      `#zotero-prefpane-${config.addonRef}-tavilySettings`,
-    ) as HTMLElement;
-    const youdotcomSettings = doc?.querySelector(
-      `#zotero-prefpane-${config.addonRef}-youdotcomSettings`,
-    ) as HTMLElement;
-
-    if (firecrawlSettings) {
-      firecrawlSettings.style.display = provider === "firecrawl" ? "" : "none";
-    }
-    if (tavilySettings) {
-      tavilySettings.style.display = provider === "tavily" ? "" : "none";
-    }
-    if (youdotcomSettings) {
-      youdotcomSettings.style.display = provider === "youdotcom" ? "" : "none";
-    }
-  }
-
-  const webSearchProviderSelect = doc?.querySelector(
-    `#zotero-prefpane-${config.addonRef}-webSearchProvider`,
-  ) as XUL.MenuList;
-  if (webSearchProviderSelect) {
-    const currentProvider =
-      (Zotero.Prefs.get(`${prefPrefix}.webSearchProvider`) as string) ||
-      "firecrawl";
-    webSearchProviderSelect.value = currentProvider;
-    updateWebSearchProviderVisibility(currentProvider);
-
-    webSearchProviderSelect.addEventListener("command", () => {
-      Zotero.Prefs.set(
-        `${prefPrefix}.webSearchProvider`,
-        webSearchProviderSelect.value,
-      );
-      updateWebSearchProviderVisibility(webSearchProviderSelect.value);
-      ztoolkit.log(`Saved webSearchProvider: ${webSearchProviderSelect.value}`);
-    });
-  }
-
-  // AI & Table settings
-  bindInput(
-    `zotero-prefpane-${config.addonRef}-aiMaxConcurrent`,
-    "aiMaxConcurrent",
-  );
-  bindCheckbox(
-    `zotero-prefpane-${config.addonRef}-tableGenerationSound`,
-    "tableGenerationSound",
-  );
-
-  // RAG Reranker settings
-  (() => {
-    const providerSelect = doc?.querySelector(
-      `#zotero-prefpane-${config.addonRef}-ragRerankerProvider`,
-    ) as XUL.MenuList;
-    if (providerSelect) {
-      const currentProvider =
-        (Zotero.Prefs.get(`${prefPrefix}.ragRerankerProvider`) as string) ||
-        "none";
-      providerSelect.value = currentProvider;
-      providerSelect.addEventListener("command", () => {
-        Zotero.Prefs.set(
-          `${prefPrefix}.ragRerankerProvider`,
-          providerSelect.value,
-        );
-      });
-    }
-
-    bindInput(
-      `zotero-prefpane-${config.addonRef}-ragRerankerApiKey`,
-      "ragRerankerApiKey",
-    );
-    bindInput(
-      `zotero-prefpane-${config.addonRef}-ragRerankerModel`,
-      "ragRerankerModel",
-    );
-    bindInput(
-      `zotero-prefpane-${config.addonRef}-ragRerankerTopN`,
-      "ragRerankerTopN",
-    );
-    bindInput(`zotero-prefpane-${config.addonRef}-ragRrfAlpha`, "ragRrfAlpha");
-    bindCheckbox(
-      `zotero-prefpane-${config.addonRef}-ragMmrEnabled`,
-      "ragMmrEnabled",
-    );
-    bindInput(
-      `zotero-prefpane-${config.addonRef}-ragMmrLambda`,
-      "ragMmrLambda",
-    );
-  })();
-
-  // Phase 8 RAG settings
-  (() => {
-    bindCheckbox(
-      `zotero-prefpane-${config.addonRef}-ragContextualRetrieval`,
-      "ragContextualRetrieval",
-    );
-    bindCheckbox(
-      `zotero-prefpane-${config.addonRef}-ragSentenceWindow`,
-      "ragSentenceWindow",
-    );
-    bindInput(
-      `zotero-prefpane-${config.addonRef}-ragSentenceWindowSize`,
-      "ragSentenceWindowSize",
-    );
-    bindCheckbox(
-      `zotero-prefpane-${config.addonRef}-ragMultiQueryExpansion`,
-      "ragMultiQueryExpansion",
-    );
-    bindCheckbox(
-      `zotero-prefpane-${config.addonRef}-ragQueryDecomposition`,
-      "ragQueryDecomposition",
-    );
-    bindInput(
-      `zotero-prefpane-${config.addonRef}-ragCitationGraphHops`,
-      "ragCitationGraphHops",
-    );
-    bindCheckbox(
-      `zotero-prefpane-${config.addonRef}-ragCorrectiveEnabled`,
-      "ragCorrectiveEnabled",
-    );
-    bindCheckbox(
-      `zotero-prefpane-${config.addonRef}-ragEvalEnabled`,
-      "ragEvalEnabled",
-    );
-    bindInput(
-      `zotero-prefpane-${config.addonRef}-ragEvalGroundTruth`,
-      "ragEvalGroundTruth",
-    );
-    bindInput(
-      `zotero-prefpane-${config.addonRef}-ragEvalEmbeddingModel`,
-      "ragEvalEmbeddingModel",
-    );
-
-    const clearBtn = doc?.querySelector(
-      `#zotero-prefpane-${config.addonRef}-clearRagCache`,
-    ) as HTMLButtonElement;
-    if (clearBtn) {
-      clearBtn.addEventListener("click", async () => {
-        try {
-          const { getVectorStore } = await import("./chat/rag/vectorStore");
-          const store = getVectorStore();
-          await store.clearAll();
-          Zotero.debug("[seerai] RAG: vector cache cleared");
-          const ZM = ztoolkit.getGlobal("Zotero").getMainWindow();
-          const svc = ZM.require("./services/prompts");
-          if (svc) svc.alert("", "RAG vector cache cleared.");
-        } catch (e) {
-          Zotero.debug(`[seerai] RAG: cache clear failed: ${e}`);
-        }
-      });
-    }
-  })();
-
-  // Initialize MCP Integration UI
-  initMcpIntegrationUI();
-
-  // Initialize Advanced Data Management UI
-  try {
-    initAdvancedDataManagementUI();
-  } catch (e) {
-    Zotero.debug(
-      `[seerai] Error initializing Advanced Data Management UI: ${e}`,
-    );
-  }
-}
-
-/**
- * Initialize MCP Integration UI
- */
-function initMcpIntegrationUI() {
-  const doc = addon.data.prefs!.window.document;
-  const configArea = doc.getElementById(
-    `zotero-prefpane-${config.addonRef}-mcpConfigJson`,
-  ) as any; // HTMLTextAreaElement
-  const copyBtn = doc.getElementById(
-    `zotero-prefpane-${config.addonRef}-copyMcpConfig`,
-  );
-
-  if (!configArea) return;
-
-  // Default config showing structure
-  const mcpConfig = {
-    mcpServers: {
-      "seerai-zotero": {
-        command: "node",
-        args: ["/absolute/path/to/seerai-mcp.cjs"],
-      },
-    },
-  };
-
-  configArea.value = JSON.stringify(mcpConfig, null, 2);
-
-  copyBtn?.addEventListener("command", () => {
-    // Copy to clipboard
-    try {
-      const clipboard = (Components.classes as any)[
-        "@mozilla.org/widget/clipboardhelper;1"
-      ].getService((Components.interfaces as any).nsIClipboardHelper);
-      clipboard.copyString(configArea.value);
-
-      // Visual feedback
-      const originalLabel = copyBtn.getAttribute("label");
-      copyBtn.setAttribute("label", "Copied!");
-      setTimeout(() => {
-        copyBtn.setAttribute(
-          "label",
-          originalLabel || "Copy Config to Clipboard",
-        );
-      }, 2000);
-    } catch (e) {
-      addon.data.prefs!.window.alert("Failed to copy to clipboard");
-      console.error(e);
-    }
-  });
-}
-
-/**
- * Initialize Advanced Data Management UI (Export/Import)
- */
-function initAdvancedDataManagementUI() {
-  const doc = addon.data.prefs!.window.document;
-  const exportBtn = doc.getElementById(
-    `zotero-prefpane-${config.addonRef}-exportConfig`,
-  );
-  const importBtn = doc.getElementById(
-    `zotero-prefpane-${config.addonRef}-importConfig`,
-  );
-
-  if (!exportBtn || !importBtn) return;
-
-  // Use the API exposed in index.ts
-  // @ts-expect-error - Zotero.SeerAI.api not in types
-  const { exportAllData, importAllData } = Zotero.SeerAI.api.ConfigManager;
-
-  exportBtn.addEventListener("command", async () => {
-    try {
-      const data = await exportAllData();
-      const json = JSON.stringify(data, null, 2);
-
-      const win = addon.data.prefs!.window;
-      const Cc = (Components as any).classes;
-      const Ci = (Components as any).interfaces;
-
-      const fp = Cc["@mozilla.org/filepicker;1"].createInstance(
-        Ci.nsIFilePicker,
-      );
-      fp.init(win, "Export Seer-AI Configuration", Ci.nsIFilePicker.modeSave);
-      fp.appendFilter("JSON Files", "*.json");
-      fp.defaultString = `seerai-config-${new Date().toISOString().slice(0, 10)}.json`;
-
-      const res = await new Promise((resolve) => fp.open(resolve));
-      if (res !== Ci.nsIFilePicker.returnCancel && fp.file) {
-        await IOUtils.writeUTF8(fp.file.path, json);
-        Zotero.debug(`[seerai] Exported config to ${fp.file.path}`);
-      }
-    } catch (e) {
-      Zotero.debug(`[seerai] Export failed: ${e}`);
-      addon.data.prefs!.window.alert(`Export failed: ${e}`);
-    }
-  });
-
-  importBtn.addEventListener("command", async () => {
-    try {
-      const win = addon.data.prefs!.window;
-      const Cc = (Components as any).classes;
-      const Ci = (Components as any).interfaces;
-
-      const fp = Cc["@mozilla.org/filepicker;1"].createInstance(
-        Ci.nsIFilePicker,
-      );
-      fp.init(win, "Import Seer-AI Configuration", Ci.nsIFilePicker.modeOpen);
-      fp.appendFilter("JSON Files", "*.json");
-
-      const res = await new Promise((resolve) => fp.open(resolve));
-      if (res !== Ci.nsIFilePicker.returnCancel && fp.file) {
-        const json = await IOUtils.readUTF8(fp.file.path);
-        const data = JSON.parse(json);
-
-        if (
-          win.confirm(
-            "This will overwrite your current Seer-AI configuration (preferences, tables, prompts). Are you sure?",
-          )
-        ) {
-          const result = await importAllData(data);
-          if (result.success) {
-            win.alert(
-              `Import Successful!\n${result.stats}\nPlease restart Zotero/Seer-AI for all changes to take full effect.`,
-            );
-          } else {
-            win.alert(`Import Failed: ${result.error}`);
-          }
-        }
-      }
-    } catch (e) {
-      Zotero.debug(`[seerai] Import failed: ${e}`);
-      addon.data.prefs!.window.alert(`Import failed: ${e}`);
-    }
-  });
 }
 
 interface ProviderUIElements {

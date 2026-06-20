@@ -142,7 +142,7 @@ function normalizedProvider(
   };
 }
 
-function createRoutingPresetBar(
+export function createRoutingPresetBar(
   doc: Document,
   currentModels: () => Partial<Record<ModelType, ModelRef>>,
   onApply: (models: Partial<Record<ModelType, ModelRef>>) => void,
@@ -1093,92 +1093,50 @@ export function renderModelDefaults(
   container.appendChild(rows);
 }
 
-export function createChatModelPicker(
+// The single model-selection surface: routing preset + per-capability routes +
+// inline provider management. Rendered inside the chat Configuration popover so
+// model, provider, and preset selection all live in one place.
+export function createModelRoutingPanel(
   doc: Document,
   stateManager: ChatStateManager,
   onChange: () => void,
-): HTMLButtonElement {
-  const button = element(doc, "button", "seerai-chat-model-button");
-  button.type = "button";
-  const label = element(doc, "span");
-  const arrow = createSvgIcon(doc, "chevron-down", { size: 12 });
-  const refreshLabel = () => {
-    const options = stateManager.getOptions();
-    const activeRoutes = {
-      ...getProviderRegistryState().defaults,
-      ...(options.modelRef && { chat: options.modelRef }),
-    };
-    const activePreset = matchingRoutingPreset(activeRoutes);
-    const selectedPreset = getModelRoutingPresets().find(
-      (preset) => preset.id === options.routingPresetId,
+): HTMLElement {
+  const panel = element(doc, "div", "seerai-model-routing-panel");
+  const notify = () => {
+    onChange();
+    doc.dispatchEvent(
+      new (doc.defaultView as any).CustomEvent("seerai-routing-changed"),
     );
-    if (selectedPreset && selectedPreset.id !== activePreset?.id) {
-      label.textContent = `${selectedPreset.name} · Edited`;
-      button.title = `Editing routing preset: ${selectedPreset.name}`;
-      return;
-    }
-    if (activePreset) {
-      label.textContent = activePreset.name;
-      button.title = `Active routing preset: ${activePreset.name}`;
-      return;
-    }
-    const resolved = getAvailableModels("chat").find(
-      (item) =>
-        item.ref.providerId === options.modelRef?.providerId &&
-        item.ref.localModelId === options.modelRef?.localModelId,
-    );
-    if (resolved) {
-      label.textContent = `${resolved.provider.name} · ${resolved.model.displayName}`;
-      button.title = "This conversation uses a model override";
-    } else {
-      const defaultRef = getDefaultModelRef("chat");
-      const inherited = getAvailableModels("chat").find(
-        (item) =>
-          item.ref.providerId === defaultRef?.providerId &&
-          item.ref.localModelId === defaultRef?.localModelId,
-      );
-      label.textContent = inherited
-        ? `${inherited.model.displayName} · Default`
-        : "Select model";
-      button.title = "This conversation follows the app default";
-    }
   };
-  refreshLabel();
-  button.append(label, arrow);
 
-  button.addEventListener("click", (event) => {
-    event.stopPropagation();
-    doc.getElementById("seerai-chat-model-popover")?.remove();
-    const rect = button.getBoundingClientRect();
-    const popup = element(doc, "div", "seerai-chat-model-popover");
-    popup.id = "seerai-chat-model-popover";
-    popup.addEventListener("mousedown", (popupEvent) => {
-      popupEvent.stopPropagation();
-    });
-    popup.addEventListener("click", (popupEvent) => {
-      popupEvent.stopPropagation();
-    });
-    popup.style.left = `${Math.max(8, rect.left)}px`;
-    popup.style.bottom = `${Math.max(8, (doc.defaultView?.innerHeight || 0) - rect.top + 6)}px`;
-    const positionPopup = () => {
-      const viewportWidth = doc.defaultView?.innerWidth || 0;
-      const viewportHeight = doc.defaultView?.innerHeight || 0;
-      const left = Math.min(
-        Math.max(8, rect.left),
-        Math.max(8, viewportWidth - popup.offsetWidth - 8),
-      );
-      const above = rect.top - popup.offsetHeight - 6;
-      const top =
-        above >= 8
-          ? above
-          : Math.min(
-              rect.bottom + 6,
-              Math.max(8, viewportHeight - popup.offsetHeight - 8),
-            );
-      popup.style.left = `${left}px`;
-      popup.style.top = `${top}px`;
-      popup.style.bottom = "auto";
-    };
+  const renderPanel = () => {
+    panel.classList.remove("is-managing");
+    panel
+      .closest(".seerai-chat-model-popover")
+      ?.classList.remove("is-managing");
+    panel.replaceChildren();
+    panel.appendChild(
+      createRoutingPresetBar(
+        doc,
+        () => ({
+          ...getProviderRegistryState().defaults,
+          ...(stateManager.getOptions().modelRef && {
+            chat: stateManager.getOptions().modelRef,
+          }),
+        }),
+        (models) => {
+          stateManager.setOptions({ modelRef: models.chat });
+          notify();
+          renderPanel();
+        },
+        {
+          get: () => stateManager.getOptions().routingPresetId,
+          set: (routingPresetId) =>
+            stateManager.setOptions({ routingPresetId }),
+        },
+      ),
+    );
+
     const routes = element(doc, "div", "seerai-capability-routes");
     let openCapability: ModelType | undefined;
     const renderRoutes = () => {
@@ -1244,14 +1202,12 @@ export function createChatModelPicker(
                   createSvgIcon(doc, "check", { size: 13 }),
                 );
               }
-              const useDefault = () => {
+              inherited.addEventListener("click", () => {
                 stateManager.setOptions({ modelRef: undefined });
-                refreshLabel();
-                onChange();
+                notify();
                 openCapability = undefined;
                 renderRoutes();
-              };
-              inherited.addEventListener("click", useDefault);
+              });
               choices.appendChild(inherited);
             }
             const matches = available.filter((item) => {
@@ -1280,11 +1236,11 @@ export function createChatModelPicker(
               const choose = () => {
                 if (capability === "chat") {
                   stateManager.setOptions({ modelRef: item.ref });
-                  onChange();
+                  notify();
                 } else {
                   setDefaultModelRef(capability, item.ref);
+                  notify();
                 }
-                refreshLabel();
                 openCapability = undefined;
                 renderRoutes();
               };
@@ -1319,67 +1275,241 @@ export function createChatModelPicker(
         }
         routes.appendChild(route);
       }
-      if (popup.isConnected) setTimeout(positionPopup, 0);
     };
-    const presets = createRoutingPresetBar(
-      doc,
-      () => ({
-        ...getProviderRegistryState().defaults,
-        ...(stateManager.getOptions().modelRef && {
-          chat: stateManager.getOptions().modelRef,
-        }),
-      }),
-      (models) => {
-        stateManager.setOptions({ modelRef: models.chat });
-        refreshLabel();
-        onChange();
-        renderRoutes();
-      },
-      {
-        get: () => stateManager.getOptions().routingPresetId,
-        set: (routingPresetId) => stateManager.setOptions({ routingPresetId }),
-      },
-    );
+
     const manage = element(doc, "button", "seerai-chat-model-manage");
     manage.type = "button";
     manage.appendChild(createSvgIcon(doc, "settings", { size: 13 }));
     manage.append(" Add or manage providers");
     manage.addEventListener("click", () => {
-      popup.classList.add("is-managing");
-      popup.replaceChildren();
+      panel.classList.add("is-managing");
+      panel.closest(".seerai-chat-model-popover")?.classList.add("is-managing");
+      panel.replaceChildren();
       const toolbar = element(doc, "div", "seerai-provider-picker-toolbar");
       const back = element(doc, "button", "seerai-provider-picker-back");
       back.type = "button";
       back.appendChild(createSvgIcon(doc, "chevron-left", { size: 13 }));
       back.append(" Back to models");
-      back.addEventListener("click", () => {
-        popup.remove();
-        button.click();
-      });
+      back.addEventListener("click", () => renderPanel());
       const providerHost = element(doc, "div", "seerai-provider-surface");
       toolbar.appendChild(back);
-      popup.append(toolbar, providerHost);
+      panel.append(toolbar, providerHost);
       renderProviderSettings(doc, providerHost);
-      positionPopup();
     });
-    popup.append(presets, routes, manage);
-    (doc.body || doc.documentElement)?.appendChild(popup);
+
+    panel.append(routes, manage);
     renderRoutes();
-    positionPopup();
-    const closePopup = (closeEvent: MouseEvent) => {
-      if (
-        popup.contains(closeEvent.target as Node) ||
-        closeEvent.target === button
-      )
-        return;
-      setTimeout(() => {
-        const activeElement = doc.activeElement;
-        if (activeElement && popup.contains(activeElement)) return;
-        popup.remove();
-        doc.removeEventListener("mousedown", closePopup);
-      }, 0);
-    };
-    setTimeout(() => doc.addEventListener("mousedown", closePopup), 0);
+  };
+
+  renderPanel();
+  return panel;
+}
+
+function activeRoutingPresetId(
+  stateManager: ChatStateManager,
+): string | undefined {
+  const options = stateManager.getOptions();
+  if (options.routingPresetId) return options.routingPresetId;
+  return matchingRoutingPreset({
+    ...getProviderRegistryState().defaults,
+    ...(options.modelRef && { chat: options.modelRef }),
+  })?.id;
+}
+
+function buildRoutingPresetList(
+  doc: Document,
+  stateManager: ChatStateManager,
+  onApply: () => void,
+): HTMLElement {
+  const list = element(doc, "div", "seerai-routing-preset-list");
+  const presets = getModelRoutingPresets();
+  if (!presets.length) {
+    const empty = element(doc, "div", "seerai-chat-model-empty");
+    empty.textContent = "No routing presets yet · expand to configure models";
+    list.appendChild(empty);
+    return list;
+  }
+  const activeId = activeRoutingPresetId(stateManager);
+  for (const preset of presets) {
+    const item = element(doc, "button", "seerai-routing-preset-item");
+    item.type = "button";
+    const label = element(doc, "span", "seerai-routing-preset-item-label");
+    label.textContent = preset.name;
+    item.appendChild(label);
+    if (preset.id === activeId) {
+      item.classList.add("is-selected");
+      item.appendChild(createSvgIcon(doc, "check", { size: 14 }));
+    }
+    item.addEventListener("click", () => {
+      applyModelRoutingPreset(preset.id);
+      stateManager.setOptions({
+        routingPresetId: preset.id,
+        modelRef: preset.models.chat,
+      });
+      onApply();
+    });
+    list.appendChild(item);
+  }
+  return list;
+}
+
+/**
+ * Routing-preset modal anchored to the model button. Collapsed by default,
+ * showing only the list of presets; the `^` toggle expands it into the full
+ * model configuration (per-capability routes + provider management).
+ */
+export function showModelRoutingPopover(
+  doc: Document,
+  anchor: HTMLElement,
+  stateManager: ChatStateManager,
+  onChange: () => void,
+): void {
+  const existing = doc.getElementById("seerai-model-routing-popover");
+  if (existing) {
+    existing.remove();
+    return;
+  }
+
+  const rect = anchor.getBoundingClientRect();
+  const win = doc.defaultView as Window;
+  const width = 320;
+  const left = Math.min(
+    Math.max(8, rect.left),
+    Math.max(8, win.innerWidth - width - 8),
+  );
+
+  const popover = element(doc, "div", "seerai-chat-model-popover");
+  popover.id = "seerai-model-routing-popover";
+  Object.assign(popover.style, {
+    bottom: `${win.innerHeight - rect.top + 8}px`,
+    left: `${left}px`,
+    width: `${width}px`,
   });
+
+  const notify = () => {
+    onChange();
+    doc.dispatchEvent(
+      new (doc.defaultView as any).CustomEvent("seerai-routing-changed"),
+    );
+  };
+
+  let expanded = false;
+  const render = () => {
+    popover.classList.remove("is-managing");
+    popover.replaceChildren();
+    const header = element(doc, "div", "seerai-routing-popover-header");
+    const title = element(doc, "span", "seerai-routing-popover-title");
+    title.textContent = expanded ? "Model configuration" : "Routing preset";
+    const toggle = element(doc, "button", "seerai-routing-popover-toggle");
+    toggle.type = "button";
+    toggle.textContent = expanded ? "Back to presets" : "Configure";
+    toggle.title = expanded
+      ? "Collapse to preset list"
+      : "Show full configuration";
+    toggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      expanded = !expanded;
+      render();
+    });
+    header.append(title, toggle);
+    popover.appendChild(header);
+
+    if (expanded) {
+      popover.appendChild(createModelRoutingPanel(doc, stateManager, notify));
+    } else {
+      popover.appendChild(
+        buildRoutingPresetList(doc, stateManager, () => {
+          // A preset was chosen in the simplified view — apply and close.
+          notify();
+          close();
+        }),
+      );
+    }
+  };
+
+  const close = () => {
+    popover.remove();
+    doc.removeEventListener("mousedown", closeHandler);
+  };
+
+  render();
+
+  const mountPoint = doc.body || doc.documentElement;
+  mountPoint?.appendChild(popover);
+
+  const closeHandler = (event: MouseEvent) => {
+    if (
+      !popover.contains(event.target as Node) &&
+      !anchor.contains(event.target as Node)
+    ) {
+      close();
+    }
+  };
+  setTimeout(() => doc.addEventListener("mousedown", closeHandler), 0);
+}
+
+export function createChatModelPicker(
+  doc: Document,
+  stateManager: ChatStateManager,
+  onOpen: () => void,
+): HTMLButtonElement {
+  const button = element(doc, "button", "seerai-chat-model-button");
+  button.type = "button";
+  const label = element(doc, "span");
+  const arrow = createSvgIcon(doc, "chevron-down", { size: 12 });
+  const refreshLabel = () => {
+    const options = stateManager.getOptions();
+    const activeRoutes = {
+      ...getProviderRegistryState().defaults,
+      ...(options.modelRef && { chat: options.modelRef }),
+    };
+    const activePreset = matchingRoutingPreset(activeRoutes);
+    const selectedPreset = getModelRoutingPresets().find(
+      (preset) => preset.id === options.routingPresetId,
+    );
+    if (selectedPreset && selectedPreset.id !== activePreset?.id) {
+      label.textContent = `${selectedPreset.name} · Edited`;
+      button.title = `Editing routing preset: ${selectedPreset.name}`;
+      return;
+    }
+    if (activePreset) {
+      label.textContent = activePreset.name;
+      button.title = `Active routing preset: ${activePreset.name}`;
+      return;
+    }
+    const resolved = getAvailableModels("chat").find(
+      (item) =>
+        item.ref.providerId === options.modelRef?.providerId &&
+        item.ref.localModelId === options.modelRef?.localModelId,
+    );
+    if (resolved) {
+      label.textContent = `${resolved.provider.name} · ${resolved.model.displayName}`;
+      button.title = "This conversation uses a model override";
+    } else {
+      const defaultRef = getDefaultModelRef("chat");
+      const inherited = getAvailableModels("chat").find(
+        (item) =>
+          item.ref.providerId === defaultRef?.providerId &&
+          item.ref.localModelId === defaultRef?.localModelId,
+      );
+      label.textContent = inherited
+        ? `${inherited.model.displayName} · Default`
+        : "Select model";
+      button.title = "This conversation follows the app default";
+    }
+  };
+  refreshLabel();
+  button.append(label, arrow);
+
+  // Model/provider/preset selection now lives in the Configuration popover.
+  // The button just shows the active model and opens that popover; this event
+  // keeps the label in sync when selection changes there.
+  doc.addEventListener("seerai-routing-changed", refreshLabel);
+
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onOpen();
+  });
+
   return button;
 }

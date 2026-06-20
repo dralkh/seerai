@@ -74,18 +74,6 @@
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
 }
 
-.seerai-chat-model-popover > .seerai-routing-presets {
-  grid-template-columns: minmax(100px, 1fr) auto auto auto auto;
-  padding: 6px 7px;
-  border-color: var(--border-secondary);
-}
-
-.seerai-chat-model-popover > .seerai-routing-presets button {
-  min-height: 27px;
-  padding: 3px 6px;
-  font-size: 9px;
-}
-
 .seerai-chat-model-empty {
   padding: 18px 9px;
   color: var(--text-secondary);
@@ -2219,4 +2207,158 @@ html.dark .prompt-picker-overlay {
   50% {
     opacity: 1;
   }
+}
+
+/* Routing preset selector inside the chat Configuration popover.
+   (Moved here from the model picker popover.) */
+.seerai-model-routing-panel .seerai-routing-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+}
+
+.seerai-model-routing-panel .seerai-routing-presets select,
+.seerai-model-routing-panel .seerai-routing-preset-name {
+  box-sizing: border-box;
+  flex: 1 1 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  background: var(--background-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+}
+
+.seerai-model-routing-panel .seerai-routing-presets button {
+  min-height: 26px;
+  padding: 3px 7px;
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  background: var(--background-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+
+.seerai-model-routing-panel .seerai-routing-presets button:hover {
+  background: var(--background-tertiary);
+}
+
+.seerai-model-routing-panel .seerai-routing-presets .seerai-icon-button {
+  padding: 3px 5px;
+}
+
+/* Routing-preset modal anchored to the toolbar model button. */
+.seerai-routing-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-primary);
+  background: var(--background-secondary);
+}
+
+.seerai-routing-popover-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.seerai-routing-popover-toggle {
+  padding: 4px 9px;
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  background: var(--background-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.seerai-routing-popover-toggle:hover {
+  background: var(--background-tertiary);
+  color: var(--text-primary);
+}
+
+.seerai-routing-preset-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  padding: 6px;
+  overflow-y: auto;
+}
+
+.seerai-routing-preset-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.seerai-routing-preset-item:hover {
+  background: var(--background-secondary);
+}
+
+.seerai-routing-preset-item.is-selected {
+  background: var(--message-user-background, var(--background-secondary));
+  font-weight: 600;
+}
+
+.seerai-routing-preset-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#seerai-model-routing-popover .seerai-model-routing-panel {
+  border: 0;
+  border-radius: 0;
+}
+
+/* Unified model selection panel inside the chat Configuration popover. */
+.seerai-model-routing-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-secondary, var(--border-primary));
+  border-radius: 8px;
+  background: var(--background-primary);
+}
+
+.seerai-model-routing-panel .seerai-capability-routes {
+  flex: none;
+  max-height: 240px;
+  border-top: 0;
+}
+
+.seerai-model-routing-panel .seerai-chat-model-manage {
+  border-top: 1px solid var(--border-secondary, var(--border-primary));
+}
+
+/* While managing providers, let the popover scroll as one surface and the
+   panel grow with its content instead of clipping. */
+.seerai-model-routing-panel.is-managing {
+  overflow: visible;
+}
+
+.seerai-model-routing-panel .seerai-provider-picker-toolbar {
+  border-bottom: 1px solid var(--border-secondary, var(--border-primary));
 }

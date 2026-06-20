@@ -109,7 +109,10 @@ import {
   showSemanticScholarQuickSettings,
   showWebSearchQuickSettings,
 } from "./chat/ui/serviceSettings";
-import { createChatModelPicker } from "./chat/ui/providerManager";
+import {
+  createChatModelPicker,
+  showModelRoutingPopover,
+} from "./chat/ui/providerManager";
 import {
   isTtsConfigured,
   autoPlayTtsResponse,
@@ -27022,11 +27025,34 @@ ${tableRows}  </tbody>
     applyToolbarButtonStyle(saveBtn as HTMLElement);
     setToolbarIcon(saveBtn as HTMLElement, "save", "Save chat as note");
 
+    // Single Configuration popover, opened by both the gear and the model
+    // button so model/provider/preset selection is not split across two menus.
+    const openChatConfig = (anchor: HTMLElement) => {
+      showChatSettings(doc, anchor, {
+        onModeChange: async (mode) => {
+          // If switching to default or explore mode, auto-add current item
+          if (mode !== "lock" && currentItem) {
+            if (mode === "default") {
+              stateManager.clearAll();
+            }
+            await this.addItemWithNotes(currentItem);
+          }
+        },
+        onModelChange: () => {
+          void getMessageStore().saveConversationState(
+            stateManager.getStates(),
+            stateManager.getOptions(),
+            ChatContextManager.getInstance().getSerializableItems(),
+          );
+        },
+      });
+    };
+
     // Settings / Config button
     const settingsBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
       properties: {
-        title: "Chat Settings (Model, Mode, Web Search)",
+        title: "Chat Settings (Models, Mode, Web Search)",
       },
       styles: {
         width: "32px",
@@ -27048,17 +27074,7 @@ ${tableRows}  </tbody>
           listener: (e: MouseEvent) => {
             Zotero.debug("[seerai] Settings button clicked");
             e.stopPropagation();
-            showChatSettings(doc, settingsBtn as HTMLElement, {
-              onModeChange: async (mode) => {
-                // If switching to default or explore mode, auto-add current item
-                if (mode !== "lock" && currentItem) {
-                  if (mode === "default") {
-                    stateManager.clearAll();
-                  }
-                  await this.addItemWithNotes(currentItem);
-                }
-              },
-            });
+            openChatConfig(settingsBtn as HTMLElement);
           },
         },
         {
@@ -27083,13 +27099,15 @@ ${tableRows}  </tbody>
     });
     applyToolbarButtonStyle(settingsBtn as HTMLElement);
     setToolbarIcon(settingsBtn as HTMLElement, "settings", "Chat settings");
-    const modelPicker = createChatModelPicker(doc, stateManager, () => {
-      void getMessageStore().saveConversationState(
-        stateManager.getStates(),
-        stateManager.getOptions(),
-        ChatContextManager.getInstance().getSerializableItems(),
-      );
-    });
+    const modelPicker = createChatModelPicker(doc, stateManager, () =>
+      showModelRoutingPopover(doc, modelPicker, stateManager, () => {
+        void getMessageStore().saveConversationState(
+          stateManager.getStates(),
+          stateManager.getOptions(),
+          ChatContextManager.getInstance().getSerializableItems(),
+        );
+      }),
+    );
 
     const settingsContainer = doc.createElement("div");
     settingsContainer.style.cssText = "position:relative;display:flex;";
