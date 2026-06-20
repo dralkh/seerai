@@ -902,6 +902,10 @@ body.dark {
 }
 
 .seerai-preferences-root {
+  /* Let light-dark() resolve to the actual OS/Zotero appearance. Without this
+     it always returns the light value, which made the inline provider editor's
+     header and left column render white in dark mode. */
+  color-scheme: light dark;
   --seerai-accent: light-dark(#635bff, #9c96ff);
   --seerai-accent-soft: light-dark(
     rgba(99, 91, 255, 0.09),
@@ -1027,6 +1031,7 @@ body.dark {
 
 .seerai-provider-surface,
 .seerai-defaults-surface {
+  color-scheme: light dark;
   --seerai-accent: light-dark(#635bff, #9c96ff);
   --seerai-accent-soft: light-dark(
     rgba(99, 91, 255, 0.09),
@@ -1443,6 +1448,7 @@ body.dark {
 }
 
 .seerai-provider-inline-editor {
+  color-scheme: light dark;
   --seerai-accent: light-dark(#635bff, #9c96ff);
   --seerai-accent-soft: light-dark(
     rgba(99, 91, 255, 0.09),

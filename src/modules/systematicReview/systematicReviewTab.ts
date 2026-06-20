@@ -204,6 +204,12 @@ let articleListCollapsed = false;
 let refreshReviewLayout: (() => void) | null = null;
 let lastReviewLayoutWidth = 0;
 let reviewLayoutRafPending = false;
+// Recent measured widths, used to detect a ResizeObserver feedback loop where
+// the layout flips between two widths (e.g. a scrollbar appearing/disappearing)
+// and "jitters" forever. Once we see the pattern A -> B -> A we lock onto the
+// smaller width so content stays within bounds instead of oscillating.
+let reviewLayoutWidthHistory: number[] = [];
+let reviewLayoutLocked = false;
 
 interface ItemMeta {
   id: number;
@@ -813,7 +819,10 @@ export async function createSystematicReviewTabContent(
   const runResponsiveLayout = () => {
     reviewLayoutRafPending = false;
     if (!mainWrapper || !sideNav) return;
-    const availableWidth = mainWrapper.getBoundingClientRect().width;
+    // Round to whole pixels so sub-pixel fluctuations never trigger relayout.
+    const availableWidth = Math.round(
+      mainWrapper.getBoundingClientRect().width,
+    );
     if (
       !availableWidth ||
       !Number.isFinite(availableWidth) ||
@@ -822,7 +831,31 @@ export async function createSystematicReviewTabContent(
       return;
     }
     if (availableWidth === lastReviewLayoutWidth) return;
-    lastReviewLayoutWidth = availableWidth;
+
+    // Anti-oscillation guard: if the width we're now seeing is one we bounced
+    // away from a moment ago (A -> B -> A), the layout itself is what's moving
+    // the boundary. Lock onto the smallest width in the cycle so it settles.
+    if (reviewLayoutLocked) {
+      if (availableWidth >= lastReviewLayoutWidth) return;
+      // A genuinely smaller width: leave the lock and re-evaluate.
+      reviewLayoutLocked = false;
+      reviewLayoutWidthHistory = [];
+    } else if (reviewLayoutWidthHistory.includes(availableWidth)) {
+      reviewLayoutLocked = true;
+      // Settle on the smaller of the two oscillating widths and stop here if
+      // that's the one we've already applied.
+      const settleWidth = Math.min(availableWidth, lastReviewLayoutWidth);
+      if (settleWidth === lastReviewLayoutWidth) return;
+      lastReviewLayoutWidth = settleWidth;
+    } else {
+      lastReviewLayoutWidth = availableWidth;
+    }
+
+    reviewLayoutWidthHistory.push(lastReviewLayoutWidth);
+    if (reviewLayoutWidthHistory.length > 4) reviewLayoutWidthHistory.shift();
+    // Always lay out for the width we committed to above (the settled one when
+    // an oscillation was detected), never the raw measurement.
+    const layoutWidth = lastReviewLayoutWidth;
     const filters = mainWrapper.querySelector(
       ".sr-filters-panel",
     ) as HTMLElement | null;
@@ -836,10 +869,10 @@ export async function createSystematicReviewTabContent(
       ".sr-filter-handle",
     ) as HTMLElement | null;
 
-    mainWrapper.classList.toggle("sr-layout-narrow", availableWidth < 760);
-    mainWrapper.classList.toggle("sr-layout-tight", availableWidth < 560);
+    mainWrapper.classList.toggle("sr-layout-narrow", layoutWidth < 760);
+    mainWrapper.classList.toggle("sr-layout-tight", layoutWidth < 560);
 
-    const sizes = computeResponsiveSizes(availableWidth);
+    const sizes = computeResponsiveSizes(layoutWidth);
     if (sizes.autoCollapseSidebar !== sidebarAutoCollapsed) {
       sidebarAutoCollapsed = sizes.autoCollapseSidebar;
     }
@@ -956,6 +989,11 @@ export async function createSystematicReviewTabContent(
   };
 
   refreshReviewLayout = applyResponsiveLayout;
+  // Fresh layout pass for this render: clear any oscillation lock from a
+  // previous mount so widths are re-measured cleanly.
+  lastReviewLayoutWidth = 0;
+  reviewLayoutWidthHistory = [];
+  reviewLayoutLocked = false;
   const ResizeObserverCtor = doc.defaultView?.ResizeObserver;
   if (ResizeObserverCtor) {
     const layoutObserver = new ResizeObserverCtor(applyResponsiveLayout);

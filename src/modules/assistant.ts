@@ -6902,9 +6902,17 @@ export class Assistant {
 
     const searchBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { innerText: "Search" },
+      properties: {
+        innerHTML: iconMarkup("search", { size: 16 }),
+        title: "Search",
+      },
       styles: {
-        padding: "10px 20px",
+        width: "36px",
+        height: "36px",
+        padding: "0",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
         backgroundColor: "var(--highlight-primary)",
         color: "var(--highlight-text)",
         border: "none",
@@ -7157,10 +7165,12 @@ export class Assistant {
     const aiRefineBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
       properties: {
-        innerText: "AI",
+        innerHTML: iconMarkup("sparkle", { size: 15 }),
         title: "AI: Refine query for Semantic Scholar",
       },
       styles: {
+        display: "inline-flex",
+        alignItems: "center",
         padding: "8px 10px",
         backgroundColor: "var(--background-secondary)",
         color: "var(--text-primary)",
