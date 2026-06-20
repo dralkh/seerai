@@ -34,6 +34,10 @@ import {
 } from "./chat/modelConfig";
 import { resolveModel } from "./chat/modelResolver";
 import {
+  applyModelRoutingPreset,
+  getModelRoutingPresets,
+} from "./chat/providerRegistry";
+import {
   parseMarkdown,
   processStreamingContent,
   stripThinkTags,
@@ -187,6 +191,21 @@ let activeTab: AssistantTab = "chat";
 let currentTableConfig: TableConfig | null = null;
 let currentTableData: TableData | null = null;
 let isTableGenerating: boolean = false;
+
+function restoreChatRoutingPreset(stateManager: ChatStateManager): void {
+  const presetId = stateManager.getOptions().routingPresetId;
+  const preset = getModelRoutingPresets().find((item) => item.id === presetId);
+  if (!preset) return;
+  applyModelRoutingPreset(preset.id);
+  stateManager.setOptions({ modelRef: preset.models.chat });
+}
+
+function resolveTableChatModel() {
+  const preset = getModelRoutingPresets().find(
+    (item) => item.id === currentTableConfig?.routingPresetId,
+  );
+  return resolveModel("chat", preset?.models.chat);
+}
 
 // Search state
 let currentSearchState: SearchState = { ...defaultSearchState };
@@ -2659,6 +2678,7 @@ export class Assistant {
     const stateManager = getChatStateManager();
     if (savedState) {
       stateManager.fromJSON(savedState);
+      restoreChatRoutingPreset(stateManager);
       if (savedState.contextItems && savedState.contextItems.length > 0) {
         ChatContextManager.getInstance().restoreItems(savedState.contextItems);
       }
@@ -2891,6 +2911,7 @@ export class Assistant {
             const savedState = await store.getConversationState();
             if (savedState) {
               stateManager.fromJSON(savedState);
+              restoreChatRoutingPreset(stateManager);
               if (
                 savedState.contextItems &&
                 savedState.contextItems.length > 0
@@ -15728,7 +15749,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     }
 
     // Get max concurrent from active model settings
-    const activeConfig = getActiveModelConfig();
+    const activeConfig =
+      resolveTableChatModel()?.model || getActiveModelConfig();
     let maxConcurrent = 5;
     if (activeConfig?.rateLimit?.type === "concurrency") {
       maxConcurrent = activeConfig.rateLimit.value;
@@ -15929,21 +15951,34 @@ ${sourceText}
 Task: ${columnPrompt}`;
 
     // Get active model config (same as chat uses)
-    const activeModel = getActiveModelConfig();
-    if (!activeModel) {
+    const resolvedModel = resolveTableChatModel();
+    const legacyModel = getActiveModelConfig();
+    if (!resolvedModel && !legacyModel) {
       throw new Error(
         "No active model configured. Please set up a model in settings.",
       );
     }
 
-    const configOverride = {
-      apiURL: activeModel.apiURL,
-      apiKey: activeModel.apiKey,
-      model: activeModel.model,
-      temperature:
-        col.temperature ?? currentTableConfig?.temperature ?? undefined,
-      max_tokens: effectiveMaxTokens,
-    };
+    const configOverride = resolvedModel
+      ? {
+          apiURL: resolvedModel.provider.apiURL,
+          apiKey: resolvedModel.provider.apiKey,
+          model: resolvedModel.model.modelId,
+          modelRef: resolvedModel.ref,
+          endpoint: resolvedModel.endpoint,
+          headers: resolvedModel.headers,
+          temperature:
+            col.temperature ?? currentTableConfig?.temperature ?? undefined,
+          max_tokens: effectiveMaxTokens,
+        }
+      : {
+          apiURL: legacyModel!.apiURL,
+          apiKey: legacyModel!.apiKey,
+          model: legacyModel!.model,
+          temperature:
+            col.temperature ?? currentTableConfig?.temperature ?? undefined,
+          max_tokens: effectiveMaxTokens,
+        };
 
     // Use non-streaming completion for simpler cell generation
     try {
@@ -16134,16 +16169,26 @@ ${sourceText.substring(0, 6000)}
 Call the generate_tags function with an array of 3-7 high-quality tags.`;
 
       // Get active model config
-      const activeModel = getActiveModelConfig();
-      if (!activeModel) {
+      const resolvedModel = resolveTableChatModel();
+      const legacyModel = getActiveModelConfig();
+      if (!resolvedModel && !legacyModel) {
         throw new Error("No active model configured");
       }
 
-      const configOverride = {
-        apiURL: activeModel.apiURL,
-        apiKey: activeModel.apiKey,
-        model: activeModel.model,
-      };
+      const configOverride = resolvedModel
+        ? {
+            apiURL: resolvedModel.provider.apiURL,
+            apiKey: resolvedModel.provider.apiKey,
+            model: resolvedModel.model.modelId,
+            modelRef: resolvedModel.ref,
+            endpoint: resolvedModel.endpoint,
+            headers: resolvedModel.headers,
+          }
+        : {
+            apiURL: legacyModel!.apiURL,
+            apiKey: legacyModel!.apiKey,
+            model: legacyModel!.model,
+          };
 
       // Generate tags using AI with function calling
       const messages: OpenAIMessage[] = [
@@ -16349,8 +16394,9 @@ You MUST call the generate_tags function.`;
 
     const userPrompt = `Generate tags for: "${paperTitle}" by ${authors}\n\n${sourceText.substring(0, 6000)}`;
 
-    const activeModel = getActiveModelConfig();
-    if (!activeModel) throw new Error("No model configured");
+    const resolvedModel = resolveTableChatModel();
+    const legacyModel = getActiveModelConfig();
+    if (!resolvedModel && !legacyModel) throw new Error("No model configured");
 
     const messages: OpenAIMessage[] = [
       { role: "system", content: systemPrompt },
@@ -16386,11 +16432,20 @@ You MUST call the generate_tags function.`;
           }
         },
       },
-      {
-        apiURL: activeModel.apiURL,
-        apiKey: activeModel.apiKey,
-        model: activeModel.model,
-      },
+      resolvedModel
+        ? {
+            apiURL: resolvedModel.provider.apiURL,
+            apiKey: resolvedModel.provider.apiKey,
+            model: resolvedModel.model.modelId,
+            modelRef: resolvedModel.ref,
+            endpoint: resolvedModel.endpoint,
+            headers: resolvedModel.headers,
+          }
+        : {
+            apiURL: legacyModel!.apiURL,
+            apiKey: legacyModel!.apiKey,
+            model: legacyModel!.model,
+          },
       [tagGenerationTool],
     );
 
@@ -23117,12 +23172,12 @@ You MUST call the generate_tags function.`;
     });
     popover.appendChild(header);
 
-    // === AI Model Selection ===
+    // === Routing Preset Selection ===
     const modelSection = ztoolkit.UI.createElement(doc, "div", {
       styles: { display: "flex", flexDirection: "column", gap: "4px" },
     });
     const modelLabel = ztoolkit.UI.createElement(doc, "div", {
-      properties: { innerText: "AI Model" },
+      properties: { innerText: "Routing preset" },
       styles: { fontSize: "12px", fontWeight: "600" },
     });
     modelSection.appendChild(modelLabel);
@@ -23140,27 +23195,26 @@ You MUST call the generate_tags function.`;
       },
     }) as HTMLSelectElement;
 
-    const configs = getModelConfigs();
-    const activeConfig = getActiveModelConfig();
-
-    if (configs.length === 0) {
-      const opt = doc.createElement("option");
-      opt.value = "default";
-      opt.innerText = "Default (configure in Settings)";
-      modelSelect.appendChild(opt);
-    } else {
-      configs.forEach((cfg) => {
-        const opt = doc.createElement("option");
-        opt.value = cfg.id;
-        opt.innerText = cfg.name;
-        if (activeConfig && cfg.id === activeConfig.id) opt.selected = true;
-        modelSelect.appendChild(opt);
-      });
+    const defaultOption = doc.createElement("option");
+    defaultOption.value = "";
+    defaultOption.innerText = "App default routing";
+    modelSelect.appendChild(defaultOption);
+    for (const preset of getModelRoutingPresets()) {
+      const option = doc.createElement("option");
+      option.value = preset.id;
+      option.innerText = preset.name;
+      option.selected = preset.id === currentTableConfig?.routingPresetId;
+      modelSelect.appendChild(option);
     }
 
-    modelSelect.addEventListener("change", () => {
-      setActiveModelId(modelSelect.value);
-      Zotero.debug(`[seerai] Table: Model changed to ${modelSelect.value}`);
+    modelSelect.addEventListener("change", async () => {
+      if (!currentTableConfig) return;
+      currentTableConfig.routingPresetId = modelSelect.value || undefined;
+      currentTableConfig.updatedAt = new Date().toISOString();
+      await getTableStore().saveConfig(currentTableConfig);
+      Zotero.debug(
+        `[seerai] Table: Routing preset changed to ${modelSelect.value || "app default"}`,
+      );
     });
     modelSection.appendChild(modelSelect);
     popover.appendChild(modelSection);

@@ -6,7 +6,7 @@
 import { ChatMessage } from "../types";
 import { parseMarkdown } from "../markdown";
 import { openAIService } from "../../openai";
-import { getActiveModelConfig } from "../modelConfig";
+import { resolveModel } from "../modelResolver";
 import type { RAGProgressEvent } from "../rag/types";
 import { ChatContextManager } from "../context/contextManager";
 import { createSvgIcon, setButtonIcon, type IconName } from "./icons";
@@ -151,8 +151,7 @@ export async function playTts(
  * Check if TTS is configured for the active model
  */
 export function isTtsConfigured(): boolean {
-  const config = getActiveModelConfig();
-  return !!config?.ttsConfig?.model;
+  return !!resolveModel("tts");
 }
 
 /**

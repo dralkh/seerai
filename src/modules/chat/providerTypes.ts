@@ -26,6 +26,11 @@ export interface ProviderPreset {
   notes?: string;
   adapterId?: ProviderAdapterId;
   verifiedCapabilities?: ModelCapability[];
+  catalogModels?: Array<{
+    id: string;
+    capabilities: ModelCapability[];
+    contextLength?: number;
+  }>;
 }
 
 export interface DiscoveredModel {
@@ -43,7 +48,9 @@ export type ProviderAdapterId =
   | "openrouter"
   | "anthropic"
   | "azure-openai"
-  | "nanogpt";
+  | "mimo"
+  | "nanogpt"
+  | "together";
 
 export type ProviderModelPolicy = "automatic" | "scoped";
 
@@ -144,18 +151,59 @@ export interface ResolvedModel {
 export function inferCapabilities(modelId: string): ModelCapability[] {
   const id = modelId.toLowerCase();
 
-  if (id.includes("embed")) return ["embedding"];
-  if (id.includes("tts") || id.includes("speech")) return ["tts"];
-  if (id.includes("whisper") || id.includes("stt")) return ["stt"];
+  if (
+    id.includes("whisper") ||
+    id.includes("transcrib") ||
+    id.includes("speech-to-text") ||
+    /(^|[/_.-])(stt|asr)([/_.-]|$)/.test(id) ||
+    id.includes("parakeet") ||
+    id.includes("deepgram/nova") ||
+    id.includes("voxtral-mini-transcribe")
+  )
+    return ["stt"];
+  if (
+    id.includes("embed") ||
+    /(^|[/_.-])(bge|e5|gte)([/_.-]|$)/.test(id) ||
+    id.includes("m2-bert")
+  )
+    return ["embedding"];
+  if (
+    /(^|[/_.-])tts([/_.-]|$)/.test(id) ||
+    id.includes("text-to-speech") ||
+    id.includes("kokoro") ||
+    id.includes("orpheus") ||
+    id.includes("cartesia/sonic") ||
+    /(^|[/_.-])speech-[0-9]/.test(id)
+  )
+    return ["tts"];
   if (
     id.includes("dall-e") ||
     id.includes("imagen") ||
+    id.includes("gpt-image") ||
     id.includes("flux") ||
     id.includes("stable-diffusion") ||
-    id.includes("midjourney")
+    id.includes("midjourney") ||
+    id.includes("ideogram") ||
+    id.includes("seedream") ||
+    id.includes("hidream") ||
+    id.includes("juggernaut") ||
+    id.includes("dreamshaper") ||
+    id.includes("cogview") ||
+    id.includes("grok-imagine-image") ||
+    /(^|[/_.-])image-0?1([/_.-]|$)/.test(id)
   )
     return ["image"];
-  if (id.includes("sora") || id.includes("video")) return ["video"];
+  if (
+    id.includes("sora") ||
+    id.includes("video") ||
+    /(^|[/_.-])veo([/_.-]|0-9|$)/.test(id) ||
+    id.includes("kling") ||
+    id.includes("seedance") ||
+    id.includes("hailuo") ||
+    id.includes("cogvideox") ||
+    /(^|[/_.-])vidu/.test(id)
+  )
+    return ["video"];
   if (
     id.startsWith("o1") ||
     id.startsWith("o3") ||

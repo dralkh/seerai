@@ -852,6 +852,10 @@ export class OpenAIService {
     const isOpenRouter =
       resolved.adapterId === "openrouter" ||
       resolved.provider.presetId === "openrouter";
+    const isMimo = resolved.adapterId === "mimo";
+    const isXai = resolved.provider.presetId === "xai";
+    const isMinimax = resolved.provider.presetId === "minimax";
+    const isMistral = resolved.provider.presetId === "mistral";
 
     Zotero.debug(
       `[seerai] TTS request: model=${ttsModel}, voice=${voice || "(default)"}, endpoint=${endpoint}, text length=${text.length}`,
@@ -869,13 +873,61 @@ export class OpenAIService {
       },
       // Send both "input" (OpenAI standard) and "text" (NanoGPT) fields.
       // Each provider uses the field it recognizes.
-      body: JSON.stringify({
-        model: ttsModel,
-        input: text,
-        text: text,
-        voice,
-        ...(isOpenRouter && { response_format: "mp3" }),
-      }),
+      body: JSON.stringify(
+        isMimo
+          ? {
+              model: ttsModel,
+              messages: [{ role: "assistant", content: text }],
+              modalities: ["text", "audio"],
+              audio: { voice, format: "mp3" },
+            }
+          : isXai
+            ? {
+                text,
+                voice_id: voice === "alloy" ? "eve" : voice,
+                language: "auto",
+                output_format: {
+                  codec: "mp3",
+                  sample_rate: 24000,
+                  bit_rate: 128000,
+                },
+              }
+            : isMinimax
+              ? {
+                  model: ttsModel,
+                  text,
+                  stream: false,
+                  language_boost: "auto",
+                  output_format: "hex",
+                  voice_setting: {
+                    voice_id:
+                      voice === "alloy" ? "English_expressive_narrator" : voice,
+                    speed: 1,
+                    vol: 1,
+                    pitch: 0,
+                  },
+                  audio_setting: {
+                    sample_rate: 32000,
+                    bitrate: 128000,
+                    format: "mp3",
+                    channel: 1,
+                  },
+                }
+              : isMistral
+                ? {
+                    model: ttsModel,
+                    input: text,
+                    voice_id: voice,
+                    response_format: "mp3",
+                  }
+                : {
+                    model: ttsModel,
+                    input: text,
+                    text: text,
+                    voice,
+                    ...(isOpenRouter && { response_format: "mp3" }),
+                  },
+      ),
     });
 
     // Handle HTTP 202 Accepted — async generation (e.g. NanoGPT Elevenlabs)
@@ -915,6 +967,36 @@ export class OpenAIService {
       Zotero.debug(
         `[seerai] TTS JSON response: audioUrl=${json.audioUrl}, model=${json.model}, cost=${json.cost}`,
       );
+      const choices = Array.isArray(json.choices) ? json.choices : [];
+      const choice = choices[0] as Record<string, unknown> | undefined;
+      const message = choice?.message as Record<string, unknown> | undefined;
+      const audio = message?.audio as Record<string, unknown> | undefined;
+      const minimaxData = json.data as Record<string, unknown> | undefined;
+      const encodedAudio =
+        (audio?.data as string | undefined) ||
+        (json.audio_data as string | undefined) ||
+        (minimaxData?.audio as string | undefined);
+      if (typeof encodedAudio === "string") {
+        const encoded = encodedAudio.includes(",")
+          ? encodedAudio.slice(encodedAudio.indexOf(",") + 1)
+          : encodedAudio;
+        if (isMinimax) {
+          const bytes = new Uint8Array(encoded.length / 2);
+          for (let index = 0; index < encoded.length; index += 2) {
+            bytes[index / 2] = Number.parseInt(
+              encoded.slice(index, index + 2),
+              16,
+            );
+          }
+          return bytes.buffer;
+        }
+        const binary = atob(encoded);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index++) {
+          bytes[index] = binary.charCodeAt(index);
+        }
+        return bytes.buffer;
+      }
       if (!json.audioUrl) {
         throw new Error("TTS response missing audioUrl");
       }
@@ -1033,12 +1115,92 @@ export class OpenAIService {
     const apiKey = resolved.provider.apiKey;
     const endpoint = resolved.endpoint;
     const isNanoGpt = resolved.adapterId === "nanogpt";
+    const isMimo = resolved.adapterId === "mimo";
+    const isXai = resolved.provider.presetId === "xai";
 
     Zotero.debug(
       `[seerai] STT request: model=${sttModel}, endpoint=${endpoint}, type=${typeof audio === "string" ? "url" : "file"}`,
     );
 
     let response: Response;
+
+    if (isMimo) {
+      let dataUrl: string;
+      if (typeof audio === "string") {
+        const audioResponse = await fetch(audio);
+        if (!audioResponse.ok) {
+          throw new Error(
+            `Failed to fetch audio input (${audioResponse.status})`,
+          );
+        }
+        const mimeType =
+          audioResponse.headers.get("Content-Type")?.split(";")[0] ||
+          "audio/mpeg";
+        const bytes = new Uint8Array(await audioResponse.arrayBuffer());
+        let binary = "";
+        for (const byte of bytes) binary += String.fromCharCode(byte);
+        dataUrl = `data:${mimeType};base64,${btoa(binary)}`;
+      } else {
+        const value = audio as any;
+        let bytes: Uint8Array;
+        if (value?.BYTES_PER_ELEMENT != null) {
+          bytes = new Uint8Array(
+            value.buffer ?? value,
+            value.byteOffset ?? 0,
+            value.byteLength,
+          );
+        } else if (value?.size != null) {
+          bytes = new Uint8Array(await value.arrayBuffer());
+        } else {
+          bytes = new Uint8Array(audio as ArrayBuffer);
+        }
+        const filename = options?.filename || "recording.webm";
+        const extension = filename.split(".").pop()?.toLowerCase();
+        const mimeType =
+          extension === "mp3"
+            ? "audio/mpeg"
+            : extension === "wav"
+              ? "audio/wav"
+              : extension === "m4a"
+                ? "audio/mp4"
+                : "audio/webm";
+        let binary = "";
+        for (const byte of bytes) binary += String.fromCharCode(byte);
+        dataUrl = `data:${mimeType};base64,${btoa(binary)}`;
+      }
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...resolved.headers,
+        },
+        body: JSON.stringify({
+          model: sttModel,
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "input_audio", input_audio: { data: dataUrl } },
+              ],
+            },
+          ],
+          asr_options: { language: options?.language || "auto" },
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(
+          `STT API Error (${response.status}): ${await response.text()}`,
+        );
+      }
+      const result = (await response.json()) as unknown as Record<
+        string,
+        unknown
+      >;
+      const choices = Array.isArray(result.choices) ? result.choices : [];
+      const choice = choices[0] as Record<string, unknown> | undefined;
+      const message = choice?.message as Record<string, unknown> | undefined;
+      return { transcription: String(message?.content || "") };
+    }
 
     if (typeof audio === "string") {
       // URL-based upload — JSON body
@@ -1119,22 +1281,32 @@ export class OpenAIService {
       const encoder = new TextEncoder();
 
       // Build multipart parts
-      let preFile = `--${boundary}\r\n`;
+      let preFile = "";
+      if (isXai) {
+        if (options?.language) {
+          preFile += `--${boundary}\r\nContent-Disposition: form-data; name="language"\r\n\r\n${options.language}\r\n`;
+          preFile += `--${boundary}\r\nContent-Disposition: form-data; name="format"\r\n\r\ntrue\r\n`;
+        }
+      }
+      preFile += `--${boundary}\r\n`;
       preFile += `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n`;
       preFile += `Content-Type: ${fileMime}\r\n\r\n`;
 
-      let postFile = `\r\n--${boundary}\r\n`;
-      postFile += `Content-Disposition: form-data; name="model"\r\n\r\n`;
-      postFile += sttModel;
-      if (options?.language) {
+      let postFile = "";
+      if (!isXai) {
         postFile += `\r\n--${boundary}\r\n`;
-        postFile += `Content-Disposition: form-data; name="language"\r\n\r\n`;
-        postFile += options.language;
-      }
-      if (options?.prompt) {
-        postFile += `\r\n--${boundary}\r\n`;
-        postFile += `Content-Disposition: form-data; name="prompt"\r\n\r\n`;
-        postFile += options.prompt;
+        postFile += `Content-Disposition: form-data; name="model"\r\n\r\n`;
+        postFile += sttModel;
+        if (options?.language) {
+          postFile += `\r\n--${boundary}\r\n`;
+          postFile += `Content-Disposition: form-data; name="language"\r\n\r\n`;
+          postFile += options.language;
+        }
+        if (options?.prompt) {
+          postFile += `\r\n--${boundary}\r\n`;
+          postFile += `Content-Disposition: form-data; name="prompt"\r\n\r\n`;
+          postFile += options.prompt;
+        }
       }
       postFile += `\r\n--${boundary}--\r\n`;
 
@@ -1383,22 +1555,38 @@ export class OpenAIService {
     const isOpenRouter =
       resolved.adapterId === "openrouter" ||
       resolved.provider.presetId === "openrouter";
+    const isGoogle = resolved.provider.presetId === "google";
+    const isMinimax = resolved.provider.presetId === "minimax";
+    const isOllama = resolved.provider.presetId === "ollama";
 
     // Build request body
-    const body: Record<string, unknown> = isOpenRouter
-      ? {
-          model: imageModel,
-          messages: [{ role: "user", content: prompt }],
-          modalities: ["image", "text"],
-          stream: false,
-        }
-      : {
-          model: imageModel,
-          prompt,
-          n: options?.n ?? 1,
-          size: options?.size ?? "1024x1024",
-          response_format: options?.response_format ?? "url",
-        };
+    const body: Record<string, unknown> =
+      isOpenRouter || isGoogle
+        ? {
+            model: imageModel,
+            messages: [{ role: "user", content: prompt }],
+            modalities: ["image", "text"],
+            stream: false,
+          }
+        : isMinimax
+          ? {
+              model: imageModel,
+              prompt,
+              n: options?.n ?? 1,
+              width: Number(options?.size?.split("x")[0] || 1024),
+              height: Number(options?.size?.split("x")[1] || 1024),
+              response_format:
+                options?.response_format === "b64_json" ? "base64" : "url",
+            }
+          : {
+              model: imageModel,
+              prompt,
+              n: options?.n ?? 1,
+              size: options?.size ?? "1024x1024",
+              response_format: isOllama
+                ? "b64_json"
+                : (options?.response_format ?? "url"),
+            };
     if (options?.imageDataUrl) body.imageDataUrl = options.imageDataUrl;
     if (options?.strength !== undefined) body.strength = options.strength;
     if (options?.guidance_scale !== undefined)
@@ -1444,7 +1632,13 @@ export class OpenAIService {
         });
       }
     }
-    if (isOpenRouter && Array.isArray(data.choices)) {
+    const minimaxData = data.data as Record<string, unknown> | undefined;
+    if (Array.isArray(minimaxData?.image_urls)) {
+      for (const url of minimaxData.image_urls) {
+        if (typeof url === "string") images.push({ url });
+      }
+    }
+    if ((isOpenRouter || isGoogle) && Array.isArray(data.choices)) {
       const choice = data.choices[0] as Record<string, unknown> | undefined;
       const message = choice?.message as Record<string, unknown> | undefined;
       if (Array.isArray(message?.images)) {
@@ -1518,6 +1712,11 @@ export class OpenAIService {
     const isOpenRouter =
       resolved.adapterId === "openrouter" ||
       resolved.provider.presetId === "openrouter";
+    const isOpenAIVideo = resolved.provider.presetId === "openai";
+    const isXaiVideo = resolved.provider.presetId === "xai";
+    const isTogetherVideo = resolved.adapterId === "together";
+    const isMinimaxVideo = resolved.provider.presetId === "minimax";
+    const isZaiVideo = resolved.provider.presetId === "zai";
 
     // Build request body
     const body: Record<string, unknown> = {
@@ -1525,12 +1724,26 @@ export class OpenAIService {
       prompt,
     };
     if (options?.duration) {
-      body.duration = isOpenRouter
-        ? Number.parseInt(options.duration, 10)
-        : options.duration;
+      if (isOpenAIVideo || isTogetherVideo) body.seconds = options.duration;
+      else if (isMinimaxVideo || isZaiVideo)
+        body.duration = Number.parseInt(options.duration, 10);
+      else {
+        body.duration = isOpenRouter
+          ? Number.parseInt(options.duration, 10)
+          : options.duration;
+      }
     }
-    if (options?.aspect_ratio) body.aspect_ratio = options.aspect_ratio;
-    if (options?.resolution) body.resolution = options.resolution;
+    if (isOpenAIVideo) {
+      const landscape = options?.aspect_ratio !== "9:16";
+      body.size = landscape ? "1280x720" : "720x1280";
+    } else if (isTogetherVideo) {
+      if (options?.aspect_ratio) body.ratio = options.aspect_ratio;
+      if (options?.resolution)
+        body.resolution = options.resolution.toUpperCase();
+    } else if (!isMinimaxVideo && !isZaiVideo) {
+      if (options?.aspect_ratio) body.aspect_ratio = options.aspect_ratio;
+      if (options?.resolution) body.resolution = options.resolution;
+    }
     if (options?.negative_prompt)
       body.negative_prompt = options.negative_prompt;
     if (options?.imageDataUrl) body.imageDataUrl = options.imageDataUrl;
@@ -1565,7 +1778,11 @@ export class OpenAIService {
     }
 
     const data = (await response.json()) as unknown as Record<string, unknown>;
-    const runId = (data.runId as string) || (data.id as string);
+    const runId =
+      (data.runId as string) ||
+      (data.id as string) ||
+      (data.request_id as string) ||
+      (data.task_id as string);
 
     if (!runId) {
       throw new Error("Video generation response missing runId for polling.");
@@ -1576,11 +1793,47 @@ export class OpenAIService {
     );
 
     // Poll for completion
-    if (isOpenRouter) {
+    if (isOpenRouter || isOpenAIVideo) {
       const pollingUrl = data.polling_url as string | undefined;
       return this._pollOpenRouterVideoResult(
         runId,
         pollingUrl,
+        resolved.provider.apiURL,
+        resolved.headers,
+        onStatusUpdate,
+      );
+    }
+
+    if (isXaiVideo) {
+      return this._pollXaiVideoResult(
+        runId,
+        resolved.provider.apiURL,
+        resolved.headers,
+        onStatusUpdate,
+      );
+    }
+
+    if (isTogetherVideo) {
+      return this._pollTogetherVideoResult(
+        runId,
+        resolved.provider.apiURL,
+        resolved.headers,
+        onStatusUpdate,
+      );
+    }
+
+    if (isMinimaxVideo) {
+      return this._pollMinimaxVideoResult(
+        runId,
+        resolved.provider.apiURL,
+        resolved.headers,
+        onStatusUpdate,
+      );
+    }
+
+    if (isZaiVideo) {
+      return this._pollZaiVideoResult(
+        runId,
         resolved.provider.apiURL,
         resolved.headers,
         onStatusUpdate,
@@ -1593,6 +1846,224 @@ export class OpenAIService {
       apiKey,
       resolved.provider.apiURL,
       onStatusUpdate,
+    );
+  }
+
+  private async _pollMinimaxVideoResult(
+    runId: string,
+    apiURL: string,
+    headers: Record<string, string>,
+    onStatusUpdate?: (
+      status: string,
+      attempt: number,
+      maxAttempts: number,
+    ) => void,
+    maxAttempts = 120,
+    intervalMs = 3000,
+  ): Promise<{
+    videoUrl?: string;
+    runId: string;
+    status: string;
+    metadata?: Record<string, unknown>;
+  }> {
+    const baseUrl = apiURL.replace(/\/+$/, "");
+    const statusUrl = `${baseUrl}/query/video_generation?task_id=${encodeURIComponent(runId)}`;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      const response = await fetch(statusUrl, { headers });
+      if (!response.ok) continue;
+      const data = (await response.json()) as unknown as Record<
+        string,
+        unknown
+      >;
+      const status = String(data.status || "Processing").toLowerCase();
+      onStatusUpdate?.(status, attempt + 1, maxAttempts);
+      if (status === "success") {
+        const fileId = String(data.file_id || "");
+        const fileResponse = await fetch(
+          `${baseUrl}/files/retrieve?file_id=${encodeURIComponent(fileId)}`,
+          { headers },
+        );
+        if (!fileResponse.ok) {
+          throw new Error(
+            `MiniMax video file lookup failed: ${fileResponse.status}`,
+          );
+        }
+        const fileData = (await fileResponse.json()) as unknown as Record<
+          string,
+          unknown
+        >;
+        const file = fileData.file as Record<string, unknown> | undefined;
+        return {
+          videoUrl: file?.download_url as string | undefined,
+          runId,
+          status,
+          metadata: data,
+        };
+      }
+      if (status === "fail") {
+        const baseResponse = data.base_resp as
+          | Record<string, unknown>
+          | undefined;
+        throw new Error(
+          `Video generation failed: ${String(baseResponse?.status_msg || status)}`,
+        );
+      }
+    }
+    throw new Error(
+      `Video generation timed out after ${(maxAttempts * intervalMs) / 1000}s. runId=${runId}`,
+    );
+  }
+
+  private async _pollZaiVideoResult(
+    runId: string,
+    apiURL: string,
+    headers: Record<string, string>,
+    onStatusUpdate?: (
+      status: string,
+      attempt: number,
+      maxAttempts: number,
+    ) => void,
+    maxAttempts = 120,
+    intervalMs = 3000,
+  ): Promise<{
+    videoUrl?: string;
+    thumbnailUrl?: string;
+    runId: string;
+    status: string;
+    metadata?: Record<string, unknown>;
+  }> {
+    const statusUrl = `${apiURL.replace(/\/+$/, "")}/async-result/${encodeURIComponent(runId)}`;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      const response = await fetch(statusUrl, { headers });
+      if (!response.ok) continue;
+      const data = (await response.json()) as unknown as Record<
+        string,
+        unknown
+      >;
+      const status = String(data.task_status || "PROCESSING").toLowerCase();
+      onStatusUpdate?.(status, attempt + 1, maxAttempts);
+      if (status === "success") {
+        const results = Array.isArray(data.video_result)
+          ? (data.video_result as Record<string, unknown>[])
+          : [];
+        return {
+          videoUrl: results[0]?.url as string | undefined,
+          thumbnailUrl: results[0]?.cover_image_url as string | undefined,
+          runId,
+          status,
+          metadata: data,
+        };
+      }
+      if (status === "fail") {
+        throw new Error(
+          `Video generation failed: ${String(data.error || status)}`,
+        );
+      }
+    }
+    throw new Error(
+      `Video generation timed out after ${(maxAttempts * intervalMs) / 1000}s. runId=${runId}`,
+    );
+  }
+
+  private async _pollTogetherVideoResult(
+    runId: string,
+    apiURL: string,
+    headers: Record<string, string>,
+    onStatusUpdate?: (
+      status: string,
+      attempt: number,
+      maxAttempts: number,
+    ) => void,
+    maxAttempts = 120,
+    intervalMs = 3000,
+  ): Promise<{
+    videoUrl?: string;
+    runId: string;
+    cost?: number;
+    status: string;
+    metadata?: Record<string, unknown>;
+  }> {
+    const statusUrl = `${apiURL.replace(/\/+$/, "")}/videos/${encodeURIComponent(runId)}`;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      const response = await fetch(statusUrl, { headers });
+      if (!response.ok) continue;
+      const data = (await response.json()) as unknown as Record<
+        string,
+        unknown
+      >;
+      const status = String(data.status || "in_progress").toLowerCase();
+      onStatusUpdate?.(status, attempt + 1, maxAttempts);
+      if (status === "completed") {
+        const outputs = data.outputs as Record<string, unknown> | undefined;
+        return {
+          videoUrl: outputs?.video_url as string | undefined,
+          runId,
+          cost: outputs?.cost as number | undefined,
+          status,
+          metadata: data,
+        };
+      }
+      if (["failed", "cancelled", "canceled"].includes(status)) {
+        const error = data.error as Record<string, unknown> | undefined;
+        throw new Error(
+          `Video generation failed: ${String(error?.message || status)}`,
+        );
+      }
+    }
+    throw new Error(
+      `Video generation timed out after ${(maxAttempts * intervalMs) / 1000}s. runId=${runId}`,
+    );
+  }
+
+  private async _pollXaiVideoResult(
+    runId: string,
+    apiURL: string,
+    headers: Record<string, string>,
+    onStatusUpdate?: (
+      status: string,
+      attempt: number,
+      maxAttempts: number,
+    ) => void,
+    maxAttempts = 120,
+    intervalMs = 3000,
+  ): Promise<{
+    videoUrl?: string;
+    thumbnailUrl?: string;
+    runId: string;
+    status: string;
+    metadata?: Record<string, unknown>;
+  }> {
+    const statusUrl = `${apiURL.replace(/\/+$/, "")}/videos/${encodeURIComponent(runId)}`;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      const response = await fetch(statusUrl, { headers });
+      if (!response.ok) continue;
+      const data = (await response.json()) as unknown as Record<
+        string,
+        unknown
+      >;
+      const status = String(data.status || "pending").toLowerCase();
+      onStatusUpdate?.(status, attempt + 1, maxAttempts);
+      if (status === "done" || status === "completed") {
+        const video = data.video as Record<string, unknown> | undefined;
+        return {
+          videoUrl: video?.url as string | undefined,
+          runId,
+          status,
+          metadata: data,
+        };
+      }
+      if (["failed", "expired", "canceled", "cancelled"].includes(status)) {
+        throw new Error(
+          `Video generation failed: ${String(data.error || status)}`,
+        );
+      }
+    }
+    throw new Error(
+      `Video generation timed out after ${(maxAttempts * intervalMs) / 1000}s. runId=${runId}`,
     );
   }
 

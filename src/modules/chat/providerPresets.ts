@@ -67,7 +67,7 @@ export const providerPresets: ProviderPreset[] = [
     defaultModel: "gemini-2.5-flash",
     supportsModelDiscovery: true,
     adapterId: "openai-compatible",
-    verifiedCapabilities: ["chat"],
+    verifiedCapabilities: ["chat", "embedding", "image"],
   },
   {
     id: "xai",
@@ -80,6 +80,11 @@ export const providerPresets: ProviderPreset[] = [
     apiKeyPlaceholder: "xai-...",
     defaultModel: "grok-4.1-fast",
     supportsModelDiscovery: true,
+    verifiedCapabilities: ["chat", "image", "video", "tts", "stt"],
+    catalogModels: [
+      { id: "grok-voice-latest", capabilities: ["tts"] },
+      { id: "grok-transcribe", capabilities: ["stt"] },
+    ],
   },
   {
     id: "mistral",
@@ -91,6 +96,7 @@ export const providerPresets: ProviderPreset[] = [
     authMethod: "bearer",
     defaultModel: "mistral-large-latest",
     supportsModelDiscovery: true,
+    verifiedCapabilities: ["chat", "embedding", "tts", "stt"],
   },
   {
     id: "deepseek",
@@ -102,6 +108,7 @@ export const providerPresets: ProviderPreset[] = [
     authMethod: "bearer",
     defaultModel: "deepseek-chat",
     supportsModelDiscovery: true,
+    verifiedCapabilities: ["chat"],
   },
   {
     id: "together",
@@ -113,6 +120,15 @@ export const providerPresets: ProviderPreset[] = [
     authMethod: "bearer",
     defaultModel: "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
     supportsModelDiscovery: true,
+    adapterId: "together",
+    verifiedCapabilities: ["chat", "embedding", "image", "video", "tts", "stt"],
+    catalogModels: [
+      { id: "openai/sora-2-pro", capabilities: ["video"] },
+      { id: "cartesia/sonic-3", capabilities: ["tts"] },
+      { id: "hexgrad/Kokoro-82M", capabilities: ["tts"] },
+      { id: "openai/whisper-large-v3", capabilities: ["stt"] },
+      { id: "deepgram/nova-3-en", capabilities: ["stt"] },
+    ],
   },
   {
     id: "groq",
@@ -125,6 +141,7 @@ export const providerPresets: ProviderPreset[] = [
     apiKeyPlaceholder: "gsk_...",
     defaultModel: "llama-3.3-70b-versatile",
     supportsModelDiscovery: true,
+    verifiedCapabilities: ["chat", "tts", "stt"],
   },
   {
     id: "fireworks",
@@ -137,6 +154,9 @@ export const providerPresets: ProviderPreset[] = [
     apiKeyPlaceholder: "fw_...",
     defaultModel: "accounts/fireworks/models/llama-v3p3-70b-instruct",
     supportsModelDiscovery: true,
+    verifiedCapabilities: ["chat", "embedding"],
+    notes:
+      "Image models use Fireworks workflow endpoints and require a per-model endpoint override.",
   },
   {
     id: "cohere",
@@ -145,9 +165,11 @@ export const providerPresets: ProviderPreset[] = [
     isLocal: false,
     icon: ICON_COHERE,
     apiURL: "https://api.cohere.com/compatibility/v1/",
+    modelsURL: "https://api.cohere.com/v1/models?page_size=1000",
     authMethod: "bearer",
     defaultModel: "command-r-plus",
     supportsModelDiscovery: true,
+    verifiedCapabilities: ["chat", "embedding"],
   },
   {
     id: "minimax",
@@ -161,7 +183,14 @@ export const providerPresets: ProviderPreset[] = [
     defaultModel: "MiniMax-M3",
     supportsModelDiscovery: true,
     adapterId: "openai-compatible",
-    verifiedCapabilities: ["chat"],
+    verifiedCapabilities: ["chat", "image", "video", "tts"],
+    catalogModels: [
+      { id: "image-01", capabilities: ["image"] },
+      { id: "MiniMax-Hailuo-2.3", capabilities: ["video"] },
+      { id: "MiniMax-Hailuo-02", capabilities: ["video"] },
+      { id: "speech-2.8-hd", capabilities: ["tts"] },
+      { id: "speech-2.8-turbo", capabilities: ["tts"] },
+    ],
     notes:
       "General API and Token Plan coding access use the same OpenAI-compatible URL.",
   },
@@ -175,9 +204,26 @@ export const providerPresets: ProviderPreset[] = [
     authMethod: "bearer",
     apiKeyPlaceholder: "sk-...",
     defaultModel: "mimo-v2.5-pro",
-    supportsModelDiscovery: true,
-    adapterId: "openai-compatible",
-    verifiedCapabilities: ["chat"],
+    supportsModelDiscovery: false,
+    adapterId: "mimo",
+    verifiedCapabilities: ["chat", "tts", "stt"],
+    catalogModels: [
+      { id: "mimo-v2.5-pro", capabilities: ["chat"], contextLength: 1000000 },
+      { id: "mimo-v2.5", capabilities: ["chat"], contextLength: 1000000 },
+      { id: "mimo-v2-flash", capabilities: ["chat"], contextLength: 256000 },
+      { id: "mimo-v2.5-asr", capabilities: ["stt"], contextLength: 8000 },
+      { id: "mimo-v2.5-tts", capabilities: ["tts"], contextLength: 8000 },
+      {
+        id: "mimo-v2.5-tts-voiceclone",
+        capabilities: ["tts"],
+        contextLength: 8000,
+      },
+      {
+        id: "mimo-v2.5-tts-voicedesign",
+        capabilities: ["tts"],
+        contextLength: 8000,
+      },
+    ],
     notes:
       "Pay-as-you-go API. Token Plan users must replace this URL with the OpenAI-compatible Base URL shown on their Token Plan page.",
   },
@@ -193,7 +239,11 @@ export const providerPresets: ProviderPreset[] = [
     defaultModel: "glm-5.1",
     supportsModelDiscovery: true,
     adapterId: "openai-compatible",
-    verifiedCapabilities: ["chat"],
+    verifiedCapabilities: ["chat", "image", "video"],
+    catalogModels: [
+      { id: "glm-image", capabilities: ["image"] },
+      { id: "cogvideox-3", capabilities: ["video"] },
+    ],
     notes: "General pay-as-you-go API.",
   },
   {
@@ -234,6 +284,7 @@ export const providerPresets: ProviderPreset[] = [
     isLocal: false,
     icon: ICON_OPENROUTER,
     apiURL: "https://openrouter.ai/api/v1/",
+    modelsURL: "https://openrouter.ai/api/v1/models?output_modalities=all",
     authMethod: "bearer",
     apiKeyPlaceholder: "sk-or-...",
     defaultModel: "openai/gpt-5-mini",
@@ -255,7 +306,8 @@ export const providerPresets: ProviderPreset[] = [
     supportsModelDiscovery: true,
     adapterId: "openai-compatible",
     verifiedCapabilities: ["chat"],
-    notes: "OpenCode Go gateway. OpenAI-compatible chat models are supported.",
+    notes:
+      "Only models documented for /chat/completions are imported; Anthropic-format models are excluded.",
   },
   {
     id: "opencode-zen",
@@ -270,7 +322,8 @@ export const providerPresets: ProviderPreset[] = [
     supportsModelDiscovery: true,
     adapterId: "openai-compatible",
     verifiedCapabilities: ["chat"],
-    notes: "OpenCode Zen gateway. OpenAI-compatible chat models are supported.",
+    notes:
+      "Only models documented for /chat/completions are imported; Responses, Anthropic, and Gemini-format models are excluded.",
   },
   {
     id: "ollama",
@@ -282,6 +335,7 @@ export const providerPresets: ProviderPreset[] = [
     isLocal: true,
     defaultModel: "llama3.3:70b",
     supportsModelDiscovery: true,
+    verifiedCapabilities: ["chat", "embedding", "image"],
   },
   {
     id: "lmstudio",
@@ -292,6 +346,7 @@ export const providerPresets: ProviderPreset[] = [
     requiresApiKey: false,
     isLocal: true,
     supportsModelDiscovery: true,
+    verifiedCapabilities: ["chat", "embedding"],
     notes: "Run LM Studio with a model loaded first",
   },
   {
@@ -334,6 +389,7 @@ export const providerPresets: ProviderPreset[] = [
     isAgent: true,
     defaultModel: "hermes-agent",
     supportsModelDiscovery: true,
+    verifiedCapabilities: ["chat"],
     notes:
       "Full research agent with terminal, file ops, web search. OpenAI-compatible API.",
   },
@@ -347,6 +403,7 @@ export const providerPresets: ProviderPreset[] = [
     isLocal: true,
     isAgent: true,
     supportsModelDiscovery: true,
+    verifiedCapabilities: ["chat"],
     notes: "Coding agent. Run opencode serve first.",
   },
 ];

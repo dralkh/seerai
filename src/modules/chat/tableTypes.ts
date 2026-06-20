@@ -113,6 +113,7 @@ export interface TableConfig {
   filterQuery?: string;
   responseLength?: number; // For AI-generated content length control
   temperature?: number; // Default temperature for table generation
+  routingPresetId?: string;
   // Filter settings
   filterLibraryId?: number | null; // Filter to specific library
   filterCollectionId?: number | null; // Filter to specific collection

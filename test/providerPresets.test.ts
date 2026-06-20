@@ -21,4 +21,55 @@ describe("Provider presets", function () {
       "https://api.z.ai/api/coding/paas/v4",
     );
   });
+
+  it("requests every OpenRouter output modality during discovery", function () {
+    assert.equal(
+      getPresetById("openrouter")?.modelsURL,
+      "https://openrouter.ai/api/v1/models?output_modalities=all",
+    );
+  });
+
+  it("uses Cohere's native model catalog endpoint", function () {
+    assert.equal(
+      getPresetById("cohere")?.modelsURL,
+      "https://api.cohere.com/v1/models?page_size=1000",
+    );
+  });
+
+  it("does not route Fireworks workflow images through OpenAI images", function () {
+    assert.notInclude(
+      getPresetById("fireworks")?.verifiedCapabilities,
+      "image",
+    );
+  });
+
+  it("supplements providers whose model endpoint omits media models", function () {
+    assert.include(
+      getPresetById("minimax")?.catalogModels?.find(
+        (model) => model.id === "MiniMax-Hailuo-2.3",
+      )?.capabilities,
+      "video",
+    );
+    assert.include(
+      getPresetById("together")?.catalogModels?.find(
+        (model) => model.id === "deepgram/nova-3-en",
+      )?.capabilities,
+      "stt",
+    );
+  });
+
+  it("provides the documented MiMo speech catalog", function () {
+    const mimo = getPresetById("mimo");
+    assert.isFalse(mimo?.supportsModelDiscovery);
+    assert.include(
+      mimo?.catalogModels?.find((model) => model.id === "mimo-v2.5-asr")
+        ?.capabilities,
+      "stt",
+    );
+    assert.include(
+      mimo?.catalogModels?.find((model) => model.id === "mimo-v2.5-tts")
+        ?.capabilities,
+      "tts",
+    );
+  });
 });

@@ -43,6 +43,30 @@ function endpointFor(
       return `${provider.apiURL.replace(/\/+$/, "")}${openRouterPath}`;
     }
   }
+  if (provider.presetId === "xai" && capability === "video") {
+    return `${provider.apiURL.replace(/\/+$/, "")}/videos/generations`;
+  }
+  if (provider.presetId === "xai" && capability === "tts") {
+    return `${provider.apiURL.replace(/\/+$/, "")}/tts`;
+  }
+  if (provider.presetId === "xai" && capability === "stt") {
+    return `${provider.apiURL.replace(/\/+$/, "")}/stt`;
+  }
+  if (provider.presetId === "google" && capability === "image") {
+    return `${provider.apiURL.replace(/\/+$/, "")}/chat/completions`;
+  }
+  if (provider.presetId === "minimax") {
+    const minimaxPaths: Partial<Record<ModelType, string>> = {
+      image: "/image_generation",
+      video: "/video_generation",
+      tts: "/t2a_v2",
+    };
+    const path = minimaxPaths[capability];
+    if (path) return `${provider.apiURL.replace(/\/+$/, "")}${path}`;
+  }
+  if (provider.presetId === "zai" && capability === "video") {
+    return `${provider.apiURL.replace(/\/+$/, "")}/videos/generations`;
+  }
   if (provider.adapterId === "nanogpt") {
     const nanoPaths: Partial<Record<ModelType, string>> = {
       tts: "/api/tts",
@@ -52,6 +76,12 @@ function endpointFor(
     };
     const nanoPath = nanoPaths[capability];
     if (nanoPath) return `https://nano-gpt.com${nanoPath}`;
+  }
+  if (
+    provider.adapterId === "mimo" &&
+    (capability === "tts" || capability === "stt")
+  ) {
+    return `${provider.apiURL.replace(/\/+$/, "")}/chat/completions`;
   }
   if (provider.adapterId === "anthropic" && capability === "chat") {
     return `${provider.apiURL.replace(/\/+$/, "")}/messages`;

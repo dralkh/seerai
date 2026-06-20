@@ -40,6 +40,7 @@ const CAPABILITIES: ModelType[] = [
   "stt",
 ];
 const HTML_NS = "http://www.w3.org/1999/xhtml";
+let defaultRoutingPresetId: string | undefined;
 
 function element<K extends keyof HTMLElementTagNameMap>(
   doc: Document,
@@ -88,6 +89,16 @@ function compactLabel(value: string, maxLength = 40): string {
   return `${value.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
+function discoverySummary(models: DiscoveredModel[]): string {
+  const counts = CAPABILITIES.map((capability) => {
+    const count = models.filter((model) =>
+      model.capabilities?.includes(capability),
+    ).length;
+    return `${capabilityLabel(capability)} ${count}`;
+  });
+  return `Connected · ${models.length} models · ${counts.join(" · ")}`;
+}
+
 function matchingRoutingPreset(models: Partial<Record<ModelType, ModelRef>>) {
   return getModelRoutingPresets().find((preset) =>
     CAPABILITIES.every((capability) => {
@@ -134,6 +145,10 @@ function createRoutingPresetBar(
   doc: Document,
   currentModels: () => Partial<Record<ModelType, ModelRef>>,
   onApply: (models: Partial<Record<ModelType, ModelRef>>) => void,
+  selection?: {
+    get: () => string | undefined;
+    set: (id: string | undefined) => void;
+  },
 ): HTMLElement {
   const bar = element(doc, "div", "seerai-routing-presets");
   const select = element(doc, "select");
@@ -147,7 +162,13 @@ function createRoutingPresetBar(
     option.textContent = preset.name;
     select.appendChild(option);
   }
-  select.value = matchingRoutingPreset(currentModels())?.id || "";
+  const selectedId = selection?.get();
+  select.value = getModelRoutingPresets().some(
+    (preset) => preset.id === selectedId,
+  )
+    ? selectedId || ""
+    : matchingRoutingPreset(currentModels())?.id || "";
+  if (!selectedId && select.value) selection?.set(select.value);
   const apply = element(doc, "button", "seerai-secondary-button");
   apply.type = "button";
   apply.textContent = "Save";
@@ -168,6 +189,7 @@ function createRoutingPresetBar(
       (item) => item.id === select.value,
     );
     if (!preset) return;
+    selection?.set(preset.id);
     applyModelRoutingPreset(preset.id);
     onApply(preset.models);
   };
@@ -210,6 +232,7 @@ function createRoutingPresetBar(
         select.appendChild(option);
       }
       select.value = preset.id;
+      selection?.set(preset.id);
       apply.disabled = false;
       restore();
       onApply(preset.models);
@@ -268,6 +291,7 @@ function createRoutingPresetBar(
     if (!select.value || !deleteModelRoutingPreset(select.value)) return;
     select.querySelector(`option[value="${select.value}"]`)?.remove();
     select.value = "";
+    selection?.set(undefined);
     apply.disabled = true;
   });
   bar.append(select, apply, save, rename, remove);
@@ -634,7 +658,7 @@ export function showProviderManagerDialog(
       discovered = await discoverModels(draft);
       connectionStatus.textContent =
         discovered.length > 0
-          ? `Connected · ${discovered.length} models`
+          ? discoverySummary(discovered)
           : "Connected · no models returned; add model IDs manually";
       renderLanes();
     } catch (reason) {
@@ -902,6 +926,12 @@ export function renderModelDefaults(
       doc,
       () => ({ ...getProviderRegistryState().defaults }),
       () => renderModelDefaults(doc, container),
+      {
+        get: () => defaultRoutingPresetId,
+        set: (id) => {
+          defaultRoutingPresetId = id;
+        },
+      },
     ),
   );
 
@@ -1026,6 +1056,14 @@ export function createChatModelPicker(
       ...(options.modelRef && { chat: options.modelRef }),
     };
     const activePreset = matchingRoutingPreset(activeRoutes);
+    const selectedPreset = getModelRoutingPresets().find(
+      (preset) => preset.id === options.routingPresetId,
+    );
+    if (selectedPreset && selectedPreset.id !== activePreset?.id) {
+      label.textContent = `${selectedPreset.name} · Edited`;
+      button.title = `Editing routing preset: ${selectedPreset.name}`;
+      return;
+    }
     if (activePreset) {
       label.textContent = activePreset.name;
       button.title = `Active routing preset: ${activePreset.name}`;
@@ -1243,6 +1281,10 @@ export function createChatModelPicker(
         refreshLabel();
         onChange();
         renderRoutes();
+      },
+      {
+        get: () => stateManager.getOptions().routingPresetId,
+        set: (routingPresetId) => stateManager.setOptions({ routingPresetId }),
       },
     );
     const manage = element(doc, "button", "seerai-chat-model-manage");

@@ -202,7 +202,7 @@ export const MODEL_TYPE_ENDPOINTS: Record<
     description: "DALL-E, Midjourney, Flux, and more",
   },
   video: {
-    path: "/generate-video",
+    path: "/videos",
     label: "Video",
     icon: "video",
     description: "Kling, Veo, Hunyuan (async with polling)",
@@ -313,6 +313,7 @@ export interface ChatOptions {
   temperature?: number; // 0.0 - 2.0, undefined = provider default
   model?: string;
   modelRef?: import("./providerTypes").ModelRef;
+  routingPresetId?: string;
   ragEnabled?: boolean; // Enable semantic search (RAG) for large context
   ragTokenThreshold?: number; // Token count threshold to auto-activate RAG
   /** Per-conversation custom system prompt */
