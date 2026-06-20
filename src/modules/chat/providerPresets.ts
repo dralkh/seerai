@@ -21,6 +21,8 @@ const ICON_MINIMAX: IconName = "sparkle";
 const ICON_MIMO: IconName = "zap";
 const ICON_ZAI: IconName = "brain";
 const ICON_MOONSHOT: IconName = "idea";
+const ICON_CODEX: IconName = "terminal";
+const ICON_ANTIGRAVITY: IconName = "rocket";
 
 export const providerPresets: ProviderPreset[] = [
   {
@@ -36,6 +38,104 @@ export const providerPresets: ProviderPreset[] = [
     supportsModelDiscovery: true,
     adapterId: "openai-compatible",
     verifiedCapabilities: ["chat", "embedding", "image", "video", "tts", "stt"],
+  },
+  {
+    id: "codex-cli",
+    name: "Codex CLI (ChatGPT)",
+    requiresApiKey: false,
+    isLocal: true,
+    icon: ICON_CODEX,
+    // Sentinel URL: local-cli providers never make HTTP calls. The value
+    // only needs to pass `new URL()` validation in the provider editor.
+    apiURL: "cli://codex",
+    authMethod: "none",
+    // Model list comes from catalogModels below — no /models endpoint.
+    supportsModelDiscovery: false,
+    adapterId: "local-cli",
+    cliAgentId: "codex",
+    defaultModel: "default",
+    verifiedCapabilities: ["chat", "reasoning"],
+    notes:
+      "Uses your locally installed Codex CLI and its ChatGPT login. Run `codex login` in a terminal once, then click Detect — your real installed models are pulled live from the CLI. No API key is stored by seerai.",
+    // Fallback only; Detect pulls the live list via `codex debug models`.
+    catalogModels: [
+      { id: "default", capabilities: ["chat", "reasoning"] },
+      { id: "gpt-5.5", capabilities: ["chat", "reasoning"] },
+      { id: "gpt-5.4", capabilities: ["chat", "reasoning"] },
+      { id: "gpt-5.4-mini", capabilities: ["chat", "reasoning"] },
+    ],
+  },
+  {
+    id: "claude-cli",
+    name: "Claude Code CLI",
+    requiresApiKey: false,
+    isLocal: true,
+    icon: ICON_ANTHROPIC,
+    apiURL: "cli://claude",
+    authMethod: "none",
+    supportsModelDiscovery: false,
+    adapterId: "local-cli",
+    cliAgentId: "claude",
+    defaultModel: "default",
+    verifiedCapabilities: ["chat", "reasoning"],
+    notes:
+      "Uses your locally installed Claude Code CLI and its login (Pro/Max or API key). Sign in with `claude` in a terminal once, then click Detect. The aliases below always map to the latest model; `default` uses your CLI's configured model. No API key is stored by seerai.",
+    catalogModels: [
+      { id: "default", capabilities: ["chat", "reasoning"] },
+      { id: "opus", capabilities: ["chat", "reasoning"] },
+      { id: "sonnet", capabilities: ["chat", "reasoning"] },
+      { id: "haiku", capabilities: ["chat"] },
+    ],
+  },
+  {
+    id: "antigravity-cli",
+    name: "Antigravity (agy)",
+    requiresApiKey: false,
+    isLocal: true,
+    icon: ICON_ANTIGRAVITY,
+    apiURL: "cli://antigravity",
+    authMethod: "none",
+    supportsModelDiscovery: false,
+    adapterId: "local-cli",
+    cliAgentId: "antigravity",
+    defaultModel: "default",
+    verifiedCapabilities: ["chat", "reasoning"],
+    notes:
+      "Uses your locally installed Antigravity CLI (`agy`) — Google's replacement for the deprecated Gemini CLI. Run `agy` once in a terminal to sign in with Google (stored in your system keyring), then click Detect. `default` uses agy's currently selected model; pick a specific model (Gemini 3 / Claude / GPT-OSS) to set it via agy's settings. No API key is stored by seerai.",
+    catalogModels: [
+      { id: "default", capabilities: ["chat", "reasoning"] },
+      { id: "Gemini 3.1 Pro (High)", capabilities: ["chat", "reasoning"] },
+      { id: "Gemini 3.1 Pro (Low)", capabilities: ["chat", "reasoning"] },
+      { id: "Gemini 3.5 Flash (High)", capabilities: ["chat", "reasoning"] },
+      { id: "Gemini 3.5 Flash (Medium)", capabilities: ["chat"] },
+      {
+        id: "Claude Sonnet 4.6 (Thinking)",
+        capabilities: ["chat", "reasoning"],
+      },
+      { id: "Claude Opus 4.6 (Thinking)", capabilities: ["chat", "reasoning"] },
+      { id: "GPT-OSS 120B (Medium)", capabilities: ["chat", "reasoning"] },
+    ],
+  },
+  {
+    id: "copilot-cli",
+    name: "GitHub Copilot CLI",
+    requiresApiKey: false,
+    isLocal: true,
+    icon: ICON_HERMES,
+    apiURL: "cli://copilot",
+    authMethod: "none",
+    supportsModelDiscovery: false,
+    adapterId: "local-cli",
+    cliAgentId: "copilot",
+    defaultModel: "default",
+    verifiedCapabilities: ["chat", "reasoning"],
+    notes:
+      "Uses your locally installed GitHub Copilot CLI and its GitHub login. Sign in with `copilot` in a terminal once, then click Detect. `default` uses Copilot's current model; add any other model id your subscription exposes. No API key is stored by seerai.",
+    catalogModels: [
+      { id: "default", capabilities: ["chat", "reasoning"] },
+      { id: "gpt-5.2", capabilities: ["chat", "reasoning"] },
+      { id: "claude-sonnet-4.6", capabilities: ["chat", "reasoning"] },
+    ],
   },
   {
     id: "anthropic",

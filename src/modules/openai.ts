@@ -157,7 +157,8 @@ export interface ChatCompletionOptions {
 
 import { RateLimiter } from "../utils/rateLimiter";
 import { requireResolvedModel, resolveModel } from "./chat/modelResolver";
-import type { ModelRef } from "./chat/providerTypes";
+import type { ModelRef, ResolvedModel } from "./chat/providerTypes";
+import { createCliProvider } from "./chat/cli/cliProvider";
 
 export class OpenAIService {
   // Active AbortController for current request (may not be available in Zotero)
@@ -400,6 +401,51 @@ export class OpenAIService {
    * @param configOverride Optional config to use instead of preferences (for multi-model support)
    * @param tools Optional tool definitions for function calling
    */
+  /**
+   * Stream a chat turn from a local CLI provider (Codex/Claude/Gemini/Copilot)
+   * into StreamCallbacks. Inherits the CLI's own login; no HTTP, no API key.
+   */
+  private async cliCompletionStream(
+    resolved: ResolvedModel,
+    messages: AnyOpenAIMessage[],
+    callbacks: StreamCallbacks,
+  ): Promise<void> {
+    this.isAborted = false;
+    const provider = createCliProvider(resolved);
+    const query = provider.query({ messages });
+    this.currentController = { abort: () => query.abort() };
+    let fullContent = "";
+    try {
+      for await (const event of query.events) {
+        if (this.isAborted) {
+          query.abort();
+          throw new Error("Request was cancelled");
+        }
+        switch (event.type) {
+          case "token":
+            fullContent += event.text;
+            callbacks.onToken?.(event.text);
+            break;
+          case "error":
+            throw new Error(event.message);
+          case "done":
+          case "init":
+          case "tool_calls":
+            break;
+        }
+      }
+      callbacks.onComplete?.(fullContent);
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      callbacks.onError?.(err);
+      throw err;
+    } finally {
+      if (this.currentController && this.currentController.abort) {
+        this.currentController = null;
+      }
+    }
+  }
+
   async chatCompletionStream(
     messages: AnyOpenAIMessage[],
     callbacks: StreamCallbacks,
@@ -417,6 +463,16 @@ export class OpenAIService {
   ): Promise<void> {
     const prefs = this.getPrefs();
     const resolved = resolveModel("chat", configOverride?.modelRef);
+
+    // Local CLI providers (Codex/Claude/Gemini/Copilot) don't speak HTTP —
+    // delegate to the installed CLI and pump its streamed output through the
+    // same callbacks. This covers BOTH the non-agentic streaming path (here)
+    // and, separately, the agentic loop in agenticChat.ts.
+    if (resolved?.adapterId === "local-cli") {
+      await this.cliCompletionStream(resolved, messages, callbacks);
+      return;
+    }
+
     const apiURL =
       configOverride?.apiURL || resolved?.provider.apiURL || prefs.apiURL;
     const apiKey =

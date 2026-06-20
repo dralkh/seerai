@@ -18,6 +18,7 @@ import {
   updateProviderConfig,
 } from "../providerRegistry";
 import { getProviderPresets, getPresetById } from "../providerPresets";
+import { detectCliAgent } from "../cli/cliDetection";
 import type {
   AuthMethod,
   DiscoveredModel,
@@ -387,6 +388,11 @@ export function showProviderManagerDialog(
   keyWrap.append(keyInput, reveal);
   keyField.append(keyLabel, keyWrap);
 
+  // Shown only for local-cli providers (e.g. Codex): there is no API key —
+  // auth is inherited from the installed CLI's own login session.
+  const cliHint = element(doc, "p", "seerai-cli-hint");
+  cliHint.hidden = true;
+
   const advanced = element(doc, "details", "seerai-provider-advanced");
   const advancedSummary = element(doc, "summary");
   advancedSummary.textContent = "Advanced connection settings";
@@ -446,6 +452,7 @@ export function showProviderManagerDialog(
     presetField,
     nameField,
     keyField,
+    cliHint,
     advanced,
     connectionActions,
   );
@@ -614,6 +621,25 @@ export function showProviderManagerDialog(
     (doc.body || doc.documentElement)?.appendChild(overlay);
   }
 
+  const isLocalCliPreset = (presetId: string) =>
+    getPresetById(presetId)?.adapterId === "local-cli";
+
+  const applyCliMode = () => {
+    const cli = isLocalCliPreset(presetSelect.value);
+    keyField.hidden = cli;
+    advanced.hidden = cli;
+    cliHint.hidden = !cli;
+    if (cli) {
+      const preset = getPresetById(presetSelect.value);
+      cliHint.textContent =
+        preset?.notes ||
+        "Uses your locally installed CLI and its login. No API key is stored by seerai.";
+      testButton.textContent = "Detect";
+    } else {
+      testButton.textContent = "Test connection";
+    }
+  };
+
   const applyPreset = () => {
     const preset = getPresetById(presetSelect.value);
     if (!preset) return;
@@ -625,8 +651,10 @@ export function showProviderManagerDialog(
     extraInput.value = preset.extraHeaders
       ? JSON.stringify(preset.extraHeaders, null, 2)
       : "";
+    applyCliMode();
   };
   if (!existing) applyPreset();
+  else applyCliMode();
   presetSelect.addEventListener("change", applyPreset);
   reveal.addEventListener("click", () => {
     keyInput.type = keyInput.type === "password" ? "text" : "password";
@@ -652,6 +680,31 @@ export function showProviderManagerDialog(
   testButton.addEventListener("click", async () => {
     error.hidden = true;
     testButton.disabled = true;
+    if (isLocalCliPreset(presetSelect.value)) {
+      connectionStatus.textContent = "Detecting…";
+      try {
+        const draft = draftConnection();
+        // Populate the model lanes from the preset catalog (no network).
+        discovered = await discoverModels(draft);
+        const detection = await detectCliAgent(
+          getPresetById(presetSelect.value)?.cliAgentId,
+        );
+        connectionStatus.textContent = detection.message;
+        if (detection.level !== "ok") {
+          error.textContent = detection.message;
+          error.hidden = false;
+        }
+        renderLanes();
+      } catch (reason) {
+        connectionStatus.textContent = "Detection failed";
+        error.textContent =
+          reason instanceof Error ? reason.message : String(reason);
+        error.hidden = false;
+      } finally {
+        testButton.disabled = false;
+      }
+      return;
+    }
     connectionStatus.textContent = "Testing…";
     try {
       const draft = draftConnection();

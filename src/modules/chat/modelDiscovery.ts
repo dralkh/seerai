@@ -12,6 +12,7 @@ interface ProviderConfig {
   modelsURL?: string;
   presetId?: string;
   adapterId?: ProviderAdapterId;
+  cliAgentId?: string;
   authMethod?: AuthMethod;
   apiKey?: string;
   authHeaderName?: string;
@@ -266,14 +267,27 @@ export async function discoverModels(
   config: ProviderConfig,
 ): Promise<DiscoveredModel[]> {
   const preset = config.presetId ? getPresetById(config.presetId) : undefined;
-  if (preset?.supportsModelDiscovery === false && preset.catalogModels) {
-    return preset.catalogModels.map((model) => ({
+  const catalogFallback = (): DiscoveredModel[] =>
+    (preset?.catalogModels || []).map((model) => ({
       id: model.id,
       object: "model",
       displayName: formatModelDisplayName(model.id),
       capabilities: model.capabilities,
       contextLength: model.contextLength,
     }));
+
+  // Local CLI providers: pull the live model list from the installed CLI
+  // (e.g. `codex debug models`); fall back to the preset catalog if the CLI
+  // can't list or isn't reachable.
+  const cliAgentId = config.cliAgentId || preset?.cliAgentId;
+  if (config.adapterId === "local-cli" || preset?.adapterId === "local-cli") {
+    const { fetchCliModels } = await import("./cli/cliModels");
+    const live = await fetchCliModels(cliAgentId);
+    return live.length ? live : catalogFallback();
+  }
+
+  if (preset?.supportsModelDiscovery === false && preset.catalogModels) {
+    return catalogFallback();
   }
   const modelsURL =
     config.modelsURL || config.apiURL.replace(/\/+$/, "") + "/models";

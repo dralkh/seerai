@@ -34,6 +34,7 @@ import {
 import { ChatMessage } from "./types";
 import { parseMarkdown } from "./markdown";
 import { resolveModel } from "./modelResolver";
+import { createCliProvider } from "./cli/cliProvider";
 import type { ModelRef } from "./providerTypes";
 import { agentTracer } from "./tracer";
 import { ChatStateManager } from "./stateManager";
@@ -1471,10 +1472,17 @@ export async function handleAgenticChat(
       agentTracer.setIterationTokens(sessionId, estimatedInputTokens);
       observer.onPreApiCall?.(estimatedInputTokens);
 
-      const provider = createProvider();
+      // Local CLI providers (e.g. Codex) delegate to an installed agent CLI
+      // that is its own agent — seerai's tool loop stays off, so the turn is a
+      // single streamed text response. Auth is inherited from the CLI's login.
+      const isCliProvider = activeModel?.provider.adapterId === "local-cli";
+      const provider =
+        isCliProvider && activeModel
+          ? createCliProvider(activeModel)
+          : createProvider();
       const query = provider.query({
         messages,
-        tools,
+        tools: isCliProvider ? undefined : tools,
         configOverride,
         continuation: continuationToken || undefined,
       });

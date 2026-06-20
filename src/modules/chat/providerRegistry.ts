@@ -44,6 +44,7 @@ function normalizeProvider(provider: ProviderConfig): ProviderConfig {
   return {
     ...provider,
     adapterId: provider.adapterId || preset?.adapterId || "openai-compatible",
+    cliAgentId: provider.cliAgentId || preset?.cliAgentId,
     modelsURL: provider.modelsURL || preset?.modelsURL,
     enabled: provider.enabled ?? provider.isActive ?? true,
     isActive: provider.isActive ?? true,

@@ -25,6 +25,11 @@ export interface ProviderPreset {
   defaultModel?: string;
   notes?: string;
   adapterId?: ProviderAdapterId;
+  /**
+   * For `local-cli` providers: id of the local CLI agent to delegate to
+   * (e.g. "codex"). Auth is inherited from that CLI's own login session.
+   */
+  cliAgentId?: string;
   verifiedCapabilities?: ModelCapability[];
   catalogModels?: Array<{
     id: string;
@@ -50,7 +55,8 @@ export type ProviderAdapterId =
   | "azure-openai"
   | "mimo"
   | "nanogpt"
-  | "together";
+  | "together"
+  | "local-cli";
 
 export type ProviderModelPolicy = "automatic" | "scoped";
 
@@ -121,6 +127,7 @@ export interface ProviderConfig {
   isActive: boolean;
   enabled?: boolean;
   adapterId?: ProviderAdapterId;
+  cliAgentId?: string;
   modelsURL?: string;
   createdAt: string;
   updatedAt: string;

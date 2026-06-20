@@ -223,61 +223,146 @@ interface ItemMeta {
 }
 const itemMetaCache: Map<number, ItemMeta> = new Map();
 const itemAbstractInflight: Map<number, Promise<void>> = new Map();
+const itemLoadInflight: Set<number> = new Set();
+
+function placeholderItemMeta(id: number): ItemMeta {
+  return {
+    id,
+    title: "",
+    abstract: "",
+    abstractSource: "none",
+    abstractNoteIds: [],
+    abstractAttachmentId: undefined,
+    abstractPending: false,
+    year: "",
+    authors: "",
+    journal: "",
+    doi: "",
+    itemType: "",
+    creators: [],
+  };
+}
+
+/**
+ * Ensure a batch of items has its data loaded before we read fields
+ * synchronously. `Zotero.Items.get()`/`getField()` throw UnloadedDataException
+ * for items whose data has not been pulled into memory yet (e.g. on first open
+ * of a large library), which would otherwise crash the whole tab render.
+ */
+async function ensureItemsLoaded(ids: number[]): Promise<void> {
+  if (!ids.length) return;
+  try {
+    const items = (await Zotero.Items.getAsync(ids)) as any[];
+    await Promise.all(
+      (items || []).map((it) =>
+        it && typeof it.loadAllData === "function"
+          ? Promise.resolve(it.loadAllData()).catch(() => undefined)
+          : Promise.resolve(),
+      ),
+    );
+  } catch (e) {
+    Zotero.debug(`[seerai] review tab: ensureItemsLoaded failed: ${e}`);
+  }
+}
+
+/**
+ * Deferred load for a single item whose data was not yet available when a
+ * synchronous read was attempted. Re-caches once loaded and notifies listeners
+ * so the row can refresh.
+ */
+function ensureItemLoadedAsync(id: number): void {
+  if (itemLoadInflight.has(id)) return;
+  itemLoadInflight.add(id);
+  void (async () => {
+    try {
+      const it = (await Zotero.Items.getAsync(id)) as any;
+      if (it && typeof it.loadAllData === "function") {
+        await Promise.resolve(it.loadAllData()).catch(() => undefined);
+      }
+      itemMetaCache.delete(id);
+      cacheItemMeta(id);
+      notifyAbstractResolved(id);
+    } catch (e) {
+      Zotero.debug(
+        `[seerai] review tab: deferred item load failed for ${id}: ${e}`,
+      );
+    } finally {
+      itemLoadInflight.delete(id);
+    }
+  })();
+}
 
 function cacheItemMeta(id: number): ItemMeta {
-  let m = itemMetaCache.get(id);
-  if (m) return m;
-  const zItem = Zotero.Items.get(id);
-  const creators = zItem ? zItem.getCreators() : [];
-  const fieldAbstract =
-    (zItem ? (zItem.getField("abstractNote") as string) : "") || "";
-  let abstract = fieldAbstract;
-  let abstractSource: ItemMeta["abstractSource"] = fieldAbstract
-    ? "field"
-    : "none";
-  let abstractNoteIds: number[] = [];
-  let abstractAttachmentId: number | undefined;
-  let abstractPending = false;
-  if (!abstract && zItem) {
-    const noteHit = findSameTitleNoteAbstract(zItem);
-    if (noteHit.matched) {
-      abstract = noteHit.text;
-      abstractSource = "same_title_note";
-      abstractNoteIds = noteHit.noteIds;
-    }
+  const cached = itemMetaCache.get(id);
+  if (cached) return cached;
+  let m: ItemMeta;
+  let zItem: Zotero.Item | false;
+  try {
+    zItem = Zotero.Items.get(id);
+  } catch {
+    // Item data not loaded yet — return a transient placeholder (not cached)
+    // and load it in the background so the row fills in on the next render.
+    ensureItemLoadedAsync(id);
+    return placeholderItemMeta(id);
   }
-  if (!abstract && zItem) {
-    const attachmentIds = zItem.getAttachments();
-    for (const attId of attachmentIds) {
-      const att = Zotero.Items.get(attId);
-      if (att && att.attachmentContentType === "application/pdf") {
-        abstractAttachmentId = attId;
-        abstractPending = true;
-        break;
+  try {
+    const creators = zItem ? zItem.getCreators() : [];
+    const fieldAbstract =
+      (zItem ? (zItem.getField("abstractNote") as string) : "") || "";
+    let abstract = fieldAbstract;
+    let abstractSource: ItemMeta["abstractSource"] = fieldAbstract
+      ? "field"
+      : "none";
+    let abstractNoteIds: number[] = [];
+    let abstractAttachmentId: number | undefined;
+    let abstractPending = false;
+    if (!abstract && zItem) {
+      const noteHit = findSameTitleNoteAbstract(zItem);
+      if (noteHit.matched) {
+        abstract = noteHit.text;
+        abstractSource = "same_title_note";
+        abstractNoteIds = noteHit.noteIds;
       }
     }
+    if (!abstract && zItem) {
+      const attachmentIds = zItem.getAttachments();
+      for (const attId of attachmentIds) {
+        const att = Zotero.Items.get(attId);
+        if (att && att.attachmentContentType === "application/pdf") {
+          abstractAttachmentId = attId;
+          abstractPending = true;
+          break;
+        }
+      }
+    }
+    m = {
+      id,
+      title: (zItem ? (zItem.getField("title") as string) : "") || "",
+      abstract,
+      abstractSource,
+      abstractNoteIds,
+      abstractAttachmentId,
+      abstractPending,
+      year: (zItem ? (zItem.getField("year") as string) : "") || "",
+      authors: creators
+        .map((c: any) => c.lastName || c.name || "")
+        .filter(Boolean)
+        .join(", "),
+      journal:
+        (zItem ? (zItem.getField("publicationTitle") as string) : "") || "",
+      doi: (zItem ? (zItem.getField("DOI") as string) : "") || "",
+      itemType: (zItem ? (zItem.getField("type") as string) : "") || "",
+      creators,
+    };
+    itemMetaCache.set(id, m);
+    return m;
+  } catch (e) {
+    // A field read hit unloaded data — defer to a background load and return a
+    // transient placeholder so the render never throws.
+    Zotero.debug(`[seerai] review tab: cacheItemMeta deferred for ${id}: ${e}`);
+    ensureItemLoadedAsync(id);
+    return placeholderItemMeta(id);
   }
-  m = {
-    id,
-    title: (zItem ? (zItem.getField("title") as string) : "") || "",
-    abstract,
-    abstractSource,
-    abstractNoteIds,
-    abstractAttachmentId,
-    abstractPending,
-    year: (zItem ? (zItem.getField("year") as string) : "") || "",
-    authors: creators
-      .map((c: any) => c.lastName || c.name || "")
-      .filter(Boolean)
-      .join(", "),
-    journal:
-      (zItem ? (zItem.getField("publicationTitle") as string) : "") || "",
-    doi: (zItem ? (zItem.getField("DOI") as string) : "") || "",
-    itemType: (zItem ? (zItem.getField("type") as string) : "") || "",
-    creators,
-  };
-  itemMetaCache.set(id, m);
-  return m;
 }
 
 function getItemMeta(id: number): ItemMeta {
@@ -633,6 +718,9 @@ export async function createSystematicReviewTabContent(
     true;
   loadSpace(doc);
   invalidateItemCache();
+  // Pull item data into memory before the synchronous warm/read pass, so a
+  // not-yet-loaded item can't throw UnloadedDataException and break the render.
+  await ensureItemsLoaded(currentState.papers.map((p) => p.id));
   warmItemCache(currentState.papers.map((p) => p.id));
 
   mainWrapper = doc.createElement("div");
