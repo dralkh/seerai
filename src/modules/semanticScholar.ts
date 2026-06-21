@@ -216,7 +216,10 @@ class SemanticScholarService {
   /**
    * Build query string from options
    */
-  private buildQueryParams(options: SearchOptions): URLSearchParams {
+  private buildQueryParams(
+    options: SearchOptions,
+    maximumLimit = 100,
+  ): URLSearchParams {
     const params = new URLSearchParams();
 
     params.set("query", options.query);
@@ -242,7 +245,10 @@ class SemanticScholarService {
     params.set("fields", fields);
 
     if (options.limit) {
-      params.set("limit", String(Math.min(100, Math.max(1, options.limit))));
+      params.set(
+        "limit",
+        String(Math.min(maximumLimit, Math.max(1, options.limit))),
+      );
     }
 
     if (options.offset !== undefined) {
@@ -315,7 +321,7 @@ class SemanticScholarService {
     options: SearchOptions,
     token?: string,
   ): Promise<BulkSearchResult> {
-    const params = this.buildQueryParams(options);
+    const params = this.buildQueryParams(options, 1000);
 
     if (token) {
       params.set("token", token);

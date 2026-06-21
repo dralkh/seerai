@@ -204,6 +204,26 @@ export type AssistantTab = "chat" | "table" | "search" | "cloud" | "systematic";
 // Search state persisted between sessions
 export interface SearchState {
   query: string;
+  mode:
+    | "broad"
+    | "biomedical"
+    | "preprints"
+    | "cryptography"
+    | "repositories"
+    | "source";
+  provider:
+    | "semantic-scholar"
+    | "arxiv"
+    | "pubmed"
+    | "biorxiv"
+    | "medrxiv"
+    | "iacr"
+    | "europe-pmc"
+    | "core"
+    | "base"
+    | "zenodo"
+    | "hal";
+  providerFilters: Record<string, Record<string, unknown>>;
   limit: number;
   yearStart?: string;
   yearEnd?: string;
@@ -225,6 +245,9 @@ export interface SearchState {
 
 export const defaultSearchState: SearchState = {
   query: "",
+  mode: "source",
+  provider: "semantic-scholar",
+  providerFilters: {},
   limit: 20,
   openAccessPdf: false,
   hideLibraryDuplicates: true,

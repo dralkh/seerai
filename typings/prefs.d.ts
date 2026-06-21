@@ -25,6 +25,13 @@ declare namespace _ZoteroTypes {
       "modelConfigs": string;
       "activeModelId": string;
       "semanticScholarApiKey": string;
+      "scholarlySearchMode": string;
+      "scholarlySearchProvider": string;
+      "scholarlySearchEmail": string;
+      "ncbiApiKey": string;
+      "coreApiKey": string;
+      "baseApiKey": string;
+      "zenodoAccessToken": string;
       "firecrawlApiKey": string;
       "firecrawlApiUrl": string;
       "firecrawlSearchLimit": number;

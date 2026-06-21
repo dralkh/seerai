@@ -16,6 +16,13 @@ pref("cloudUseLlm", false);
 pref("modelConfigs", "[]");
 pref("activeModelId", "");
 pref("semanticScholarApiKey", "");
+pref("scholarlySearchMode", "source");
+pref("scholarlySearchProvider", "semantic-scholar");
+pref("scholarlySearchEmail", "");
+pref("ncbiApiKey", "");
+pref("coreApiKey", "");
+pref("baseApiKey", "");
+pref("zenodoAccessToken", "");
 pref("firecrawlApiKey", "");
 pref(
   "firecrawlApiUrl",

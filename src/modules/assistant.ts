@@ -75,6 +75,26 @@ import {
   FIELDS_OF_STUDY,
   PUBLICATION_TYPES,
 } from "./semanticScholar";
+import {
+  FederatedSearchResult,
+  ScholarlyPaper,
+  ScholarlyProviderId,
+  ScholarlySearchMode,
+  ScholarlySearchQuery,
+  SMART_MODE_PROVIDERS,
+  getProviderCapability,
+  papersToBibtex,
+  scholarlySearchController,
+  scholarlyExportManager,
+  retryScholarlyProvider,
+  fetchScholarlyPapersForExport,
+  deduplicateScholarlyPapers,
+  normalizeTitleForMatch,
+  normalizeDoiForMatch,
+  createAbortController,
+  migrateSearchHistoryData,
+  PersistedSearchHistoryEntry,
+} from "./search";
 import { firecrawlService, PdfDiscoveryResult } from "./firecrawl";
 import {
   getActiveProvider,
@@ -212,8 +232,25 @@ function resolveTableChatModel() {
 
 // Search state
 let currentSearchState: SearchState = { ...defaultSearchState };
-let currentSearchResults: SemanticScholarPaper[] = [];
+let currentSearchResults: ScholarlyPaper[] = [];
 let currentSearchToken: string | null = null; // For pagination
+let currentScholarlySession: FederatedSearchResult | undefined;
+// Active bulk "Add to Zotero" / "Add to Review" import, if any. The header
+// buttons double as Cancel while one is running.
+let bulkImportController: AbortController | null = null;
+// How many papers to import (with PDF discovery) in parallel during a bulk
+// import. Bounded so large imports stay fast without flooding the network or
+// Zotero's transaction queue.
+const BULK_IMPORT_CONCURRENCY = 4;
+
+function toScholarlyPaper(paper: SemanticScholarPaper): ScholarlyPaper {
+  return {
+    ...paper,
+    source: "semantic-scholar",
+    sources: ["semantic-scholar"],
+    providerIds: { "semantic-scholar": paper.paperId },
+  };
+}
 
 // Systematic Review state cache
 let currentSRPaperIds: number[] = [];
@@ -1038,6 +1075,7 @@ function getSourceLinkForPaper(
  */
 
 interface FilterPreset {
+  schemaVersion: 2;
   name: string;
   filters: SearchState;
 }
@@ -1047,7 +1085,28 @@ function getFilterPresets(): FilterPreset[] {
     const stored = Zotero.Prefs.get(
       "extensions.seerai.filterPresets",
     ) as string;
-    return stored ? JSON.parse(stored) : [];
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return [];
+    const migrated = parsed.flatMap((preset: any): FilterPreset[] =>
+      preset && typeof preset.name === "string"
+        ? [
+            {
+              schemaVersion: 2,
+              name: preset.name,
+              filters: {
+                ...defaultSearchState,
+                ...(preset.filters || {}),
+                providerFilters: preset.filters?.providerFilters || {},
+              },
+            },
+          ]
+        : [],
+    );
+    if (migrated.some((preset, index) => parsed[index]?.schemaVersion !== 2)) {
+      saveFilterPresets(migrated);
+    }
+    return migrated;
   } catch {
     return [];
   }
@@ -1059,7 +1118,7 @@ function saveFilterPresets(presets: FilterPreset[]): void {
 
 function addFilterPreset(name: string, filters: SearchState): void {
   const presets = getFilterPresets();
-  presets.push({ name, filters: { ...filters } });
+  presets.push({ schemaVersion: 2, name, filters: { ...filters } });
   saveFilterPresets(presets);
 }
 
@@ -1077,15 +1136,7 @@ function getNextPresetName(): string {
 
 // ==================== Search History (File-based Persistence) ====================
 
-interface SearchHistoryEntry {
-  id: string;
-  query: string;
-  state: SearchState;
-  results: SemanticScholarPaper[];
-  totalResults: number;
-  searchToken: string | null;
-  savedAt: string;
-}
+type SearchHistoryEntry = PersistedSearchHistoryEntry;
 
 const SEARCH_HISTORY_MAX_ENTRIES = 20;
 let searchHistoryDataDir: string | null = null;
@@ -1125,7 +1176,14 @@ async function getSearchHistory(): Promise<SearchHistoryEntry[]> {
     const content = new TextDecoder().decode(contentBytes);
     if (!content) return [];
 
-    return JSON.parse(content) as SearchHistoryEntry[];
+    const { entries, migrated } = migrateSearchHistoryData(JSON.parse(content));
+    if (migrated) {
+      const backup = `${filePath}.v1.bak`;
+      if (!(await IOUtils.exists(backup)))
+        await IOUtils.write(backup, contentBytes);
+      await saveSearchHistory(entries);
+    }
+    return entries;
   } catch (e) {
     Zotero.debug(`[seerai] Error loading search history: ${e}`);
     return [];
@@ -1137,10 +1195,12 @@ async function saveSearchHistory(entries: SearchHistoryEntry[]): Promise<void> {
     await ensureSearchHistoryDir();
     const filePath = getSearchHistoryFilePath();
     const encoder = new TextEncoder();
+    const temporaryPath = `${filePath}.tmp`;
     await IOUtils.write(
-      filePath,
+      temporaryPath,
       encoder.encode(JSON.stringify(entries, null, 2)),
     );
+    await IOUtils.move(temporaryPath, filePath, { noOverwrite: false });
   } catch (e) {
     Zotero.debug(`[seerai] Error saving search history: ${e}`);
   }
@@ -1150,9 +1210,11 @@ async function addSearchHistoryEntry(entry: SearchHistoryEntry): Promise<void> {
   const history = await getSearchHistory();
 
   // Remove any existing entry with the same query (avoid duplicates)
-  const filtered = history.filter(
-    (h) => h.query.toLowerCase() !== entry.query.toLowerCase(),
-  );
+  const identity = `${entry.state.mode}:${entry.state.mode === "source" ? entry.state.provider : "smart"}:${entry.query.trim().toLowerCase()}`;
+  const filtered = history.filter((historyEntry) => {
+    const historyIdentity = `${historyEntry.state.mode}:${historyEntry.state.mode === "source" ? historyEntry.state.provider : "smart"}:${historyEntry.query.trim().toLowerCase()}`;
+    return historyIdentity !== identity;
+  });
 
   // Add new entry at the beginning
   filtered.unshift(entry);
@@ -2202,8 +2264,10 @@ export class Assistant {
     searchInput: HTMLInputElement,
   ): void {
     // Restore state
-    currentSearchState = { ...entry.state };
+    currentSearchState = { ...defaultSearchState, ...entry.state };
     currentSearchResults = [...entry.results];
+    currentScholarlySession = entry.session;
+    scholarlySearchController.restore(entry.session);
     totalSearchResults = entry.totalResults;
     currentSearchToken = entry.searchToken;
 
@@ -6849,6 +6913,16 @@ export class Assistant {
     doc: Document,
     item: Zotero.Item,
   ): Promise<HTMLElement> {
+    if (!currentSearchState.query && currentSearchResults.length === 0) {
+      const preferredMode = getPref("scholarlySearchMode") as
+        | ScholarlySearchMode
+        | undefined;
+      const preferredProvider = getPref("scholarlySearchProvider") as
+        | ScholarlyProviderId
+        | undefined;
+      if (preferredMode) currentSearchState.mode = preferredMode;
+      if (preferredProvider) currentSearchState.provider = preferredProvider;
+    }
     // Load search column configuration
     searchColumnConfig = await loadSearchColumnConfig();
 
@@ -6867,6 +6941,139 @@ export class Assistant {
       },
     });
 
+    const modeRow = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        display: "flex",
+        gap: "8px",
+        alignItems: "center",
+        flexWrap: "wrap",
+        padding: "8px",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "8px",
+        backgroundColor: "var(--background-secondary)",
+      },
+    });
+    const modeSelect = ztoolkit.UI.createElement(doc, "select", {
+      attributes: { title: "Search mode" },
+      styles: {
+        minWidth: "155px",
+        padding: "7px 9px",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "6px",
+        backgroundColor: "var(--background-primary)",
+        color: "var(--text-primary)",
+      },
+    }) as HTMLSelectElement;
+    const modes: Array<{ value: ScholarlySearchMode; label: string }> = [
+      { value: "broad", label: "Broad discovery" },
+      { value: "biomedical", label: "Biomedical" },
+      { value: "preprints", label: "Preprints" },
+      { value: "cryptography", label: "Cryptography" },
+      { value: "repositories", label: "Open repositories" },
+      { value: "source", label: "Single source" },
+    ];
+    for (const mode of modes) {
+      const option = doc.createElement("option");
+      option.value = mode.value;
+      option.textContent = mode.label;
+      option.selected = currentSearchState.mode === mode.value;
+      modeSelect.appendChild(option);
+    }
+    const sourceSelect = ztoolkit.UI.createElement(doc, "select", {
+      attributes: { title: "Search source" },
+      styles: {
+        minWidth: "170px",
+        padding: "7px 9px",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "6px",
+        backgroundColor: "var(--background-primary)",
+        color: "var(--text-primary)",
+        display: currentSearchState.mode === "source" ? "block" : "none",
+      },
+    }) as HTMLSelectElement;
+    const providerIds: ScholarlyProviderId[] = [
+      "semantic-scholar",
+      "arxiv",
+      "pubmed",
+      "biorxiv",
+      "medrxiv",
+      "iacr",
+      "europe-pmc",
+      "core",
+      "base",
+      "zenodo",
+      "hal",
+    ];
+    for (const providerId of providerIds) {
+      const capability = getProviderCapability(providerId);
+      const option = doc.createElement("option");
+      option.value = providerId;
+      option.textContent = `${capability.label}${capability.experimental ? " (experimental)" : ""}`;
+      option.selected = currentSearchState.provider === providerId;
+      sourceSelect.appendChild(option);
+    }
+    const modeDescription = ztoolkit.UI.createElement(doc, "span", {
+      styles: {
+        flex: "1",
+        minWidth: "180px",
+        fontSize: "11px",
+        color: "var(--text-secondary)",
+      },
+    });
+    const refreshModeDescription = () => {
+      if (currentSearchState.mode === "source") {
+        modeDescription.textContent = getProviderCapability(
+          currentSearchState.provider,
+        ).description;
+      } else {
+        const labels: Record<Exclude<ScholarlySearchMode, "source">, string> = {
+          broad:
+            "Cross-disciplinary results merged and deduplicated across scholarly indexes.",
+          biomedical:
+            "PubMed and Europe PMC for clinical and life-science literature.",
+          preprints:
+            "arXiv, bioRxiv, medRxiv, and IACR preprints in one ranked view.",
+          cryptography:
+            "Cryptology-focused discovery across IACR, arXiv, and Semantic Scholar.",
+          repositories:
+            "Open repository records from CORE, HAL, Zenodo, and BASE when configured.",
+        };
+        modeDescription.textContent = labels[currentSearchState.mode];
+      }
+    };
+    const resetSearch = () => {
+      currentSearchResults = [];
+      currentScholarlySession = undefined;
+      currentSearchToken = null;
+      const input = doc.getElementById(
+        "semantic-scholar-search-input",
+      ) as HTMLInputElement | null;
+      if (input) {
+        input.placeholder =
+          currentSearchState.mode === "source"
+            ? `Search ${getProviderCapability(currentSearchState.provider).label}...`
+            : "Search scholarly literature...";
+      }
+      refreshModeDescription();
+      const filters = doc.querySelector(".search-filters-container");
+      if (filters) filters.replaceWith(this.createSearchFilters(doc));
+    };
+    modeSelect.addEventListener("change", () => {
+      currentSearchState.mode = modeSelect.value as ScholarlySearchMode;
+      sourceSelect.style.display =
+        currentSearchState.mode === "source" ? "block" : "none";
+      setPref("scholarlySearchMode", currentSearchState.mode);
+      resetSearch();
+    });
+    sourceSelect.addEventListener("change", () => {
+      currentSearchState.provider = sourceSelect.value as ScholarlyProviderId;
+      setPref("scholarlySearchProvider", currentSearchState.provider);
+      resetSearch();
+    });
+    refreshModeDescription();
+    modeRow.append(modeSelect, sourceSelect, modeDescription);
+    searchContainer.appendChild(modeRow);
+
     // === SEARCH INPUT ===
     const searchInputContainer = ztoolkit.UI.createElement(doc, "div", {
       styles: {
@@ -6883,7 +7090,10 @@ export class Assistant {
     const searchInput = ztoolkit.UI.createElement(doc, "input", {
       attributes: {
         type: "text",
-        placeholder: "Search Semantic Scholar...",
+        placeholder:
+          currentSearchState.mode === "source"
+            ? `Search ${getProviderCapability(currentSearchState.provider).label}...`
+            : "Search scholarly literature...",
         value: currentSearchState.query || "",
       },
       properties: { id: "semantic-scholar-search-input" },
@@ -6929,6 +7139,7 @@ export class Assistant {
           listener: async () => {
             currentSearchState.query = searchInput.value;
             currentSearchResults = [];
+            currentScholarlySession = undefined;
             currentSearchToken = null;
             await this.performSearch(doc);
           },
@@ -6938,7 +7149,7 @@ export class Assistant {
 
     const searchSettingsBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
-      properties: { title: "Semantic Scholar API settings" },
+      properties: { title: "Scholarly search API settings" },
       styles: {
         width: "36px",
         height: "36px",
@@ -6979,6 +7190,7 @@ export class Assistant {
       if (ke.key === "Enter") {
         currentSearchState.query = searchInput.value;
         currentSearchResults = [];
+        currentScholarlySession = undefined;
         currentSearchToken = null;
         await this.performSearch(doc);
       }
@@ -7712,6 +7924,190 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     return searchContainer;
   }
 
+  private static createProviderSearchControls(doc: Document): HTMLElement {
+    const container = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+        marginBottom: "12px",
+        paddingBottom: "12px",
+        borderBottom: "1px solid var(--border-primary)",
+      },
+    });
+    const ids =
+      currentSearchState.mode === "source"
+        ? [currentSearchState.provider]
+        : SMART_MODE_PROVIDERS[currentSearchState.mode];
+    const statuses = ztoolkit.UI.createElement(doc, "div", {
+      styles: { display: "flex", flexWrap: "wrap", gap: "6px" },
+    });
+    for (const id of ids) {
+      const capability = getProviderCapability(id);
+      const state = currentScholarlySession?.providers[id];
+      const status = state?.error
+        ? "failed"
+        : state?.skippedReason
+          ? "setup required"
+          : capability.experimental
+            ? "experimental"
+            : capability.requiresConfiguration
+              ? "setup required"
+              : "ready";
+      const chip = ztoolkit.UI.createElement(doc, "span", {
+        properties: {
+          innerText: `${capability.label} · ${status}`,
+          title: state?.error || state?.skippedReason || capability.description,
+        },
+        styles: {
+          padding: "3px 8px",
+          borderRadius: "12px",
+          border: "1px solid var(--border-primary)",
+          backgroundColor: "var(--background-secondary)",
+          color: state?.error
+            ? "var(--error-color, #d32f2f)"
+            : "var(--text-secondary)",
+          fontSize: "10px",
+        },
+      });
+      statuses.appendChild(chip);
+    }
+    container.appendChild(statuses);
+    if (currentSearchState.mode !== "source") return container;
+
+    const id = currentSearchState.provider;
+    const values = (currentSearchState.providerFilters[id] ||= {});
+    const controls = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+        gap: "8px",
+      },
+    });
+    const addText = (label: string, key: string, placeholder = "") => {
+      const wrapper = ztoolkit.UI.createElement(doc, "label", {
+        styles: { fontSize: "10px", color: "var(--text-secondary)" },
+      });
+      wrapper.append(label);
+      const input = ztoolkit.UI.createElement(doc, "input", {
+        attributes: {
+          type: key.toLowerCase().includes("date") ? "date" : "text",
+          value: String(values[key] || ""),
+          placeholder,
+        },
+        styles: {
+          display: "block",
+          width: "100%",
+          boxSizing: "border-box",
+          marginTop: "3px",
+          padding: "5px 7px",
+          border: "1px solid var(--border-primary)",
+          borderRadius: "4px",
+          backgroundColor: "var(--background-primary)",
+          color: "var(--text-primary)",
+        },
+      }) as HTMLInputElement;
+      input.addEventListener("change", () => {
+        values[key] = input.value || undefined;
+      });
+      wrapper.appendChild(input);
+      controls.appendChild(wrapper);
+    };
+    const addSelect = (
+      label: string,
+      key: string,
+      options: Array<[string, string]>,
+    ) => {
+      const wrapper = ztoolkit.UI.createElement(doc, "label", {
+        styles: { fontSize: "10px", color: "var(--text-secondary)" },
+      });
+      wrapper.append(label);
+      const select = ztoolkit.UI.createElement(doc, "select", {
+        styles: {
+          display: "block",
+          width: "100%",
+          marginTop: "3px",
+          padding: "5px 7px",
+          border: "1px solid var(--border-primary)",
+          borderRadius: "4px",
+          backgroundColor: "var(--background-primary)",
+          color: "var(--text-primary)",
+        },
+      }) as HTMLSelectElement;
+      for (const [value, text] of options) {
+        const option = doc.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        option.selected = values[key] === value;
+        select.appendChild(option);
+      }
+      select.addEventListener("change", () => {
+        values[key] = select.value || undefined;
+        const filters = doc.querySelector(".search-filters-container");
+        if (filters) filters.replaceWith(this.createSearchFilters(doc));
+      });
+      wrapper.appendChild(select);
+      controls.appendChild(wrapper);
+    };
+    const addCheck = (label: string, key: string) => {
+      const checkbox = this.createFilterCheckbox(
+        doc,
+        label,
+        values[key] === true,
+        (checked) => {
+          values[key] = checked;
+        },
+      );
+      controls.appendChild(checkbox);
+    };
+
+    if (id === "arxiv") {
+      addSelect("Search field", "field", [
+        ["all", "All fields"],
+        ["ti", "Title"],
+        ["au", "Author"],
+        ["abs", "Abstract"],
+      ]);
+      addText("Category", "category", "cs.AI");
+    } else if (id === "pubmed") {
+      addText("Article type", "articleType", "Clinical Trial");
+    } else if (id === "biorxiv" || id === "medrxiv") {
+      addSelect("Search style", "searchStyle", [
+        ["keyword", "Keyword"],
+        ["browse", "Browse recent/category"],
+      ]);
+      values.browseMode = values.searchStyle === "browse";
+      if (values.browseMode) {
+        addText("Start date", "startDate");
+        addText("End date", "endDate");
+        addText("Category", "category");
+      }
+    } else if (id === "europe-pmc") {
+      addCheck("Preprints only", "preprintsOnly");
+      addCheck("Has abstract", "hasAbstract");
+    } else if (id === "core") {
+      addCheck("Full text available", "hasFullText");
+    } else if (id === "base") {
+      addText("Document type", "documentType");
+      addText("Language", "language");
+      addText("Repository/domain", "domain");
+    } else if (id === "zenodo") {
+      addSelect("Record type", "type", [
+        ["publication", "Publication"],
+        ["dataset", "Dataset"],
+        ["software", "Software"],
+      ]);
+      addText("Publication subtype", "subtype", "preprint");
+    } else if (id === "hal") {
+      addText("Document type", "documentType", "ART");
+      addText("Language", "language");
+      addText("Domain", "domain");
+      addCheck("File available", "fileOnly");
+    }
+    if (controls.childElementCount) container.appendChild(controls);
+    return container;
+  }
+
   /**
    * Create the advanced search filters UI
    */
@@ -8011,6 +8407,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     presetRow.appendChild(toggleBtn);
 
     filtersBody.appendChild(presetRow);
+    filtersBody.appendChild(this.createProviderSearchControls(doc));
 
     // Collapsible container for advanced filters
     const advancedFiltersContainer = ztoolkit.UI.createElement(doc, "div", {
@@ -8183,7 +8580,12 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     // Row 3: Min Citations + Sort By
     const row3 = ztoolkit.UI.createElement(doc, "div", { styles: gridStyle });
 
-    const minCitGroup = ztoolkit.UI.createElement(doc, "div", {});
+    const showSemanticScholarFilters =
+      currentSearchState.mode === "source" &&
+      currentSearchState.provider === "semantic-scholar";
+    const minCitGroup = ztoolkit.UI.createElement(doc, "div", {
+      styles: { display: showSemanticScholarFilters ? "block" : "none" },
+    });
     const minCitLabel = ztoolkit.UI.createElement(doc, "label", {
       properties: { innerText: "Min citations" },
       styles: labelStyle,
@@ -8249,7 +8651,10 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
     // Row 4: Fields of Study multi-select
     const fosGroup = ztoolkit.UI.createElement(doc, "div", {
-      styles: { marginBottom: "12px" },
+      styles: {
+        marginBottom: "12px",
+        display: showSemanticScholarFilters ? "block" : "none",
+      },
     });
     const fosLabel = ztoolkit.UI.createElement(doc, "label", {
       properties: { innerText: "Fields of Study" },
@@ -8316,7 +8721,10 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
     // Row 5: Publication Types
     const pubTypeGroup = ztoolkit.UI.createElement(doc, "div", {
-      styles: { marginBottom: "12px" },
+      styles: {
+        marginBottom: "12px",
+        display: showSemanticScholarFilters ? "block" : "none",
+      },
     });
     const pubTypeLabel = ztoolkit.UI.createElement(doc, "label", {
       properties: { innerText: "Publication Types" },
@@ -8382,7 +8790,10 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
 
     // Row 6: Venue filter
     const venueGroup = ztoolkit.UI.createElement(doc, "div", {
-      styles: { marginBottom: "8px" },
+      styles: {
+        marginBottom: "8px",
+        display: showSemanticScholarFilters ? "block" : "none",
+      },
     });
     const venueLabel = ztoolkit.UI.createElement(doc, "label", {
       properties: { innerText: "Venue (e.g., Nature, Cell, ICML)" },
@@ -8698,8 +9109,41 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
   /**
    * Perform the search and update results
    */
+  /**
+   * Build the federated query object from the current search state. Single
+   * source of truth shared by live search, BibTeX export, and bulk import so
+   * the three paths never drift in how filters/sort/providers are derived.
+   */
+  private static buildScholarlyQuery(
+    overrides: { limit?: number } = {},
+  ): ScholarlySearchQuery {
+    return {
+      text: currentSearchState.query,
+      mode: currentSearchState.mode,
+      providers: [currentSearchState.provider],
+      limit: overrides.limit ?? currentSearchState.limit,
+      sort:
+        currentSearchState.sortBy === "citationCount:desc"
+          ? "citations"
+          : currentSearchState.sortBy === "publicationDate:desc"
+            ? "newest"
+            : "relevance",
+      filters: {
+        yearStart: currentSearchState.yearStart,
+        yearEnd: currentSearchState.yearEnd,
+        openAccess: currentSearchState.openAccessPdf,
+        hasPdf: currentSearchState.openAccessPdf,
+        fieldsOfStudy: currentSearchState.fieldsOfStudy,
+        publicationTypes: currentSearchState.publicationTypes,
+        minCitationCount: currentSearchState.minCitationCount,
+        venue: currentSearchState.venue,
+      },
+      providerFilters: currentSearchState.providerFilters,
+    };
+  }
+
   private static async performSearch(doc: Document): Promise<void> {
-    if (isSearching || !currentSearchState.query.trim()) return;
+    if (!currentSearchState.query.trim()) return;
 
     isSearching = true;
     const resultsArea = doc.getElementById("semantic-scholar-results");
@@ -8728,59 +9172,24 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
           color: "var(--text-secondary)",
         },
       });
-      loadingEl.innerHTML = `<div class="seerai-search-loading"><div class="seerai-search-loading-spinner"></div><div>Searching Semantic Scholar...</div></div>`;
+      loadingEl.innerHTML = `<div class="seerai-search-loading"><div class="seerai-search-loading-spinner"></div><div>Searching scholarly sources...</div></div>`;
       resultsArea.appendChild(loadingEl);
     }
 
     try {
-      // Check for API key
-      // API Key is optional now, but checked for rate limiting internally
-
-      // Build year filter
-      let yearParam: string | undefined;
-      if (currentSearchState.yearStart || currentSearchState.yearEnd) {
-        const start = currentSearchState.yearStart || "";
-        const end = currentSearchState.yearEnd || "";
-        yearParam = `${start}-${end}`;
-      }
-
-      const result = await semanticScholarService.searchPapers({
-        query: currentSearchState.query,
-        limit: currentSearchState.limit,
-        offset: currentSearchResults.length,
-        year: yearParam,
-        openAccessPdf: currentSearchState.openAccessPdf || undefined,
-        fieldsOfStudy:
-          currentSearchState.fieldsOfStudy.length > 0
-            ? currentSearchState.fieldsOfStudy
-            : undefined,
-        publicationTypes:
-          currentSearchState.publicationTypes.length > 0
-            ? currentSearchState.publicationTypes
-            : undefined,
-        minCitationCount: currentSearchState.minCitationCount,
-        venue: currentSearchState.venue,
-      });
-
-      Zotero.debug(
-        `[seerai] Search response - total: ${result.total}, data length: ${result.data?.length ?? "undefined"}`,
+      const query = this.buildScholarlyQuery();
+      const result = await scholarlySearchController.search(
+        query,
+        isPagination,
       );
-
-      // Defensive check: ensure result.data exists and is an array
-      if (!result.data || !Array.isArray(result.data)) {
-        Zotero.debug(
-          `[seerai] Invalid search response - data is ${typeof result.data}`,
-        );
-        throw new Error("Invalid search response from API - no results data");
-      }
-
-      // Capture total count from result
-      if (currentSearchResults.length === 0) {
-        totalSearchResults = result.total || 0;
-      }
-
-      // Filter library duplicates if enabled
-      let papers = result.data;
+      currentScholarlySession = result;
+      const totals = Object.values(result.providers)
+        .map((state) => state?.total)
+        .filter((value): value is number => typeof value === "number");
+      totalSearchResults = totals.length
+        ? totals.reduce((sum, value) => sum + value, 0)
+        : result.items.length;
+      let papers = result.items;
       const papersBeforeFilter = papers.length;
       if (currentSearchState.hideLibraryDuplicates && papers.length > 0) {
         papers = await this.filterLibraryDuplicates(papers);
@@ -8792,34 +9201,20 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
         }
       }
 
-      const previousCount = currentSearchResults.length;
-      currentSearchResults = [...currentSearchResults, ...papers];
-
-      // If this is a fresh search (previousCount === 0), render everything
-      // Otherwise, just append the new cards
-      if (previousCount === 0) {
-        this.renderSearchResults(doc, resultsArea as HTMLElement, currentItem!);
-
-        // Auto-save to search history (only for fresh searches with results)
-        if (currentSearchResults.length > 0) {
-          addSearchHistoryEntry({
-            id: `search_${Date.now()}`,
-            query: currentSearchState.query,
-            state: { ...currentSearchState },
-            results: [...currentSearchResults],
-            totalResults: totalSearchResults,
-            searchToken: currentSearchToken,
-            savedAt: new Date().toISOString(),
-          });
-        }
-      } else {
-        // Append new cards without clearing existing content
-        this.appendSearchCards(
-          doc,
-          resultsArea as HTMLElement,
-          papers,
-          currentItem!,
-        );
+      currentSearchResults = papers;
+      this.renderSearchResults(doc, resultsArea as HTMLElement, currentItem!);
+      if (!isPagination && currentSearchResults.length > 0) {
+        addSearchHistoryEntry({
+          schemaVersion: 2,
+          id: `search_${Date.now()}`,
+          query: currentSearchState.query,
+          state: { ...currentSearchState },
+          results: [...currentSearchResults],
+          totalResults: totalSearchResults,
+          searchToken: currentSearchToken,
+          savedAt: new Date().toISOString(),
+          session: currentScholarlySession,
+        });
       }
     } catch (error) {
       const errorMessage =
@@ -8875,64 +9270,15 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
   }
 
   /**
-   * Filter out papers that already exist in any Zotero library (User or Group)
+   * Filter out papers that already exist in any Zotero library (User or Group).
+   * Reuses the same library index and DOI/PMID/title matcher as bulk import so
+   * "hidden as duplicate" and "reused on import" stay perfectly consistent.
    */
   private static async filterLibraryDuplicates(
-    papers: SemanticScholarPaper[],
-  ): Promise<SemanticScholarPaper[]> {
-    // Build lookup sets for DOI, PMID, and titles across ALL libraries
-    const existingDOIs = new Set<string>();
-    const existingPMIDs = new Set<string>();
-    const existingTitles = new Set<string>();
-
-    const libraries = Zotero.Libraries.getAll();
-
-    for (const lib of libraries) {
-      try {
-        const libraryItems = await Zotero.Items.getAll(lib.libraryID);
-        for (const item of libraryItems) {
-          if (!item.isRegularItem()) continue;
-
-          const doi = item.getField("DOI") as string;
-          if (doi) existingDOIs.add(doi.toLowerCase());
-
-          const extra = item.getField("extra") as string;
-          if (extra) {
-            const pmidMatch = extra.match(/PMID:\s*(\d+)/i);
-            if (pmidMatch) existingPMIDs.add(pmidMatch[1]);
-          }
-
-          const title = item.getField("title") as string;
-          if (title) existingTitles.add(title.toLowerCase().trim());
-        }
-      } catch (e) {
-        Zotero.debug(
-          `[seerai] Error checking duplicates in library ${lib.name}: ${e}`,
-        );
-      }
-    }
-
-    return papers.filter((paper) => {
-      // Check DOI
-      if (
-        paper.externalIds?.DOI &&
-        existingDOIs.has(paper.externalIds.DOI.toLowerCase())
-      ) {
-        return false;
-      }
-      // Check PMID
-      if (
-        paper.externalIds?.PMID &&
-        existingPMIDs.has(paper.externalIds.PMID)
-      ) {
-        return false;
-      }
-      // Check title (exact match, case insensitive)
-      if (paper.title && existingTitles.has(paper.title.toLowerCase().trim())) {
-        return false;
-      }
-      return true;
-    });
+    papers: ScholarlyPaper[],
+  ): Promise<ScholarlyPaper[]> {
+    const index = await this.buildLibraryItemIndex();
+    return papers.filter((paper) => !this.matchLibraryItem(paper, index));
   }
 
   /**
@@ -8956,8 +9302,8 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
       });
       emptyState.innerHTML = `
                 <div style="margin-bottom: 16px; opacity: 0.6;">${iconMarkup("search", { size: 48 })}</div>
-                <div style="font-size: 14px; font-weight: 500; margin-bottom: 8px;">Search Semantic Scholar</div>
-                <div style="font-size: 12px;">Enter a query to find relevant papers</div>
+                <div style="font-size: 14px; font-weight: 500; margin-bottom: 8px;">Search scholarly literature</div>
+                <div style="font-size: 12px;">Choose a discovery mode or source, then enter a query</div>
             `;
       container.appendChild(emptyState);
       return;
@@ -8999,12 +9345,124 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     const filterNote = currentSearchState.hideLibraryDuplicates
       ? " (hiding library duplicates)"
       : "";
-    countText.innerHTML = `${iconMarkup("list", { size: 12 })} Found <strong>${totalSearchResults.toLocaleString()}</strong> papers • Showing ${currentSearchResults.length}${filterNote}`;
+    const providerStates = Object.entries(
+      currentScholarlySession?.providers || {},
+    );
+    const partialFailures = providerStates.filter(([, state]) => state?.error);
+    const sourceSummary = providerStates.length
+      ? ` • ${providerStates.length} source${providerStates.length === 1 ? "" : "s"}`
+      : "";
+    const failureSummary = partialFailures.length
+      ? ` • ${partialFailures.length} unavailable`
+      : "";
+    countText.innerHTML = `${iconMarkup("list", { size: 12 })} <strong>${currentSearchResults.length}</strong> unique papers${sourceSummary}${failureSummary}${filterNote}`;
+    if (partialFailures.length) {
+      countText.title = partialFailures
+        .map(([id, state]) => `${id}: ${state?.error}`)
+        .join("\n");
+    }
     countHeader.appendChild(countText);
 
     const headerButtons = ztoolkit.UI.createElement(doc, "div", {
       styles: { display: "flex", gap: "8px" },
     });
+    for (const [providerId] of partialFailures) {
+      const retry = doc.createElement("button");
+      retry.textContent = `Retry ${getProviderCapability(providerId as ScholarlyProviderId).label}`;
+      retry.style.cssText =
+        "padding:4px 8px;font-size:10px;border:1px solid var(--border-primary);border-radius:4px;background:var(--background-primary);color:var(--text-primary);cursor:pointer";
+      retry.addEventListener("click", async () => {
+        if (!currentScholarlySession) return;
+        retry.disabled = true;
+        retry.textContent = "Retrying…";
+        try {
+          currentScholarlySession = await retryScholarlyProvider(
+            currentScholarlySession,
+            providerId as ScholarlyProviderId,
+          );
+          scholarlySearchController.restore(currentScholarlySession);
+          currentSearchResults = currentSearchState.hideLibraryDuplicates
+            ? await this.filterLibraryDuplicates(currentScholarlySession.items)
+            : currentScholarlySession.items;
+          this.renderSearchResults(doc, container, item);
+        } catch (error) {
+          retry.textContent = "Retry failed";
+          retry.title = error instanceof Error ? error.message : String(error);
+        } finally {
+          retry.disabled = false;
+        }
+      });
+      headerButtons.appendChild(retry);
+    }
+
+    const headerBtnStyle = {
+      display: "inline-flex",
+      alignItems: "center",
+      gap: "4px",
+      padding: "4px 10px",
+      fontSize: "11px",
+      border: "1px solid var(--border-primary)",
+      borderRadius: "4px",
+      backgroundColor: "var(--background-primary)",
+      color: "var(--text-primary)",
+      cursor: "pointer",
+    };
+
+    // Add to Zotero (bulk) — import all loaded results into a chosen folder with
+    // automatic PDF discovery.
+    const addAllBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
+      properties: {
+        innerHTML: iconMarkup("add", { size: 12 }) + " Add to Zotero",
+      },
+      styles: headerBtnStyle,
+      listeners: [
+        {
+          type: "click",
+          listener: async (e: Event) => {
+            e.stopPropagation();
+            const btn = e.currentTarget as HTMLButtonElement;
+            await this.runBulkImportAction(doc, btn, {
+              title: "Add results to Zotero",
+              confirmLabel: "Import all",
+              verb: "Imported",
+            });
+          },
+        },
+      ],
+    });
+    headerButtons.appendChild(addAllBtn);
+
+    // Add to Systematic Review — import into a chosen folder with PDF discovery,
+    // then register the resulting items as a review source.
+    const addReviewBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
+      properties: {
+        innerHTML: iconMarkup("library", { size: 12 }) + " Add to Review",
+      },
+      styles: headerBtnStyle,
+      listeners: [
+        {
+          type: "click",
+          listener: async (e: Event) => {
+            e.stopPropagation();
+            const btn = e.currentTarget as HTMLButtonElement;
+            await this.runBulkImportAction(doc, btn, {
+              title: "Add results to a systematic review",
+              confirmLabel: "Import & add",
+              verb: "Added to review",
+              onImported: async (items) => {
+                const before = currentSRPaperIds.length;
+                await this.addItemsToSystematicReview(items, { silent: true });
+                const added = currentSRPaperIds.length - before;
+                return `${added} added to review · ${items.length - added} already present`;
+              },
+            });
+          },
+        },
+      ],
+    });
+    headerButtons.appendChild(addReviewBtn);
 
     // Export BibTeX button (Keep only this button in header)
     const exportBtn = ztoolkit.UI.createElement(doc, "button", {
@@ -9029,23 +9487,40 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
           type: "click",
           listener: async (e: Event) => {
             e.stopPropagation();
-            const btn = e.target as HTMLButtonElement;
+            const btn = e.currentTarget as HTMLButtonElement;
+            if (scholarlyExportManager.getJob().status === "running") {
+              scholarlyExportManager.cancel();
+              btn.textContent = "Canceling...";
+              return;
+            }
             const originalHTML = btn.innerHTML;
-            btn.textContent = "Exporting...";
-            btn.disabled = true;
+            const target = await this.chooseBibtexExportTarget(doc);
+            if (target === undefined) return;
+            btn.textContent =
+              target > currentSearchResults.length
+                ? "Cancel export"
+                : "Exporting...";
+            btn.disabled = false;
             try {
-              await this.exportResultsAsBibtex();
+              await this.exportResultsAsBibtex(target, (unique) => {
+                btn.textContent = `Cancel (${unique}/${target})`;
+              });
               btn.innerHTML = iconMarkup("check", { size: 12 }) + " Exported!";
               setTimeout(() => {
                 btn.innerHTML = originalHTML;
                 btn.disabled = false;
               }, 2000);
             } catch (err) {
-              btn.textContent = "Failed";
+              btn.textContent =
+                (err as { name?: string })?.name === "AbortError"
+                  ? "Canceled"
+                  : "Failed";
               setTimeout(() => {
                 btn.innerHTML = originalHTML;
                 btn.disabled = false;
               }, 2000);
+            } finally {
+              btn.disabled = false;
             }
           },
         },
@@ -9544,7 +10019,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
    * Get formatted citation string based on style
    */
   private static getFormattedCitation(
-    paper: SemanticScholarPaper,
+    paper: ScholarlyPaper,
     index: number,
     style: string,
   ): string {
@@ -10243,7 +10718,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
    */
   private static async batchCheckUnpaywall(
     doc: Document,
-    papers: SemanticScholarPaper[],
+    papers: ScholarlyPaper[],
   ): Promise<void> {
     // Filter papers that need checking (no openAccessPdf but have DOI)
     const papersToCheck = papers.filter(
@@ -10309,7 +10784,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   private static appendSearchCards(
     doc: Document,
     container: HTMLElement,
-    newPapers: SemanticScholarPaper[],
+    newPapers: ScholarlyPaper[],
     item: Zotero.Item,
   ): void {
     // Find and remove the loading indicator if present
@@ -10387,7 +10862,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
    */
   private static createSearchResultCard(
     doc: Document,
-    paper: SemanticScholarPaper,
+    paper: ScholarlyPaper,
     item: Zotero.Item,
     isTableCell: boolean = false,
   ): HTMLElement {
@@ -10449,6 +10924,44 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
     card.appendChild(header);
 
+    const sourceBadges = ztoolkit.UI.createElement(doc, "div", {
+      styles: {
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "4px",
+        marginBottom: "6px",
+      },
+    });
+    for (const source of paper.sources) {
+      const badge = ztoolkit.UI.createElement(doc, "span", {
+        properties: { innerText: getProviderCapability(source).label },
+        styles: {
+          padding: "2px 6px",
+          borderRadius: "10px",
+          border: "1px solid var(--border-primary)",
+          backgroundColor: "var(--background-secondary)",
+          color: "var(--text-secondary)",
+          fontSize: "9px",
+        },
+      });
+      sourceBadges.appendChild(badge);
+    }
+    if (paper.openAccessPdf) {
+      const badge = doc.createElement("span");
+      badge.textContent = "PDF";
+      badge.style.cssText =
+        "padding:2px 6px;border-radius:10px;border:1px solid var(--border-primary);color:var(--highlight-primary);font-size:9px";
+      sourceBadges.appendChild(badge);
+    }
+    if (paper.license) {
+      const badge = doc.createElement("span");
+      badge.textContent = paper.license;
+      badge.style.cssText =
+        "padding:2px 6px;border-radius:10px;border:1px solid var(--border-primary);color:var(--text-secondary);font-size:9px";
+      sourceBadges.appendChild(badge);
+    }
+    card.appendChild(sourceBadges);
+
     // Meta: Authors (clickable), Year, Venue
     const meta = ztoolkit.UI.createElement(doc, "div", {
       styles: {
@@ -10477,7 +10990,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             type: "click",
             listener: async (e: Event) => {
               e.stopPropagation();
-              await this.showAuthorModal(doc, author.authorId, author.name);
+              if (author.authorId) {
+                await this.showAuthorModal(doc, author.authorId, author.name);
+              }
             },
           },
         ],
@@ -10516,8 +11031,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         marginBottom: "6px",
       },
     });
-    citationBadge.innerHTML = `<strong>${paper.citationCount.toLocaleString()}</strong> citations`;
-    card.appendChild(citationBadge);
+    const suppliesCitations = paper.sources.some((source) =>
+      ["semantic-scholar", "europe-pmc", "core"].includes(source),
+    );
+    if (suppliesCitations) {
+      citationBadge.innerHTML = `<strong>${paper.citationCount.toLocaleString()}</strong> citations`;
+      card.appendChild(citationBadge);
+    }
 
     // Abstract preview (TLDR or truncated abstract)
     const abstractText = paper.tldr?.text || paper.abstract;
@@ -11403,13 +11923,20 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             btn.disabled = true;
             try {
               // Get recommendations based on this paper
+              const semanticScholarId = paper.providerIds?.["semantic-scholar"];
+              if (!semanticScholarId) {
+                doc.defaultView?.alert(
+                  "Similar-paper recommendations require a Semantic Scholar record.",
+                );
+                return;
+              }
               const recommendations =
                 await semanticScholarService.getRecommendations([
-                  paper.paperId,
+                  semanticScholarId,
                 ]);
               if (recommendations.length > 0) {
                 // Replace current results with recommendations
-                currentSearchResults = recommendations;
+                currentSearchResults = recommendations.map(toScholarlyPaper);
                 totalSearchResults = recommendations.length;
                 currentSearchState.query = `Similar to: ${paper.title.slice(0, 50)}...`;
                 const resultsArea = doc.getElementById(
@@ -11433,7 +11960,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       ],
     });
-    actions.appendChild(similarBtn);
+    if (paper.providerIds?.["semantic-scholar"]) {
+      actions.appendChild(similarBtn);
+    }
 
     card.appendChild(actions);
 
@@ -11681,7 +12210,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
    * 7. Attach PDF if available
    */
   private static async addPaperToZotero(
-    paper: SemanticScholarPaper,
+    paper: ScholarlyPaper,
   ): Promise<Zotero.Item | null> {
     try {
       Zotero.debug(`[seerai] Adding paper to Zotero: ${paper.title}`);
@@ -11748,9 +12277,25 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       if (paper.externalIds?.DOI) {
         newItem.setField("DOI", paper.externalIds.DOI);
       }
+      if (paper.publisher) newItem.setField("publisher", paper.publisher);
+      if (paper.volume) newItem.setField("volume", paper.volume);
+      if (paper.issue) newItem.setField("issue", paper.issue);
+      if (paper.pages) newItem.setField("pages", paper.pages);
       if (paper.url) {
         newItem.setField("url", paper.url);
       }
+      const extra = [
+        paper.externalIds?.PMID ? `PMID: ${paper.externalIds.PMID}` : "",
+        paper.externalIds?.PMCID ? `PMCID: ${paper.externalIds.PMCID}` : "",
+        paper.externalIds?.ArXiv ? `arXiv: ${paper.externalIds.ArXiv}` : "",
+        paper.externalIds?.IACR ? `IACR: ${paper.externalIds.IACR}` : "",
+        paper.externalIds?.HAL ? `HAL: ${paper.externalIds.HAL}` : "",
+        paper.externalIds?.CORE ? `CORE: ${paper.externalIds.CORE}` : "",
+        paper.externalIds?.Zenodo ? `Zenodo: ${paper.externalIds.Zenodo}` : "",
+        paper.license ? `License: ${paper.license}` : "",
+        `Sources: ${paper.sources.join(", ")}`,
+      ].filter(Boolean);
+      if (extra.length) newItem.setField("extra", extra.join("\n"));
 
       // Add authors/creators
       if (paper.authors && paper.authors.length > 0) {
@@ -11903,7 +12448,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
    * Returns both the item and whether PDF was successfully attached
    */
   public static async addPaperToZoteroWithPdfDiscovery(
-    paper: SemanticScholarPaper,
+    paper: ScholarlyPaper | SemanticScholarPaper,
     statusBtn?: HTMLButtonElement,
     targetColId?: number,
     waitForPdf: boolean = true,
@@ -11913,6 +12458,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     pdfAttached: boolean;
     sourceUrl?: string;
   }> {
+    if (!("source" in paper)) {
+      paper = toScholarlyPaper(paper);
+    }
     try {
       Zotero.debug(
         `[seerai] Adding paper to Zotero with PDF discovery: ${paper.title}`,
@@ -12103,7 +12651,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
    * Used for retry functionality after Source-Link is clicked
    */
   private static async tryFindPdfForItem(
-    paper: SemanticScholarPaper,
+    paper: ScholarlyPaper,
     item: Zotero.Item,
   ): Promise<boolean> {
     try {
@@ -12219,7 +12767,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   /**
    * Convert a Semantic Scholar paper to BibTeX format
    */
-  private static paperToBibtex(paper: SemanticScholarPaper): string {
+  private static paperToBibtex(paper: ScholarlyPaper): string {
     // Generate a unique cite key: firstAuthorLastName + year + firstTitleWord
     let citeKey = "unknown";
     if (paper.authors && paper.authors.length > 0) {
@@ -12307,21 +12855,49 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   /**
    * Export all current search results as a BibTeX file
    */
-  private static async exportResultsAsBibtex(): Promise<void> {
+  private static async exportResultsAsBibtex(
+    target = currentSearchResults.length,
+    onProgress?: (unique: number) => void,
+  ): Promise<void> {
     if (currentSearchResults.length === 0) {
       Zotero.debug("[seerai] No search results to export");
       return;
     }
 
     try {
-      // Generate BibTeX for all papers
-      const bibtexEntries = currentSearchResults.map((paper) =>
-        this.paperToBibtex(paper),
-      );
-      const bibtexContent = bibtexEntries.join("\n\n");
+      let papers = currentSearchResults;
+      if (target > papers.length) {
+        const query = this.buildScholarlyQuery({
+          limit: Math.min(1000, target),
+        });
+        const unsubscribe = scholarlyExportManager.subscribe((job) => {
+          onProgress?.(job.progress?.unique || job.papers.length);
+        });
+        const job = await scholarlyExportManager.start(
+          query,
+          target,
+          papers,
+          currentScholarlySession,
+        );
+        unsubscribe();
+        if (job.status === "failed")
+          throw new Error(job.error || "Export failed");
+        papers = job.papers;
+      }
+      const bibtexContent = papersToBibtex(papers);
 
       // Create file picker for save location using ztoolkit
-      const defaultFileName = `semantic_scholar_export_${new Date().toISOString().slice(0, 10)}.bib`;
+      const querySlug = currentSearchState.query
+        .normalize("NFKD")
+        .replace(/[^\p{L}\p{N}]+/gu, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 40)
+        .toLowerCase();
+      const sourceSlug =
+        currentSearchState.mode === "source"
+          ? currentSearchState.provider
+          : currentSearchState.mode;
+      const defaultFileName = `${sourceSlug}_${querySlug || "search"}_${new Date().toISOString().slice(0, 10)}_${papers.length}.bib`;
 
       const filePath = await new ztoolkit.FilePicker(
         "Export BibTeX",
@@ -12334,11 +12910,639 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         // Write the file using Zotero.File
         await Zotero.File.putContentsAsync(filePath, bibtexContent);
         Zotero.debug(
-          `[seerai] Exported ${currentSearchResults.length} papers to BibTeX: ${filePath}`,
+          `[seerai] Exported ${papers.length} papers to BibTeX: ${filePath}`,
         );
       }
     } catch (error) {
       Zotero.debug(`[seerai] Error exporting BibTeX: ${error}`);
+    }
+  }
+
+  private static chooseBibtexExportTarget(
+    doc: Document,
+  ): Promise<number | undefined> {
+    return new Promise((resolve) => {
+      const overlay = ztoolkit.UI.createElement(doc, "div", {
+        styles: {
+          position: "fixed",
+          inset: "0",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "rgba(0,0,0,0.35)",
+          zIndex: "200010",
+        },
+      });
+      const dialog = ztoolkit.UI.createElement(doc, "div", {
+        styles: {
+          width: "min(420px, calc(100vw - 32px))",
+          padding: "18px",
+          border: "1px solid var(--border-primary)",
+          borderRadius: "10px",
+          backgroundColor: "var(--background-primary)",
+          color: "var(--text-primary)",
+          boxShadow: "0 12px 36px rgba(0,0,0,0.28)",
+        },
+      });
+      const title = doc.createElement("div");
+      title.textContent = "Export scholarly results as BibTeX";
+      title.style.cssText = "font-size:15px;font-weight:600;margin-bottom:6px";
+      const description = doc.createElement("div");
+      description.textContent = `${currentSearchResults.length} unique results are loaded. Larger exports continue provider pagination and preserve partial results.`;
+      description.style.cssText =
+        "font-size:11px;color:var(--text-secondary);line-height:1.45;margin-bottom:14px";
+      const choices = doc.createElement("div");
+      choices.style.cssText =
+        "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px";
+      const provider = getProviderCapability(currentSearchState.provider);
+      const max =
+        currentSearchState.mode === "source"
+          ? provider.supportsBulk
+            ? provider.maxBulkResults
+            : currentSearchResults.length
+          : 2000;
+      const options = [
+        {
+          label: `Loaded (${currentSearchResults.length})`,
+          value: currentSearchResults.length,
+        },
+        { label: "Fetch 100", value: 100 },
+        { label: "Fetch 500", value: 500 },
+        { label: "Fetch 1,000", value: 1000 },
+        { label: "Fetch 2,000", value: 2000 },
+      ];
+      const finish = (value?: number) => {
+        overlay.remove();
+        resolve(value);
+      };
+      for (const option of options) {
+        const button = doc.createElement("button");
+        button.textContent = option.label;
+        button.disabled = option.value > max;
+        button.style.cssText =
+          "padding:9px;border:1px solid var(--border-primary);border-radius:6px;background:var(--background-secondary);color:var(--text-primary);cursor:pointer";
+        button.addEventListener("click", () => finish(option.value));
+        choices.appendChild(button);
+      }
+      const cancel = doc.createElement("button");
+      cancel.textContent = "Cancel";
+      cancel.style.cssText =
+        "margin-top:12px;padding:7px 12px;border:0;background:transparent;color:var(--text-secondary);cursor:pointer";
+      cancel.addEventListener("click", () => finish());
+      overlay.addEventListener("click", (event) => {
+        if (event.target === overlay) finish();
+      });
+      dialog.append(title, description, choices, cancel);
+      overlay.appendChild(dialog);
+      const mount = doc.body || doc.documentElement;
+      if (!mount) return resolve(undefined);
+      mount.appendChild(overlay);
+    });
+  }
+
+  /**
+   * Build an in-memory index of existing regular library items keyed by DOI,
+   * PMID, and normalized title. Used by bulk import so we reuse existing items
+   * instead of creating duplicates (across all libraries).
+   */
+  private static async buildLibraryItemIndex(): Promise<{
+    byDoi: Map<string, Zotero.Item>;
+    byPmid: Map<string, Zotero.Item>;
+    byTitle: Map<string, Zotero.Item>;
+  }> {
+    const byDoi = new Map<string, Zotero.Item>();
+    const byPmid = new Map<string, Zotero.Item>();
+    const byTitle = new Map<string, Zotero.Item>();
+    for (const lib of Zotero.Libraries.getAll()) {
+      try {
+        const items = await Zotero.Items.getAll(lib.libraryID);
+        for (const item of items) {
+          if (!item.isRegularItem()) continue;
+          this.indexLibraryItem(item, { byDoi, byPmid, byTitle });
+        }
+      } catch (e) {
+        Zotero.debug(
+          `[seerai] buildLibraryItemIndex error (${lib.name}): ${e}`,
+        );
+      }
+    }
+    return { byDoi, byPmid, byTitle };
+  }
+
+  private static indexLibraryItem(
+    item: Zotero.Item,
+    index: {
+      byDoi: Map<string, Zotero.Item>;
+      byPmid: Map<string, Zotero.Item>;
+      byTitle: Map<string, Zotero.Item>;
+    },
+  ): void {
+    try {
+      const doi = normalizeDoiForMatch(item.getField("DOI") as string);
+      if (doi) index.byDoi.set(doi, item);
+      const extra = item.getField("extra") as string;
+      const pmidMatch = extra?.match(/PMID:\s*(\d+)/i);
+      if (pmidMatch) index.byPmid.set(pmidMatch[1], item);
+      const title = normalizeTitleForMatch(item.getField("title") as string);
+      if (title) index.byTitle.set(title, item);
+    } catch {
+      // Ignore items that fail field access.
+    }
+  }
+
+  private static matchLibraryItem(
+    paper: ScholarlyPaper,
+    index: {
+      byDoi: Map<string, Zotero.Item>;
+      byPmid: Map<string, Zotero.Item>;
+      byTitle: Map<string, Zotero.Item>;
+    },
+  ): Zotero.Item | null {
+    const doi = normalizeDoiForMatch(paper.externalIds?.DOI);
+    if (doi && index.byDoi.has(doi)) return index.byDoi.get(doi)!;
+    const pmid = paper.externalIds?.PMID;
+    if (pmid && index.byPmid.has(pmid)) return index.byPmid.get(pmid)!;
+    const title = normalizeTitleForMatch(paper.title);
+    if (title && index.byTitle.has(title)) return index.byTitle.get(title)!;
+    return null;
+  }
+
+  /**
+   * Present a modal that lets the user pick an existing Zotero collection or
+   * create a new one to import results into. Returns the resolved collection id
+   * and a human-readable label, or undefined if cancelled.
+   *
+   * "Add to Zotero" and "Add to Systematic Review" both require the user to
+   * define a destination folder, so this is the shared entry point.
+   */
+  private static chooseImportCollection(
+    doc: Document,
+    opts: { title: string; description: string; confirmLabel: string },
+  ): Promise<
+    { collectionId: number; label: string; target: number } | undefined
+  > {
+    return new Promise((resolve) => {
+      const overlay = ztoolkit.UI.createElement(doc, "div", {
+        styles: {
+          position: "fixed",
+          inset: "0",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "rgba(0,0,0,0.35)",
+          zIndex: "200010",
+        },
+      });
+      const dialog = ztoolkit.UI.createElement(doc, "div", {
+        styles: {
+          width: "min(460px, calc(100vw - 32px))",
+          padding: "18px",
+          border: "1px solid var(--border-primary)",
+          borderRadius: "10px",
+          backgroundColor: "var(--background-primary)",
+          color: "var(--text-primary)",
+          boxShadow: "0 12px 36px rgba(0,0,0,0.28)",
+        },
+      });
+      const title = doc.createElement("div");
+      title.textContent = opts.title;
+      title.style.cssText = "font-size:15px;font-weight:600;margin-bottom:6px";
+      const description = doc.createElement("div");
+      description.textContent = opts.description;
+      description.style.cssText =
+        "font-size:11px;color:var(--text-secondary);line-height:1.45;margin-bottom:14px";
+
+      // How many results to import. "Loaded" uses the on-screen results; larger
+      // targets continue provider pagination first (symmetric with BibTeX
+      // export). Capped by the active provider's bulk limit.
+      const loaded = currentSearchResults.length;
+      const providerCap = getProviderCapability(currentSearchState.provider);
+      const max =
+        currentSearchState.mode === "source"
+          ? providerCap.supportsBulk
+            ? providerCap.maxBulkResults
+            : loaded
+          : 2000;
+      let selectedTarget = loaded;
+      const countLabel = doc.createElement("div");
+      countLabel.textContent = "How many to import";
+      countLabel.style.cssText =
+        "font-size:11px;font-weight:600;margin-bottom:4px";
+      const countRow = doc.createElement("div");
+      countRow.style.cssText =
+        "display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin-bottom:12px";
+      const countButtons: HTMLButtonElement[] = [];
+      const countOptions: Array<{ label: string; value: number }> = [
+        { label: `Loaded (${loaded})`, value: loaded },
+        { label: "100", value: 100 },
+        { label: "500", value: 500 },
+        { label: "1,000", value: 1000 },
+        { label: "2,000", value: 2000 },
+      ];
+      const paintCounts = () => {
+        for (const button of countButtons) {
+          const active = Number(button.dataset.value) === selectedTarget;
+          button.style.background = active
+            ? "var(--highlight-primary)"
+            : "var(--background-secondary)";
+          button.style.color = active
+            ? "var(--highlight-text)"
+            : "var(--text-primary)";
+          button.style.fontWeight = active ? "600" : "400";
+        }
+      };
+      for (const option of countOptions) {
+        const button = doc.createElement("button");
+        button.textContent = option.label;
+        button.dataset.value = String(option.value);
+        button.disabled = option.value > max;
+        button.style.cssText =
+          "padding:7px 4px;font-size:11px;border:1px solid var(--border-primary);border-radius:6px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
+        if (button.disabled) button.style.opacity = "0.4";
+        button.addEventListener("click", () => {
+          if (button.disabled) return;
+          selectedTarget = option.value;
+          paintCounts();
+        });
+        countButtons.push(button);
+        countRow.appendChild(button);
+      }
+      paintCounts();
+
+      const pickerLabel = doc.createElement("div");
+      pickerLabel.textContent = "Destination folder";
+      pickerLabel.style.cssText =
+        "font-size:11px;font-weight:600;margin-bottom:4px";
+      const select = doc.createElement("select");
+      select.style.cssText =
+        "width:100%;padding:8px;border:1px solid var(--border-primary);border-radius:6px;background:var(--background-secondary);color:var(--text-primary);font:inherit;font-size:12px;margin-bottom:12px";
+      this.populateCollectionSelect(select);
+
+      const newLabel = doc.createElement("div");
+      newLabel.textContent = "Or create a new folder (optional)";
+      newLabel.style.cssText =
+        "font-size:11px;font-weight:600;margin-bottom:4px";
+      const newInput = doc.createElement("input");
+      newInput.placeholder = "New collection name";
+      newInput.style.cssText =
+        "width:100%;padding:8px;border:1px solid var(--border-primary);border-radius:6px;background:var(--background-primary);color:var(--text-primary);font:inherit;font-size:12px;box-sizing:border-box";
+
+      const error = doc.createElement("div");
+      error.style.cssText =
+        "font-size:11px;color:#c62828;margin-top:8px;min-height:14px";
+
+      const actions = doc.createElement("div");
+      actions.style.cssText =
+        "display:flex;justify-content:flex-end;gap:8px;margin-top:14px";
+      const cancel = doc.createElement("button");
+      cancel.textContent = "Cancel";
+      cancel.style.cssText =
+        "padding:7px 12px;border:1px solid var(--border-primary);border-radius:6px;background:transparent;color:var(--text-secondary);cursor:pointer";
+      const confirm = doc.createElement("button");
+      confirm.textContent = opts.confirmLabel;
+      confirm.style.cssText =
+        "padding:7px 14px;border:0;border-radius:6px;background:var(--highlight-primary);color:var(--highlight-text);cursor:pointer;font-weight:600";
+
+      let settled = false;
+      const finish = (value?: {
+        collectionId: number;
+        label: string;
+        target: number;
+      }) => {
+        if (settled) return;
+        settled = true;
+        overlay.remove();
+        resolve(value);
+      };
+
+      confirm.addEventListener("click", async () => {
+        error.textContent = "";
+        const newName = newInput.value.trim();
+        try {
+          const sel = select.value;
+          // Resolve the selected library + optional parent collection.
+          let parentLibraryId = Zotero.Libraries.userLibraryID;
+          let parentCollectionId: number | undefined;
+          if (sel === "user") {
+            parentLibraryId = Zotero.Libraries.userLibraryID;
+          } else if (sel.startsWith("lib_")) {
+            parentLibraryId = parseInt(sel.replace("lib_", ""), 10);
+          } else if (sel.startsWith("col_")) {
+            parentCollectionId = parseInt(sel.replace("col_", ""), 10);
+            const col = Zotero.Collections.get(
+              parentCollectionId,
+            ) as Zotero.Collection;
+            parentLibraryId = col?.libraryID ?? parentLibraryId;
+          }
+
+          if (newName) {
+            confirm.disabled = true;
+            confirm.textContent = "Creating...";
+            const collection = new Zotero.Collection({
+              libraryID: parentLibraryId,
+              name: newName,
+              ...(parentCollectionId !== undefined
+                ? { parentID: parentCollectionId }
+                : {}),
+            });
+            await collection.saveTx();
+            finish({
+              collectionId: collection.id,
+              label: newName,
+              target: selectedTarget,
+            });
+            return;
+          }
+
+          if (parentCollectionId === undefined) {
+            error.textContent =
+              "Pick an existing collection or enter a new folder name.";
+            return;
+          }
+          const label =
+            (Zotero.Collections.get(parentCollectionId) as Zotero.Collection)
+              ?.name || "collection";
+          finish({
+            collectionId: parentCollectionId,
+            label,
+            target: selectedTarget,
+          });
+        } catch (e) {
+          Zotero.debug(`[seerai] chooseImportCollection error: ${e}`);
+          confirm.disabled = false;
+          confirm.textContent = opts.confirmLabel;
+          error.textContent = `Could not create folder: ${
+            e instanceof Error ? e.message : String(e)
+          }`;
+        }
+      });
+      cancel.addEventListener("click", () => finish());
+      overlay.addEventListener("click", (event) => {
+        if (event.target === overlay) finish();
+      });
+
+      actions.append(cancel, confirm);
+      dialog.append(
+        title,
+        description,
+        countLabel,
+        countRow,
+        pickerLabel,
+        select,
+        newLabel,
+        newInput,
+        error,
+        actions,
+      );
+      overlay.appendChild(dialog);
+      const mount = doc.body || doc.documentElement;
+      if (!mount) return resolve(undefined);
+      mount.appendChild(overlay);
+    });
+  }
+
+  /**
+   * Populate a <select> with libraries (as new-folder parents) and their
+   * existing collections, indented to show hierarchy.
+   */
+  private static populateCollectionSelect(select: HTMLSelectElement): void {
+    const doc = select.ownerDocument;
+    if (!doc) return;
+    try {
+      const preferred = currentSearchState.saveLocation;
+      for (const library of Zotero.Libraries.getAll()) {
+        const libOption = doc.createElement("option");
+        libOption.value =
+          library.libraryID === Zotero.Libraries.userLibraryID
+            ? "user"
+            : `lib_${library.libraryID}`;
+        libOption.textContent = `${library.name} (library root)`;
+        if (preferred === libOption.value) libOption.selected = true;
+        select.appendChild(libOption);
+
+        const collections = Zotero.Collections.getByLibrary(
+          library.libraryID,
+          true,
+        );
+        const colMap = new Map<number, Zotero.Collection>();
+        const childrenMap = new Map<number, Zotero.Collection[]>();
+        const rootCols: Zotero.Collection[] = [];
+        collections.forEach((col) => colMap.set(col.id, col));
+        collections.forEach((col) => {
+          if (col.parentID && colMap.has(col.parentID)) {
+            const arr = childrenMap.get(col.parentID) || [];
+            arr.push(col);
+            childrenMap.set(col.parentID, arr);
+          } else {
+            rootCols.push(col);
+          }
+        });
+        const sortCols = (a: Zotero.Collection, b: Zotero.Collection) =>
+          a.name.localeCompare(b.name);
+        rootCols.sort(sortCols);
+        childrenMap.forEach((children) => children.sort(sortCols));
+        const render = (cols: Zotero.Collection[], level: number) => {
+          for (const col of cols) {
+            const opt = doc.createElement("option");
+            opt.value = `col_${col.id}`;
+            opt.textContent = `${"  ".repeat(level + 1)}${col.name}`;
+            if (preferred === opt.value) opt.selected = true;
+            select.appendChild(opt);
+            const children = childrenMap.get(col.id);
+            if (children?.length) render(children, level + 1);
+          }
+        };
+        render(rootCols, 0);
+      }
+    } catch (e) {
+      Zotero.debug(`[seerai] populateCollectionSelect error: ${e}`);
+    }
+  }
+
+  /**
+   * Import the given papers into Zotero (optionally into a collection), running
+   * automatic PDF discovery for each new item. Existing library items matched by
+   * DOI/PMID/title are reused (and added to the collection) rather than
+   * duplicated. Reports progress and honors cancellation.
+   */
+  private static async bulkImportToZotero(
+    papers: ScholarlyPaper[],
+    collectionId: number | undefined,
+    options: {
+      onProgress?: (done: number, total: number, pdfAttached: number) => void;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<{
+    items: Zotero.Item[];
+    imported: number;
+    reused: number;
+    failed: number;
+    pdfAttached: number;
+  }> {
+    const index = await this.buildLibraryItemIndex();
+    // Dedupe by canonical key so no two parallel workers ever process the same
+    // logical paper (which would otherwise race to create a duplicate item).
+    const queue = deduplicateScholarlyPapers(papers);
+    const total = queue.length;
+    const items: Zotero.Item[] = [];
+    let imported = 0;
+    let reused = 0;
+    let failed = 0;
+    let pdfAttached = 0;
+    let done = 0;
+    let cursor = 0;
+
+    const worker = async (): Promise<void> => {
+      while (cursor < queue.length) {
+        if (options.signal?.aborted) return;
+        const paper = queue[cursor++];
+        try {
+          const existing = this.matchLibraryItem(paper, index);
+          if (existing) {
+            reused++;
+            if (
+              collectionId !== undefined &&
+              !existing.getCollections().includes(collectionId)
+            ) {
+              existing.addToCollection(collectionId);
+              await existing.saveTx();
+            }
+            items.push(existing);
+          } else {
+            const result = await this.addPaperToZoteroWithPdfDiscovery(
+              paper,
+              undefined,
+              collectionId,
+              true,
+              false,
+            );
+            if (result.item) {
+              imported++;
+              if (result.pdfAttached) pdfAttached++;
+              items.push(result.item);
+              this.indexLibraryItem(result.item, index);
+            } else {
+              failed++;
+            }
+          }
+        } catch (e) {
+          failed++;
+          Zotero.debug(`[seerai] bulkImportToZotero error: ${e}`);
+        }
+        done++;
+        options.onProgress?.(done, total, pdfAttached);
+      }
+    };
+
+    const poolSize = Math.min(BULK_IMPORT_CONCURRENCY, queue.length);
+    await Promise.all(
+      Array.from({ length: Math.max(1, poolSize) }, () => worker()),
+    );
+    return { items, imported, reused, failed, pdfAttached };
+  }
+
+  /**
+   * Drive a header button through a bulk import: pick a folder + count, fetch up
+   * to the requested count (continuing provider pagination, symmetric with
+   * BibTeX export), import every result with automatic PDF discovery, then
+   * optionally hand the resulting items to a follow-up (e.g. add to systematic
+   * review). Shared by the Add to Zotero and Add to Review buttons.
+   */
+  private static async runBulkImportAction(
+    doc: Document,
+    btn: HTMLButtonElement,
+    opts: {
+      title: string;
+      confirmLabel: string;
+      verb: string;
+      onImported?: (items: Zotero.Item[]) => Promise<string | void>;
+    },
+  ): Promise<void> {
+    // A second click while a bulk import is running cancels it (the button
+    // doubles as Cancel, matching the Export BibTeX button).
+    if (bulkImportController) {
+      bulkImportController.abort();
+      btn.textContent = "Canceling...";
+      return;
+    }
+    const loaded = currentSearchResults;
+    if (!loaded.length) return;
+    const choice = await this.chooseImportCollection(doc, {
+      title: opts.title,
+      description:
+        "Choose how many results to import and where. Larger counts continue " +
+        "provider pagination first. Every imported item runs automatic PDF " +
+        "discovery; items already in your library are reused, not duplicated.",
+      confirmLabel: opts.confirmLabel,
+    });
+    if (!choice) return;
+
+    const originalHTML = btn.innerHTML;
+    const controller = createAbortController();
+    bulkImportController = controller;
+    try {
+      // Phase 1: fetch up to the requested count if it exceeds what's loaded.
+      let papers = loaded;
+      if (choice.target > loaded.length) {
+        btn.textContent = `Fetching (${loaded.length}/${choice.target})`;
+        papers = await fetchScholarlyPapersForExport(
+          this.buildScholarlyQuery({ limit: Math.min(1000, choice.target) }),
+          choice.target,
+          loaded,
+          controller.signal,
+          (progress) => {
+            if (!controller.signal.aborted)
+              btn.textContent = `Fetching (${progress.unique}/${choice.target})`;
+          },
+          currentScholarlySession,
+        );
+      }
+      // Phase 2: import (with PDF discovery) everything we gathered — unless the
+      // fetch phase was cancelled, in which case skip it (no library scan).
+      btn.textContent = `Cancel (0/${papers.length})`;
+      const result = controller.signal.aborted
+        ? { items: [], imported: 0, reused: 0, failed: 0, pdfAttached: 0 }
+        : await this.bulkImportToZotero(papers, choice.collectionId, {
+            signal: controller.signal,
+            onProgress: (d, t) => {
+              if (!controller.signal.aborted)
+                btn.textContent = `Cancel (${d}/${t})`;
+            },
+          });
+      const cancelled = controller.signal.aborted;
+      let followup: string | void = undefined;
+      if (!cancelled && opts.onImported && result.items.length) {
+        followup = await opts.onImported(result.items);
+      }
+      btn.innerHTML =
+        iconMarkup(cancelled ? "close" : "check", { size: 12 }) +
+        (cancelled ? " Canceled" : " Done");
+      const parts = [
+        `${result.imported} imported`,
+        result.reused ? `${result.reused} reused` : "",
+        result.pdfAttached ? `${result.pdfAttached} PDFs` : "",
+        result.failed ? `${result.failed} failed` : "",
+      ].filter(Boolean);
+      new ztoolkit.ProgressWindow("SeerAI")
+        .createLine({
+          text:
+            (cancelled
+              ? `${opts.verb} canceled — `
+              : `${opts.verb} into "${choice.label}" — `) +
+            (followup || parts.join(" · ")),
+          progress: 100,
+        })
+        .show();
+    } catch (e) {
+      Zotero.debug(`[seerai] runBulkImportAction error: ${e}`);
+      btn.innerHTML = iconMarkup("close", { size: 12 }) + " Failed";
+    } finally {
+      bulkImportController = null;
+      btn.disabled = false;
+      setTimeout(() => {
+        btn.innerHTML = originalHTML;
+        btn.disabled = false;
+      }, 2500);
     }
   }
 
@@ -13177,11 +14381,22 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     toolbar.appendChild(primaryRow);
     toolbar.appendChild(secondaryRow);
 
+    // Hysteresis so the density mode doesn't flip-flop (and the toolbar doesn't
+    // "change shape") when the width hovers right at a breakpoint. A mode is
+    // entered at its threshold but only left once the width climbs back past
+    // threshold + band — wider than any scrollbar, so it can't oscillate.
+    const TOOLBAR_HYSTERESIS = 56;
+    let toolbarCompact = false;
+    let toolbarNarrow = false;
+    let lastToolbarWidth = 0;
     const applyToolbarDensity = () => {
-      const width = toolbar.getBoundingClientRect().width;
-      if (!width) return;
-      toolbar.classList.toggle("table-toolbar-compact", width < 760);
-      toolbar.classList.toggle("table-toolbar-narrow", width < 520);
+      const width = Math.round(toolbar.getBoundingClientRect().width);
+      if (!width || width === lastToolbarWidth) return;
+      lastToolbarWidth = width;
+      toolbarCompact = width < 760 + (toolbarCompact ? TOOLBAR_HYSTERESIS : 0);
+      toolbarNarrow = width < 520 + (toolbarNarrow ? TOOLBAR_HYSTERESIS : 0);
+      toolbar.classList.toggle("table-toolbar-compact", toolbarCompact);
+      toolbar.classList.toggle("table-toolbar-narrow", toolbarNarrow);
     };
     const ResizeObserverCtor = doc.defaultView?.ResizeObserver;
     if (ResizeObserverCtor) {
@@ -17063,7 +18278,7 @@ You MUST call the generate_tags function.`;
    */
   private static showSearchCellDetailModal(
     doc: Document,
-    paper: SemanticScholarPaper,
+    paper: ScholarlyPaper,
     col: SearchAnalysisColumn,
     currentValue: string,
     resultsContainer: HTMLElement,
@@ -21801,7 +23016,7 @@ You MUST call the generate_tags function.`;
    */
   private static createUnifiedResultRow(
     doc: Document,
-    paper: SemanticScholarPaper,
+    paper: ScholarlyPaper,
     item: Zotero.Item,
     columns: SearchColumnConfig["columns"],
   ): HTMLTableRowElement {
@@ -23864,7 +25079,7 @@ You MUST call the generate_tags function.`;
    */
   private static createSearchCardColumns(
     doc: Document,
-    paper: SemanticScholarPaper,
+    paper: ScholarlyPaper,
     resultsContainer: HTMLElement,
     item: Zotero.Item,
   ): HTMLElement {
@@ -23967,7 +25182,7 @@ You MUST call the generate_tags function.`;
    * Uses PDF if available, otherwise falls back to abstract/TLDR/metadata
    */
   private static async analyzeSearchPaperColumn(
-    paper: SemanticScholarPaper,
+    paper: ScholarlyPaper,
     column: SearchAnalysisColumn,
   ): Promise<string> {
     let sourceText = "";
@@ -24007,7 +25222,7 @@ You MUST call the generate_tags function.`;
    * Generate column content for a search result using AI
    */
   private static async generateSearchColumnContent(
-    paper: SemanticScholarPaper,
+    paper: ScholarlyPaper,
     column: SearchAnalysisColumn,
     sourceText: string,
   ): Promise<string> {
@@ -33044,7 +34259,10 @@ Note: Context was automatically reduced using stricter semantic search due to si
     );
   }
 
-  static async addItemsToSystematicReview(items: Zotero.Item[]): Promise<void> {
+  static async addItemsToSystematicReview(
+    items: Zotero.Item[],
+    options: { silent?: boolean } = {},
+  ): Promise<void> {
     const { addPapersToSystematicReview } =
       await import("./systematicReview/systematicReviewTab");
     const { generateSourceLabel } = await import("./systematicReview/utils");
@@ -33053,12 +34271,14 @@ Note: Context was automatically reduced using stricter semantic search due to si
       .map((item) => item.id);
 
     if (paperIds.length === 0) {
-      new ztoolkit.ProgressWindow("SeerAI")
-        .createLine({
-          text: "Select at least one regular Zotero item",
-          progress: 100,
-        })
-        .show();
+      if (!options.silent) {
+        new ztoolkit.ProgressWindow("SeerAI")
+          .createLine({
+            text: "Select at least one regular Zotero item",
+            progress: 100,
+          })
+          .show();
+      }
       return;
     }
 
@@ -33072,6 +34292,10 @@ Note: Context was automatically reduced using stricter semantic search due to si
     if (activeTab === "systematic" && currentContainer && currentItem) {
       this.renderInterface(currentContainer, currentItem);
     }
+
+    // The bulk-import caller shows its own combined summary, so stay silent to
+    // avoid a duplicate progress popup.
+    if (options.silent) return;
 
     const addedCount = added.length;
     const existingCount = paperIds.length - addedCount;

@@ -471,10 +471,35 @@ export function renderSemanticScholarSettings(
   const body = sectionShell(
     doc,
     container,
-    "Semantic Scholar Integration",
-    "Higher rate limits for paper discovery when an API key is supplied.",
+    "Scholarly Search",
+    "Configure native academic search sources used by the Search tab.",
   );
   const fields = fieldRows(doc);
+  fields.appendChild(
+    selectField(
+      doc,
+      "Default search mode",
+      () => (getPref("scholarlySearchMode") as string) || "source",
+      (v) => setPref("scholarlySearchMode", v),
+      [
+        { value: "broad", label: "Broad discovery" },
+        { value: "biomedical", label: "Biomedical" },
+        { value: "preprints", label: "Preprints" },
+        { value: "cryptography", label: "Cryptography" },
+        { value: "repositories", label: "Open repositories" },
+        { value: "source", label: "Single source" },
+      ],
+    ),
+  );
+  fields.appendChild(
+    textField(
+      doc,
+      "Contact email for scholarly APIs",
+      () => (getPref("scholarlySearchEmail") as string) || "",
+      (v) => setPref("scholarlySearchEmail", v),
+      { placeholder: "researcher@example.org" },
+    ),
+  );
   fields.appendChild(
     textField(
       doc,
@@ -484,11 +509,47 @@ export function renderSemanticScholarSettings(
       { password: true, placeholder: "S2 API Key" },
     ),
   );
+  fields.appendChild(
+    textField(
+      doc,
+      "NCBI API key (optional)",
+      () => (getPref("ncbiApiKey") as string) || "",
+      (v) => setPref("ncbiApiKey", v),
+      { password: true, placeholder: "PubMed / NCBI key" },
+    ),
+  );
+  fields.appendChild(
+    textField(
+      doc,
+      "CORE API key",
+      () => (getPref("coreApiKey") as string) || "",
+      (v) => setPref("coreApiKey", v),
+      { password: true, placeholder: "CORE key" },
+    ),
+  );
+  fields.appendChild(
+    textField(
+      doc,
+      "BASE API key",
+      () => (getPref("baseApiKey") as string) || "",
+      (v) => setPref("baseApiKey", v),
+      { password: true, placeholder: "Registered BASE key" },
+    ),
+  );
+  fields.appendChild(
+    textField(
+      doc,
+      "Zenodo access token (optional)",
+      () => (getPref("zenodoAccessToken") as string) || "",
+      (v) => setPref("zenodoAccessToken", v),
+      { password: true, placeholder: "Zenodo token" },
+    ),
+  );
   body.appendChild(fields);
   body.appendChild(
     helpText(
       doc,
-      "Without a key, searches use Semantic Scholar's lower anonymous rate limit.",
+      "arXiv, PubMed, Europe PMC, bioRxiv, medRxiv, IACR, Zenodo, and HAL work without keys. CORE and BASE remain visible but require credentials.",
     ),
   );
   const linkRow = el(doc, "div", "seerai-inline-actions");

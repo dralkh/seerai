@@ -90,6 +90,11 @@ const SR_AUTO_COLLAPSE_THRESHOLD = 480;
 const SR_FILTERS_AUTO_COLLAPSE_THRESHOLD = 400;
 const SR_ARTICLE_LIST_AUTO_COLLAPSE_THRESHOLD = 320;
 const SR_RESERVED_FOR_CONTENT = 360;
+// Hysteresis band for auto-collapse decisions. A panel collapses when the width
+// drops below its threshold, but only re-expands once the width climbs back past
+// threshold + this band. The gap (larger than any scrollbar) prevents the
+// collapse/expand flip-flop that made the layout "jitter" near a boundary.
+const SR_COLLAPSE_HYSTERESIS = 56;
 
 function appendToBody(doc: Document, el: HTMLElement): void {
   const target = doc.body || doc.documentElement;
@@ -191,12 +196,9 @@ let currentPanel: SRSubTab = "screening";
 let picoLabelMap: Record<string, string[]> = {};
 let sidebarCollapsed = false;
 let sidebarAutoCollapsed = false;
-let sidebarUserTouched = false;
 let filtersCollapsed = false;
 let filtersAutoCollapsed = false;
-let filtersUserTouched = false;
 let articleListAutoCollapsed = false;
-let articleListUserTouched = false;
 let reviewSidebarWidth = 210;
 let reviewArticleListWidth = 260;
 let reviewFiltersWidth = 200;
@@ -204,12 +206,6 @@ let articleListCollapsed = false;
 let refreshReviewLayout: (() => void) | null = null;
 let lastReviewLayoutWidth = 0;
 let reviewLayoutRafPending = false;
-// Recent measured widths, used to detect a ResizeObserver feedback loop where
-// the layout flips between two widths (e.g. a scrollbar appearing/disappearing)
-// and "jitters" forever. Once we see the pattern A -> B -> A we lock onto the
-// smaller width so content stays within bounds instead of oscillating.
-let reviewLayoutWidthHistory: number[] = [];
-let reviewLayoutLocked = false;
 
 interface ItemMeta {
   id: number;
@@ -583,10 +579,16 @@ interface ResponsiveSizes {
 }
 
 function computeResponsiveSizes(outerWidth: number): ResponsiveSizes {
+  // Auto-collapse purely on available width. We intentionally do NOT exempt
+  // panels the user has manually resized: honoring a manual width when there is
+  // no room is exactly what created the "stuck" minimum width and truncation.
+  // Compaction always wins over truncation; the manual width is still used as
+  // the preferred size whenever the panel is expanded.
   const autoCollapseSidebar =
     !sidebarCollapsed &&
-    !sidebarUserTouched &&
-    outerWidth < SR_AUTO_COLLAPSE_THRESHOLD;
+    outerWidth <
+      SR_AUTO_COLLAPSE_THRESHOLD +
+        (sidebarAutoCollapsed ? SR_COLLAPSE_HYSTERESIS : 0);
   const effectiveCollapsed = sidebarCollapsed || autoCollapseSidebar;
 
   let sidebarWidth: number;
@@ -605,14 +607,16 @@ function computeResponsiveSizes(outerWidth: number): ResponsiveSizes {
   const contentWidth = Math.max(0, outerWidth - sidebarWidth - 5);
   const autoCollapseFilters =
     !filtersCollapsed &&
-    !filtersUserTouched &&
-    contentWidth < SR_FILTERS_AUTO_COLLAPSE_THRESHOLD;
+    contentWidth <
+      SR_FILTERS_AUTO_COLLAPSE_THRESHOLD +
+        (filtersAutoCollapsed ? SR_COLLAPSE_HYSTERESIS : 0);
   const effectiveFiltersCollapsed = filtersCollapsed || autoCollapseFilters;
 
   const autoCollapseArticleList =
     !articleListCollapsed &&
-    !articleListUserTouched &&
-    contentWidth < SR_ARTICLE_LIST_AUTO_COLLAPSE_THRESHOLD;
+    contentWidth <
+      SR_ARTICLE_LIST_AUTO_COLLAPSE_THRESHOLD +
+        (articleListAutoCollapsed ? SR_COLLAPSE_HYSTERESIS : 0);
   const effectiveArticleListCollapsed =
     articleListCollapsed || autoCollapseArticleList;
 
@@ -831,31 +835,8 @@ export async function createSystematicReviewTabContent(
       return;
     }
     if (availableWidth === lastReviewLayoutWidth) return;
-
-    // Anti-oscillation guard: if the width we're now seeing is one we bounced
-    // away from a moment ago (A -> B -> A), the layout itself is what's moving
-    // the boundary. Lock onto the smallest width in the cycle so it settles.
-    if (reviewLayoutLocked) {
-      if (availableWidth >= lastReviewLayoutWidth) return;
-      // A genuinely smaller width: leave the lock and re-evaluate.
-      reviewLayoutLocked = false;
-      reviewLayoutWidthHistory = [];
-    } else if (reviewLayoutWidthHistory.includes(availableWidth)) {
-      reviewLayoutLocked = true;
-      // Settle on the smaller of the two oscillating widths and stop here if
-      // that's the one we've already applied.
-      const settleWidth = Math.min(availableWidth, lastReviewLayoutWidth);
-      if (settleWidth === lastReviewLayoutWidth) return;
-      lastReviewLayoutWidth = settleWidth;
-    } else {
-      lastReviewLayoutWidth = availableWidth;
-    }
-
-    reviewLayoutWidthHistory.push(lastReviewLayoutWidth);
-    if (reviewLayoutWidthHistory.length > 4) reviewLayoutWidthHistory.shift();
-    // Always lay out for the width we committed to above (the settled one when
-    // an oscillation was detected), never the raw measurement.
-    const layoutWidth = lastReviewLayoutWidth;
+    lastReviewLayoutWidth = availableWidth;
+    const layoutWidth = availableWidth;
     const filters = mainWrapper.querySelector(
       ".sr-filters-panel",
     ) as HTMLElement | null;
@@ -869,8 +850,16 @@ export async function createSystematicReviewTabContent(
       ".sr-filter-handle",
     ) as HTMLElement | null;
 
-    mainWrapper.classList.toggle("sr-layout-narrow", layoutWidth < 760);
-    mainWrapper.classList.toggle("sr-layout-tight", layoutWidth < 560);
+    const wasNarrow = mainWrapper.classList.contains("sr-layout-narrow");
+    const wasTight = mainWrapper.classList.contains("sr-layout-tight");
+    mainWrapper.classList.toggle(
+      "sr-layout-narrow",
+      layoutWidth < 760 + (wasNarrow ? SR_COLLAPSE_HYSTERESIS : 0),
+    );
+    mainWrapper.classList.toggle(
+      "sr-layout-tight",
+      layoutWidth < 560 + (wasTight ? SR_COLLAPSE_HYSTERESIS : 0),
+    );
 
     const sizes = computeResponsiveSizes(layoutWidth);
     if (sizes.autoCollapseSidebar !== sidebarAutoCollapsed) {
@@ -989,11 +978,8 @@ export async function createSystematicReviewTabContent(
   };
 
   refreshReviewLayout = applyResponsiveLayout;
-  // Fresh layout pass for this render: clear any oscillation lock from a
-  // previous mount so widths are re-measured cleanly.
+  // Fresh layout pass for this render: re-measure cleanly.
   lastReviewLayoutWidth = 0;
-  reviewLayoutWidthHistory = [];
-  reviewLayoutLocked = false;
   const ResizeObserverCtor = doc.defaultView?.ResizeObserver;
   if (ResizeObserverCtor) {
     const layoutObserver = new ResizeObserverCtor(applyResponsiveLayout);
@@ -1462,7 +1448,6 @@ function buildSidebar(
     const effectiveCollapsed = sidebarCollapsed || sidebarAutoCollapsed;
     sidebarCollapsed = !effectiveCollapsed;
     sidebarAutoCollapsed = false;
-    sidebarUserTouched = true;
     const shellWidth =
       mainWrapper?.getBoundingClientRect().width ||
       sideNav.getBoundingClientRect().width ||
@@ -1711,7 +1696,7 @@ function buildScreeningPanel(doc: Document): HTMLElement {
   if (!currentState) return doc.createElement("div");
   const panel = doc.createElement("div");
   panel.style.cssText =
-    "display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;";
+    "display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;overflow:hidden;";
 
   // Pipeline progress bar
   panel.appendChild(buildPipeline(doc));
@@ -1947,7 +1932,6 @@ function buildArticleList(
   listToggle.addEventListener("click", () => {
     articleListCollapsed = !articleListCollapsed;
     articleListAutoCollapsed = false;
-    articleListUserTouched = true;
     Zotero.Prefs.set(
       "extensions.zotero.seerai.srArticleListCollapsed",
       articleListCollapsed,
@@ -3500,7 +3484,6 @@ function buildFiltersPanel(
   toggleBtn.addEventListener("click", () => {
     filtersCollapsed = !filtersCollapsed;
     filtersAutoCollapsed = false;
-    filtersUserTouched = true;
     applyCollapsedState();
     Zotero.Prefs.set(
       "extensions.zotero.seerai.srFiltersCollapsed",

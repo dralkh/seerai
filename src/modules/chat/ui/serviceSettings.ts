@@ -1,4 +1,9 @@
 import { getPref, setPref } from "../../../utils/prefs";
+import {
+  ScholarlyProviderId,
+  getProviderCapability,
+  testScholarlyProviderConnection,
+} from "../../search";
 
 type WebProvider = "firecrawl" | "tavily" | "nanogpt" | "youdotcom";
 type OcrMode = "local" | "cloud" | "mistral";
@@ -387,7 +392,39 @@ export function showSemanticScholarQuickSettings(
   anchor: HTMLElement,
 ): void {
   const content = doc.createElement("div");
-  content.appendChild(
+  let selected = (getPref("scholarlySearchProvider") ||
+    "semantic-scholar") as ScholarlyProviderId;
+  const providerOptions: ScholarlyProviderId[] = [
+    "semantic-scholar",
+    "arxiv",
+    "pubmed",
+    "biorxiv",
+    "medrxiv",
+    "iacr",
+    "europe-pmc",
+    "core",
+    "base",
+    "zenodo",
+    "hal",
+  ];
+  const status = doc.createElement("div");
+  content.append(
+    field(
+      doc,
+      "Source to test",
+      select(
+        doc,
+        selected,
+        providerOptions.map((id) => ({
+          value: id,
+          label: getProviderCapability(id).label,
+        })),
+        (value) => {
+          selected = value as ScholarlyProviderId;
+          setPref("scholarlySearchProvider", value);
+        },
+      ),
+    ),
     field(
       doc,
       "Semantic Scholar API key (optional)",
@@ -395,10 +432,43 @@ export function showSemanticScholarQuickSettings(
         setPref("semanticScholarApiKey", value),
       ),
     ),
+    field(
+      doc,
+      "NCBI API key (optional)",
+      input(doc, "password", getPref("ncbiApiKey") || "", (value) =>
+        setPref("ncbiApiKey", value),
+      ),
+    ),
+    field(
+      doc,
+      "CORE API key (optional)",
+      input(doc, "password", getPref("coreApiKey") || "", (value) =>
+        setPref("coreApiKey", value),
+      ),
+    ),
+    field(
+      doc,
+      "BASE API key / registered access",
+      input(doc, "password", getPref("baseApiKey") || "", (value) =>
+        setPref("baseApiKey", value),
+      ),
+    ),
   );
+  const testButton = doc.createElement("button");
+  testButton.textContent = "Test selected source";
+  testButton.addEventListener("click", async () => {
+    testButton.disabled = true;
+    status.textContent = "Testing…";
+    const result = await testScholarlyProviderConnection(selected);
+    status.textContent = result.ok
+      ? `Connected in ${result.latencyMs} ms`
+      : result.error || result.readiness.message;
+    testButton.disabled = false;
+  });
+  content.append(testButton, status);
   const help = doc.createElement("div");
   help.textContent =
-    "Without a key, searches use Semantic Scholar's lower anonymous rate limit.";
+    "Public sources work anonymously where supported. BASE requires registered access; IACR is experimental.";
   Object.assign(help.style, {
     marginTop: "8px",
     fontSize: "10px",
@@ -408,8 +478,8 @@ export function showSemanticScholarQuickSettings(
   showPopover(
     doc,
     anchor,
-    "semantic-scholar-quick-settings",
-    "Semantic Scholar",
+    "scholarly-search-quick-settings",
+    "Scholarly Search",
     content,
   );
 }
