@@ -4168,14 +4168,15 @@ function buildEvidencePanel(doc: Document): HTMLElement {
     "display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;";
   const hdr = doc.createElement("div");
   hdr.style.cssText =
-    "display:flex;align-items:center;justify-content:space-between;padding:4px 12px;border-bottom:1px solid var(--border-primary);flex-shrink:0;";
+    "display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;padding:4px 12px;border-bottom:1px solid var(--border-primary);flex-shrink:0;";
   const title = doc.createElement("div");
   title.textContent = "Evidence Synthesis";
   title.style.cssText =
-    "font-size:13px;font-weight:600;color:var(--text-primary);";
+    "font-size:13px;font-weight:600;color:var(--text-primary);flex-shrink:0;";
   hdr.appendChild(title);
   const tabRow = doc.createElement("div");
-  tabRow.style.cssText = "display:flex;gap:4px;align-items:center;";
+  tabRow.style.cssText =
+    "display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end;";
   const overBtn = doc.createElement("button");
   overBtn.textContent = "Overview";
   overBtn.style.cssText =
@@ -4395,6 +4396,12 @@ function buildEvidencePanel(doc: Document): HTMLElement {
     }
   });
   tabRow.appendChild(tableBtn);
+  // Keep every toolbar button's full label visible: never shrink/clip them, let
+  // the toolbar wrap to additional rows instead.
+  for (const el of Array.from(tabRow.children)) {
+    (el as HTMLElement).style.whiteSpace = "nowrap";
+    (el as HTMLElement).style.flexShrink = "0";
+  }
   hdr.appendChild(tabRow);
   panel.appendChild(hdr);
   const body = doc.createElement("div");

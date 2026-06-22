@@ -2,6 +2,8 @@
  * Type definitions for Papers Table feature
  */
 
+import type { SearchQueryIR } from "../search/queryIR";
+
 // Column definition for the papers table
 export interface TableColumn {
   id: string;
@@ -236,17 +238,23 @@ export interface SearchState {
   sortBy: "relevance" | "citationCount:desc" | "publicationDate:desc";
   // Save location: 'user' for user library, 'lib_ID' for group library, 'col_ID' for collection
   saveLocation: string;
-  // Cached AI insights for this search query
+  // Cached AI insights for this search query (kept updated with the partial
+  // text while streaming so it survives tab switches mid-generation)
   cachedAiInsights?: string;
+  // Lifecycle of the cached insights: streaming (in progress), done, or error
+  aiInsightsStatus?: "streaming" | "done" | "error";
   // AI insights configuration
   searchAiInsightsPrompt?: string;
   searchAiInsightsResponseLength?: number;
+  // Structured query from the AI refine feature. When set, buildScholarlyQuery
+  // compiles it per provider; cleared whenever the raw query is edited.
+  queryIR?: SearchQueryIR;
 }
 
 export const defaultSearchState: SearchState = {
   query: "",
   mode: "source",
-  provider: "semantic-scholar",
+  provider: "pubmed",
   providerFilters: {},
   limit: 20,
   openAccessPdf: false,

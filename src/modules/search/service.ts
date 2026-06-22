@@ -19,6 +19,42 @@ export function selectedProviders(
   return [...selected];
 }
 
+/** Overall ceiling for a federated (smart-mode) fetch across providers. */
+export const FEDERATED_RESULT_CAP = 10000;
+
+/** Max records retrievable from a single provider, by retrieval channel. */
+export function providerResultCap(
+  id: ScholarlyProviderId,
+  channel: "live" | "bulk" = "bulk",
+): number {
+  const caps = scholarlyProviders[id].capabilities;
+  return channel === "live"
+    ? (caps.maxLiveResults ?? caps.maxBulkResults)
+    : caps.maxBulkResults;
+}
+
+/**
+ * Realistic maximum number of unique records a query can return, used to clamp
+ * the "load max / fetch N" controls and the export dialog. In source mode this
+ * is the single provider's cap; in smart mode it is the combined provider caps,
+ * bounded by {@link FEDERATED_RESULT_CAP}.
+ */
+export function maxResultsForQuery(
+  query: ScholarlySearchQuery,
+  channel: "live" | "bulk" = "bulk",
+): number {
+  const ids = selectedProviders(query).filter((id) =>
+    scholarlyProviders[id].isConfigured(),
+  );
+  if (ids.length === 0) return 0;
+  if (query.mode === "source") return providerResultCap(ids[0], channel);
+  const combined = ids.reduce(
+    (sum, id) => sum + providerResultCap(id, channel),
+    0,
+  );
+  return Math.min(combined, FEDERATED_RESULT_CAP);
+}
+
 export async function searchScholarlyPapers(
   query: ScholarlySearchQuery,
   previous: FederatedSearchResult | undefined,
@@ -171,18 +207,22 @@ export async function fetchScholarlyPapersForExport(
       if (state?.exhausted) continue;
       try {
         const provider = scholarlyProviders[id];
+        const cap = provider.capabilities.maxBulkResults;
         const page = await (provider.bulkSearch || provider.search).call(
           provider,
-          { ...query, limit: Math.min(1000, target - papers.length) },
+          { ...query, limit: Math.min(2000, target - papers.length) },
           state?.cursor,
           { signal },
         );
         pages[id] = [...(pages[id] || []), ...page.items];
         rawCount += page.items.length;
+        // Stop paging a provider once we've pulled its documented ceiling, so we
+        // never request beyond what its API allows (e.g. arXiv 30k, Zenodo 10k).
+        const reachedCap = pages[id].length >= cap;
         states[id] = {
           cursor: page.cursor,
           total: page.total,
-          exhausted: page.exhausted || page.items.length === 0,
+          exhausted: page.exhausted || page.items.length === 0 || reachedCap,
           warnings: page.warnings,
         };
         progressed = progressed || page.items.length > 0;

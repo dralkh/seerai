@@ -295,22 +295,43 @@ class SemanticScholarService {
 
     Zotero.debug(`[seerai] Semantic Scholar search: ${url}`);
 
-    try {
-      const response = await this.rateLimitedFetch(url);
-
-      if (!response.ok) {
+    // The anonymous relevance endpoint is heavily throttled and frequently
+    // returns 403/429 under shared load. Retry with backoff before giving up.
+    const maxAttempts = 3;
+    let lastStatus = 0;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const response = await this.rateLimitedFetch(url);
+        if (response.ok) {
+          return (await response.json()) as unknown as SearchResult;
+        }
+        lastStatus = response.status;
         const errorText = await response.text();
-        throw new Error(
-          `Semantic Scholar API error (${response.status}): ${errorText}`,
+        const transient = response.status === 403 || response.status === 429;
+        if (!transient || attempt === maxAttempts - 1) {
+          throw new Error(
+            `Semantic Scholar API error (${response.status}): ${errorText}`,
+          );
+        }
+        Zotero.debug(
+          `[seerai] Semantic Scholar ${response.status}, retrying (attempt ${attempt + 1})`,
         );
+        await new Promise((resolve) =>
+          setTimeout(resolve, 1500 * 2 ** attempt),
+        );
+      } catch (error) {
+        if (attempt === maxAttempts - 1) {
+          Zotero.debug(`[seerai] Semantic Scholar search error: ${error}`);
+          if (lastStatus === 403 && !this.getApiKey()) {
+            throw new Error(
+              "Semantic Scholar blocked this request (403). The public API is rate-limited; add a free Semantic Scholar API key in Settings for reliable access.",
+            );
+          }
+          throw error;
+        }
       }
-
-      const data = (await response.json()) as unknown as SearchResult;
-      return data;
-    } catch (error) {
-      Zotero.debug(`[seerai] Semantic Scholar search error: ${error}`);
-      throw error;
     }
+    throw new Error("Semantic Scholar search failed");
   }
 
   /**

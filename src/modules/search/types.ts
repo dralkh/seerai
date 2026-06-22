@@ -79,6 +79,12 @@ export interface ScholarlyCommonFilters {
 
 export interface ScholarlySearchQuery {
   text: string;
+  /**
+   * Per-provider precompiled native query (from the AI refine IR). Each provider
+   * reads its own entry and falls back to `text` when absent, so non-refined
+   * searches behave exactly as before.
+   */
+  providerQueries?: Partial<Record<ScholarlyProviderId, string>>;
   mode: ScholarlySearchMode;
   providers: ScholarlyProviderId[];
   limit: number;
@@ -108,7 +114,19 @@ export interface ProviderCapabilities {
   supportsYearRange?: boolean;
   supportsCitationSort?: boolean;
   supportsBulk: boolean;
+  /**
+   * Maximum total records that can be retrieved from this provider for a single
+   * query via bulk pagination (export / "load max per corpus"). Reflects the
+   * provider's real documented ceiling (e.g. PubMed 10k, Zenodo 10k window).
+   */
   maxBulkResults: number;
+  /**
+   * Maximum total records retrievable via the live relevance search endpoint,
+   * when it is lower than {@link maxBulkResults} (e.g. Semantic Scholar caps
+   * relevance search at offset+limit <= 1000 but allows 10M via the bulk
+   * endpoint). Defaults to {@link maxBulkResults} when unset.
+   */
+  maxLiveResults?: number;
   requiresConfiguration?: boolean;
   experimental?: boolean;
   stability?: "stable" | "experimental";

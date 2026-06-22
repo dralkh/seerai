@@ -12,6 +12,19 @@ import {
   ScholarlySearchQuery,
 } from "./types";
 
+/**
+ * Native query string a provider should send: the precompiled per-provider
+ * query from the AI refine IR when present, otherwise the raw `text`.
+ */
+function queryText(
+  query: ScholarlySearchQuery,
+  id: ScholarlyProviderId,
+): string {
+  // `||` (not `??`) so an empty compiled string falls back to the canonical
+  // text rather than issuing an empty network query.
+  return query.providerQueries?.[id] || query.text;
+}
+
 const capabilities: Record<ScholarlyProviderId, ProviderCapabilities> = {
   "semantic-scholar": {
     id: "semantic-scholar",
@@ -24,7 +37,10 @@ const capabilities: Record<ScholarlyProviderId, ProviderCapabilities> = {
     supportsYearRange: true,
     supportsCitationSort: true,
     supportsBulk: true,
-    maxBulkResults: 2000,
+    // Relevance search caps at offset+limit <= 1000; bulk endpoint allows far
+    // more (API max 10M) — keep a practical export ceiling.
+    maxBulkResults: 10000,
+    maxLiveResults: 1000,
   },
   arxiv: {
     id: "arxiv",
@@ -34,7 +50,9 @@ const capabilities: Record<ScholarlyProviderId, ProviderCapabilities> = {
     supportsPdfFilter: true,
     supportsYearRange: true,
     supportsBulk: true,
-    maxBulkResults: 2000,
+    // arXiv hard-limits a query to 30000 results (slices of <=2000); keep a
+    // practical export ceiling well within that.
+    maxBulkResults: 10000,
   },
   pubmed: {
     id: "pubmed",
@@ -43,7 +61,8 @@ const capabilities: Record<ScholarlyProviderId, ProviderCapabilities> = {
     queryKind: "keyword",
     supportsYearRange: true,
     supportsBulk: true,
-    maxBulkResults: 2000,
+    // E-utilities can only retrieve the first 10000 records of a query.
+    maxBulkResults: 10000,
   },
   biorxiv: {
     id: "biorxiv",
@@ -54,7 +73,7 @@ const capabilities: Record<ScholarlyProviderId, ProviderCapabilities> = {
     supportsPdfFilter: true,
     supportsYearRange: true,
     supportsBulk: true,
-    maxBulkResults: 2000,
+    maxBulkResults: 5000,
   },
   medrxiv: {
     id: "medrxiv",
@@ -87,7 +106,8 @@ const capabilities: Record<ScholarlyProviderId, ProviderCapabilities> = {
     supportsYearRange: true,
     supportsCitationSort: true,
     supportsBulk: true,
-    maxBulkResults: 2000,
+    // Cursor (cursorMark) pagination is effectively unbounded; practical cap.
+    maxBulkResults: 10000,
   },
   core: {
     id: "core",
@@ -98,7 +118,7 @@ const capabilities: Record<ScholarlyProviderId, ProviderCapabilities> = {
     supportsPdfFilter: true,
     supportsYearRange: true,
     supportsBulk: true,
-    maxBulkResults: 2000,
+    maxBulkResults: 10000,
     authentication: "optional",
   },
   base: {
@@ -109,7 +129,7 @@ const capabilities: Record<ScholarlyProviderId, ProviderCapabilities> = {
     supportsOpenAccess: true,
     supportsYearRange: true,
     supportsBulk: true,
-    maxBulkResults: 2000,
+    maxBulkResults: 10000,
     requiresConfiguration: true,
   },
   zenodo: {
@@ -121,7 +141,8 @@ const capabilities: Record<ScholarlyProviderId, ProviderCapabilities> = {
     supportsPdfFilter: true,
     supportsYearRange: true,
     supportsBulk: true,
-    maxBulkResults: 2000,
+    // Zenodo (Elasticsearch) rejects page*size beyond a 10000 result window.
+    maxBulkResults: 10000,
   },
   hal: {
     id: "hal",
@@ -132,7 +153,8 @@ const capabilities: Record<ScholarlyProviderId, ProviderCapabilities> = {
     supportsPdfFilter: true,
     supportsYearRange: true,
     supportsBulk: true,
-    maxBulkResults: 2000,
+    // cursorMark pagination is effectively unbounded; practical cap.
+    maxBulkResults: 10000,
   },
 };
 
@@ -185,7 +207,7 @@ class SemanticScholarProvider implements ScholarlySearchProvider {
   ): Promise<ProviderPage> {
     const offset = Number(cursor || 0);
     const result = await semanticScholarService.searchPapers({
-      query: query.text,
+      query: queryText(query, "semantic-scholar"),
       limit: Math.min(query.limit, 100),
       offset,
       year: yearRange(query),
@@ -219,7 +241,7 @@ class SemanticScholarProvider implements ScholarlySearchProvider {
   ): Promise<ProviderPage> {
     const result = await semanticScholarService.searchPapersBulk(
       {
-        query: query.text,
+        query: queryText(query, "semantic-scholar"),
         limit: Math.min(query.limit, 1000),
         year: yearRange(query),
         openAccessPdf:
@@ -269,7 +291,7 @@ class ArxivProvider implements ScholarlySearchProvider {
     const filters = query.providerFilters.arxiv || {};
     const field = String(filters.field || "all");
     const category = String(filters.category || "");
-    let search = `${field}:${query.text}`;
+    let search = `${field}:${queryText(query, "arxiv")}`;
     if (category) search += ` AND cat:${category}`;
     if (query.filters.yearStart || query.filters.yearEnd) {
       const from = `${query.filters.yearStart || "0000"}01010000`;
@@ -279,7 +301,7 @@ class ArxivProvider implements ScholarlySearchProvider {
     const params = new URLSearchParams({
       search_query: search,
       start: String(start),
-      max_results: String(Math.min(query.limit, 100)),
+      max_results: String(Math.min(query.limit, 2000)),
       sortBy:
         query.sort === "newest" || query.sort === "oldest"
           ? "submittedDate"
@@ -328,11 +350,12 @@ class ArxivProvider implements ScholarlySearchProvider {
       });
     });
     const next = start + items.length;
+    const cap = Math.min(total, capabilities.arxiv.maxBulkResults);
     return {
       items,
       total,
-      cursor: items.length ? String(next) : undefined,
-      exhausted: items.length === 0 || next >= total,
+      cursor: items.length && next < cap ? String(next) : undefined,
+      exhausted: items.length === 0 || next >= cap,
     };
   }
 }
@@ -374,7 +397,7 @@ class PubmedProvider implements ScholarlySearchProvider {
     const retstart = history?.retstart || 0;
     const apiKey = String(getPref("ncbiApiKey" as never) || "");
     const email = String(getPref("scholarlySearchEmail" as never) || "");
-    let term = query.text;
+    let term = queryText(query, "pubmed");
     if (query.filters.yearStart || query.filters.yearEnd) {
       term += ` AND (${query.filters.yearStart || "1000"}[PDAT] : ${query.filters.yearEnd || "3000"}[PDAT])`;
     }
@@ -577,7 +600,7 @@ async function searchEuropePmc(
   cursor: string | undefined,
   signal?: AbortSignal,
 ): Promise<ProviderPage> {
-  const clauses = [query.text];
+  const clauses = [queryText(query, source)];
   if (source === "biorxiv") clauses.push("SRC:PPR", 'JOURNAL:"bioRxiv"');
   if (source === "medrxiv") clauses.push("SRC:PPR", 'JOURNAL:"medRxiv"');
   if (query.filters.yearStart || query.filters.yearEnd) {
@@ -710,7 +733,7 @@ class IacrProvider implements ScholarlySearchProvider {
     context: { signal?: AbortSignal },
   ): Promise<ProviderPage> {
     if (cursor) return { items: [], exhausted: true };
-    const params = new URLSearchParams({ q: query.text });
+    const params = new URLSearchParams({ q: queryText(query, "iacr") });
     const response = await scholarlyFetch(
       "iacr",
       `https://eprint.iacr.org/search?${params}`,
@@ -773,7 +796,7 @@ class CoreProvider implements ScholarlySearchProvider {
     const offset = Number(cursor || 0);
     const key = String(getPref("coreApiKey" as never) || "");
     const filters = query.providerFilters.core || {};
-    let q = query.text;
+    let q = queryText(query, "core");
     if (query.filters.yearStart)
       q += ` AND yearPublished>=${query.filters.yearStart}`;
     if (query.filters.yearEnd)
@@ -860,7 +883,7 @@ class BaseProvider implements ScholarlySearchProvider {
     const offset = Number(cursor || 0);
     const params = new URLSearchParams({
       func: "PerformSearch",
-      query: query.text,
+      query: queryText(query, "base"),
       hits: String(Math.min(query.limit, 100)),
       offset: String(offset),
       format: "json",
@@ -930,7 +953,7 @@ class ZenodoProvider implements ScholarlySearchProvider {
     const pageNumber = cursor?.startsWith("http") ? 1 : Number(cursor || 1);
     const token = String(getPref("zenodoAccessToken" as never) || "");
     const filters = query.providerFilters.zenodo || {};
-    let q = query.text;
+    let q = queryText(query, "zenodo");
     if (query.filters.yearStart || query.filters.yearEnd) {
       q += ` AND publication_date:[${query.filters.yearStart || "1000"}-01-01 TO ${query.filters.yearEnd || "3000"}-12-31]`;
     }
@@ -1026,7 +1049,7 @@ class HalProvider implements ScholarlySearchProvider {
     if (filters.domain) fq.push(`domain_s:${filters.domain}`);
     if (filters.language) fq.push(`language_s:${filters.language}`);
     const params = new URLSearchParams({
-      q: query.text,
+      q: queryText(query, "hal"),
       fl: "halId_s,title_s,authFullName_s,abstract_s,doiId_s,publicationDateY_i,submittedDate_s,fileMain_s,uri_s,docType_s,journalTitle_s,volume_s,issue_s,page_s,keyword_s,license_s",
       rows: String(Math.min(query.limit, 1000)),
       wt: "json",

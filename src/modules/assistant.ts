@@ -83,11 +83,18 @@ import {
   ScholarlySearchQuery,
   SMART_MODE_PROVIDERS,
   getProviderCapability,
+  SearchQueryIR,
+  parseSearchQueryIR,
+  compileQuery,
+  compileQueriesForProviders,
   papersToBibtex,
   scholarlySearchController,
   scholarlyExportManager,
   retryScholarlyProvider,
   fetchScholarlyPapersForExport,
+  maxResultsForQuery,
+  PROVIDER_FILTERS,
+  FilterOption,
   deduplicateScholarlyPapers,
   normalizeTitleForMatch,
   normalizeDoiForMatch,
@@ -192,6 +199,8 @@ import {
 import { createSystematicReviewTabContent } from "./systematicReview/systematicReviewTab";
 import { getSRService } from "./systematicReview/service";
 import { getActiveProtocolRevision } from "./systematicReview/protocol";
+import { getSRStore } from "./systematicReview/store";
+import type { SystematicReviewSpace } from "./systematicReview/types";
 
 // Debounce timer for autocomplete
 const autocompleteTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -235,6 +244,13 @@ let currentSearchState: SearchState = { ...defaultSearchState };
 let currentSearchResults: ScholarlyPaper[] = [];
 let currentSearchToken: string | null = null; // For pagination
 let currentScholarlySession: FederatedSearchResult | undefined;
+// True while an AI Insights generation stream is running. Lets the search tab
+// survive tab switches mid-generation: on re-render we resume showing the
+// partial result instead of blanking or starting a duplicate generation.
+let searchInsightsInFlight = false;
+// Monotonic token identifying the current insights generation. A new search
+// bumps it so any still-running stream from a previous query is ignored.
+let insightsGenerationToken = 0;
 // Active bulk "Add to Zotero" / "Add to Review" import, if any. The header
 // buttons double as Cancel while one is running.
 let bulkImportController: AbortController | null = null;
@@ -6436,24 +6452,44 @@ export class Assistant {
       icon: string | IconName,
       title: string,
       onClick: (e: Event) => void,
+      caption?: string,
     ) => {
       const btn = ztoolkit.UI.createElement(doc, "button", {
         namespace: "html",
         attributes: { title: title },
-        styles: {
-          width: "30px",
-          height: "30px",
-          padding: "0",
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          border: "1px solid var(--border-primary)",
-          borderRadius: "4px",
-          backgroundColor: "var(--background-primary)",
-          cursor: "pointer",
-          color: "var(--text-primary)",
-          transition: "all 0.2s ease",
-        },
+        styles: caption
+          ? {
+              // Icon + wrapping caption so the action is clear and never clipped
+              // inside the narrow side strip.
+              width: "46px",
+              minHeight: "44px",
+              padding: "5px 2px",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: "3px",
+              border: "1px solid var(--border-primary)",
+              borderRadius: "4px",
+              backgroundColor: "var(--background-primary)",
+              cursor: "pointer",
+              color: "var(--text-primary)",
+              transition: "all 0.2s ease",
+            }
+          : {
+              width: "30px",
+              height: "30px",
+              padding: "0",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              border: "1px solid var(--border-primary)",
+              borderRadius: "4px",
+              backgroundColor: "var(--background-primary)",
+              cursor: "pointer",
+              color: "var(--text-primary)",
+              transition: "all 0.2s ease",
+            },
         listeners: [
           {
             type: "click",
@@ -6562,7 +6598,17 @@ export class Assistant {
           createSvgIcon(doc, icon as IconName, { size: 14, strokeWidth: 1.7 }),
         );
       } else {
-        btn.textContent = icon as string;
+        const iconSpan = doc.createElement("span");
+        iconSpan.textContent = icon as string;
+        btn.appendChild(iconSpan);
+      }
+
+      if (caption) {
+        const captionEl = doc.createElement("span");
+        captionEl.textContent = caption;
+        captionEl.style.cssText =
+          "font-size:8px;line-height:1.1;text-align:center;white-space:normal;word-break:break-word;color:inherit;";
+        btn.appendChild(captionEl);
       }
 
       btn.addEventListener("mouseenter", () => {
@@ -6588,6 +6634,7 @@ export class Assistant {
         e.stopPropagation();
         await this.addImmediateTableColumn(doc, item, container);
       },
+      "Add column",
     );
     stickyContainer.appendChild(addColumnBtn);
 
@@ -6599,6 +6646,7 @@ export class Assistant {
         e.stopPropagation();
         this.generateAllEmptyColumns(doc, item);
       },
+      "Generate all",
     );
     stickyContainer.appendChild(generateAllBtn);
 
@@ -6615,6 +6663,7 @@ export class Assistant {
           item,
         );
       },
+      "Manage",
     );
     stickyContainer.appendChild(settingsBtn);
 
@@ -6992,9 +7041,9 @@ export class Assistant {
       },
     }) as HTMLSelectElement;
     const providerIds: ScholarlyProviderId[] = [
-      "semantic-scholar",
-      "arxiv",
       "pubmed",
+      "arxiv",
+      "semantic-scholar",
       "biorxiv",
       "medrxiv",
       "iacr",
@@ -7196,6 +7245,23 @@ export class Assistant {
       }
     });
 
+    // When the refine flow is seeded from a systematic review, the LLM input is
+    // the full criteria blob but the visible/free-text query must stay short.
+    // The review-seed handler sets this; the refine handler consumes and clears
+    // it. `null` means "use the search box value" (a normal typed refine).
+    let pendingRefineSeed: { llmInput: string; displayQuery: string } | null =
+      null;
+
+    // Editing the raw query invalidates any AI-refined structured query so a
+    // stale per-provider compilation never overrides hand-typed text, and drops
+    // any review seed so it can't attach to a later hand-typed refine. (Setting
+    // searchInput.value programmatically — e.g. "Use & Search" — does not fire
+    // this event, so the refined IR is preserved.)
+    searchInput.addEventListener("input", () => {
+      currentSearchState.queryIR = undefined;
+      pendingRefineSeed = null;
+    });
+
     // Query syntax help tooltip
     const syntaxHelp = ztoolkit.UI.createElement(doc, "span", {
       properties: { innerHTML: iconMarkup("help", { size: 15 }) },
@@ -7350,6 +7416,7 @@ export class Assistant {
           item.addEventListener("click", async () => {
             searchInput.value = sugg.title;
             currentSearchState.query = sugg.title;
+            currentSearchState.queryIR = undefined;
             suggestionsDropdown.style.display = "none";
             currentSearchResults = [];
             await this.performSearch(doc);
@@ -7378,7 +7445,7 @@ export class Assistant {
       namespace: "html",
       properties: {
         innerHTML: iconMarkup("sparkle", { size: 15 }),
-        title: "AI: Refine query for Semantic Scholar",
+        title: "AI: Refine query for the selected source(s)",
       },
       styles: {
         display: "inline-flex",
@@ -7427,7 +7494,12 @@ export class Assistant {
 
     // AI Refine button click handler
     aiRefineBtn.addEventListener("click", async () => {
-      const userInput = searchInput.value.trim();
+      // A review seed (if any) provides the LLM input; otherwise use the box.
+      const seed = pendingRefineSeed;
+      pendingRefineSeed = null;
+      const userInput = (seed?.llmInput ?? searchInput.value).trim();
+      // What ends up in the box and as the free-text fallback — always short.
+      const displayQuery = (seed?.displayQuery ?? userInput).trim();
 
       if (userInput.length < 3) {
         aiRefineDropdown.innerHTML = "";
@@ -7480,154 +7552,67 @@ export class Assistant {
       aiRefineDropdown.style.display = "block";
 
       try {
-        const systemPrompt = `You are a search query optimization expert for Semantic Scholar academic paper search.
+        // The providers this mode will actually query — used to compile the
+        // structured query into each source's native dialect for the preview.
+        const activeProviders =
+          currentSearchState.mode === "source"
+            ? [currentSearchState.provider]
+            : SMART_MODE_PROVIDERS[currentSearchState.mode];
+        const modeHint =
+          currentSearchState.mode === "biomedical"
+            ? ' The search targets biomedical databases, so populate "mesh" for clinical concepts.'
+            : "";
 
-Your task is to convert user input (which may be natural language questions, research objectives, PICO/FINER criteria, PRISMA requirements, or any study parameters) into optimized search queries for Semantic Scholar.
+        const systemPrompt = `You are a scholarly search strategist. Convert the user input (a natural-language question, research objective, PICO/FINER criteria, or PRISMA parameters) into a STRUCTURED, source-agnostic search specification.
 
-Semantic Scholar Query Syntax:
-- Use + between required terms: "machine learning+healthcare" 
-- Use | for OR between alternatives: "cancer|tumor|neoplasm"
-- Use - to exclude terms: "diabetes -type1"
-- Use quotes for exact phrases: "deep learning"
-- Use * for prefix/suffix wildcard: "neuro*"
-- Use ~ for proximity: "gene~3 expression" (within 3 words)
+Output ONLY a JSON object — no prose, no markdown code fences — matching exactly this shape:
+{
+  "groups": [{ "terms": ["canonical", "synonym", "abbreviation"], "mesh": ["Controlled Vocabulary Term"], "phrase": false }],
+  "exclude": ["term to exclude"],
+  "field": "all" | "title" | "abstract" | "title-abstract"
+}
 
-Guidelines:
-1. Extract key concepts from user input
-2. Include synonyms using | operator
-3. Combine related required terms with +
-4. Exclude irrelevant concepts if mentioned
-5. Use quotes for multi-word concepts
-6. Keep the query focused but comprehensive
-7. Output ONLY the refined search query, nothing else
+Rules:
+- Each object in "groups" is ONE concept; its "terms" are synonyms/spelling variants that will be OR-ed together. Distinct concepts go in SEPARATE groups (groups are AND-ed).
+- Put the most representative term first in each group's "terms".
+- "mesh": include MeSH / controlled-vocabulary descriptors ONLY for biomedical concepts; omit the key otherwise.
+- "exclude": concepts to remove from results, only if the user implies any.
+- "phrase": set true only when a multi-word term must match as an exact phrase.
+- "field": use "all" unless the user clearly wants title-only or abstract scope.
+- Be comprehensive with synonyms but precise.${modeHint}
 
 Examples:
-Input: "I want papers about using AI for diagnosing kidney diseases"
-Output: "artificial intelligence"|"machine learning"|"deep learning"+"kidney disease"|"renal disease"|nephropathy+diagnosis
+Input: "papers about using AI for diagnosing kidney diseases"
+{"groups":[{"terms":["artificial intelligence","machine learning","deep learning"]},{"terms":["kidney disease","renal disease","nephropathy"],"mesh":["Kidney Diseases"]},{"terms":["diagnosis","detection","screening"]}],"field":"all"}
 
-Input: "PICO: Population=elderly patients, Intervention=exercise, Outcome=cognitive function"
-Output: elderly|geriatric|"older adults"+exercise|"physical activity"+"cognitive function"|cognition|"mental performance"
-
-Input: "Systematic review on COVID-19 vaccines effectiveness"  
-Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|efficacy+"systematic review"|meta-analysis`;
+Input: "Systematic review on COVID-19 vaccine effectiveness, excluding animal studies"
+{"groups":[{"terms":["COVID-19","SARS-CoV-2","coronavirus"]},{"terms":["vaccine","vaccination","immunization"],"mesh":["Vaccines"]},{"terms":["effectiveness","efficacy"]}],"exclude":["animal"],"field":"all"}`;
 
         const messages = [
           { role: "system" as const, content: systemPrompt },
           { role: "user" as const, content: userInput },
         ];
 
-        let refinedQuery = "";
+        let raw = "";
 
         await openAIService.chatCompletionStream(
           messages,
           {
             onToken: (token) => {
-              refinedQuery += token;
-              // Update live
-              aiRefineDropdown.innerHTML = "";
-              const previewDiv = ztoolkit.UI.createElement(doc, "div", {
-                styles: { padding: "12px" },
-              });
-              previewDiv.innerHTML = `
-                            <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">AI Refined Query:</div>
-                            <div style="font-family: monospace; font-size: 12px; padding: 8px; background: var(--background-secondary); border-radius: 4px; word-break: break-word;">${refinedQuery}</div>
-                        `;
-              aiRefineDropdown.appendChild(previewDiv);
+              // JSON cannot be parsed mid-stream; keep the spinner and accumulate.
+              raw += token;
             },
             onComplete: (content) => {
-              refinedQuery = content.trim();
-              // Show final result with action buttons
-              aiRefineDropdown.innerHTML = "";
-
-              const resultDiv = ztoolkit.UI.createElement(doc, "div", {
-                styles: { padding: "12px" },
-              });
-
-              const headerDiv = ztoolkit.UI.createElement(doc, "div", {
-                styles: {
-                  fontSize: "11px",
-                  color: "var(--text-secondary)",
-                  marginBottom: "8px",
-                },
-              });
-              headerDiv.innerHTML = "AI Refined Query:";
-              resultDiv.appendChild(headerDiv);
-
-              const queryDiv = ztoolkit.UI.createElement(doc, "div", {
-                styles: {
-                  fontFamily: "monospace",
-                  fontSize: "12px",
-                  padding: "8px",
-                  backgroundColor: "var(--background-secondary)",
-                  borderRadius: "4px",
-                  wordBreak: "break-word",
-                  marginBottom: "12px",
-                },
-              });
-              queryDiv.innerText = refinedQuery;
-              resultDiv.appendChild(queryDiv);
-
-              // Action buttons
-              const actionsDiv = ztoolkit.UI.createElement(doc, "div", {
-                styles: {
-                  display: "flex",
-                  gap: "8px",
-                },
-              });
-
-              const useBtn = ztoolkit.UI.createElement(doc, "button", {
-                namespace: "html",
-                properties: {
-                  innerHTML:
-                    iconMarkup("check", { size: 12 }) + " Use & Search",
-                },
-                styles: {
-                  flex: "1",
-                  padding: "8px 12px",
-                  backgroundColor: "#1976d2",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "4px",
-                  fontSize: "12px",
-                  cursor: "pointer",
-                },
-              });
-              useBtn.addEventListener("click", async () => {
-                searchInput.value = refinedQuery;
-                currentSearchState.query = refinedQuery;
-                aiRefineDropdown.style.display = "none";
-                currentSearchResults = [];
-                await this.performSearch(doc);
-              });
-
-              const copyBtn = ztoolkit.UI.createElement(doc, "button", {
-                namespace: "html",
-                properties: { innerText: "Copy" },
-                styles: {
-                  padding: "8px 12px",
-                  backgroundColor: "var(--background-secondary)",
-                  color: "var(--text-primary)",
-                  border: "1px solid var(--border-primary)",
-                  borderRadius: "4px",
-                  fontSize: "12px",
-                  cursor: "pointer",
-                },
-              });
-              copyBtn.addEventListener("click", () => {
-                new ztoolkit.Clipboard()
-                  .addText(refinedQuery, "text/unicode")
-                  .copy();
-                copyBtn.innerHTML =
-                  iconMarkup("check", { size: 12 }) + " Copied!";
-                setTimeout(() => {
-                  copyBtn.innerText = "Copy";
-                }, 1500);
-              });
-
-              actionsDiv.appendChild(useBtn);
-              actionsDiv.appendChild(copyBtn);
-              resultDiv.appendChild(actionsDiv);
-              aiRefineDropdown.appendChild(resultDiv);
+              raw = (content || raw).trim();
+              const ir = parseSearchQueryIR(raw);
+              this.renderRefineResult(
+                doc,
+                aiRefineDropdown,
+                ir,
+                displayQuery,
+                activeProviders,
+                searchInput,
+              );
             },
             onError: (error) => {
               aiRefineDropdown.innerHTML = "";
@@ -7647,6 +7632,8 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
             apiURL: activeModel.apiURL,
             apiKey: activeModel.apiKey,
             model: activeModel.model,
+            // Low temperature: structured IR extraction should be reproducible.
+            temperature: 0.1,
           },
         );
       } catch (e) {
@@ -7662,6 +7649,126 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
         });
         errorDiv.innerHTML = "Failed to refine query";
         aiRefineDropdown.appendChild(errorDiv);
+      }
+    });
+
+    // === SEED-FROM-REVIEW BUTTON AND DROPDOWN ===
+    // Builds a refine seed from a systematic review's criteria, then runs the
+    // same AI refine flow so it is compiled per source like any other query.
+    const reviewSeedBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
+      properties: {
+        innerHTML: iconMarkup("review", { size: 15 }),
+        title: "Build query from a systematic review's criteria",
+      },
+      styles: {
+        display: "inline-flex",
+        alignItems: "center",
+        padding: "8px 10px",
+        backgroundColor: "var(--background-secondary)",
+        color: "var(--text-primary)",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "6px",
+        fontSize: "14px",
+        cursor: "pointer",
+        marginLeft: "4px",
+        flexShrink: "0",
+      },
+    });
+    const reviewSeedDropdown = ztoolkit.UI.createElement(doc, "div", {
+      properties: { id: "review-seed-dropdown" },
+      styles: {
+        display: "none",
+        position: "absolute",
+        top: "100%",
+        left: "0",
+        right: "0",
+        marginTop: "4px",
+        backgroundColor: "var(--background-primary)",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "6px",
+        boxShadow: "0 4px 16px rgba(0,0,0,0.15)",
+        zIndex: "9999",
+        maxHeight: "300px",
+        overflowY: "auto",
+      },
+    });
+    doc.addEventListener("click", (e: Event) => {
+      if (
+        !reviewSeedDropdown.contains(e.target as Node) &&
+        e.target !== reviewSeedBtn
+      ) {
+        reviewSeedDropdown.style.display = "none";
+      }
+    });
+    reviewSeedBtn.addEventListener("click", async () => {
+      reviewSeedDropdown.innerHTML = "";
+      reviewSeedDropdown.style.display = "block";
+      const loading = ztoolkit.UI.createElement(doc, "div", {
+        styles: {
+          padding: "12px",
+          fontSize: "12px",
+          color: "var(--text-secondary)",
+        },
+      });
+      loading.innerText = "Loading reviews...";
+      reviewSeedDropdown.appendChild(loading);
+      let spaces: SystematicReviewSpace[] = [];
+      try {
+        const state = await getSRStore().loadState();
+        spaces = state.spaces || [];
+      } catch (e) {
+        Zotero.debug(`[seerai] Review seed load error: ${e}`);
+      }
+      reviewSeedDropdown.innerHTML = "";
+      if (spaces.length === 0) {
+        const empty = ztoolkit.UI.createElement(doc, "div", {
+          styles: {
+            padding: "12px",
+            fontSize: "12px",
+            color: "var(--text-secondary)",
+          },
+        });
+        empty.innerText = "No systematic reviews found.";
+        reviewSeedDropdown.appendChild(empty);
+        return;
+      }
+      for (const space of spaces) {
+        const item = ztoolkit.UI.createElement(doc, "div", {
+          styles: {
+            padding: "10px 12px",
+            fontSize: "12px",
+            cursor: "pointer",
+            borderBottom: "1px solid var(--border-primary)",
+          },
+        });
+        item.innerText = space.name || "Untitled review";
+        item.addEventListener("mouseenter", () => {
+          item.style.backgroundColor = "var(--background-secondary)";
+        });
+        item.addEventListener("mouseleave", () => {
+          item.style.backgroundColor = "transparent";
+        });
+        item.addEventListener("click", () => {
+          const seedText = Assistant.buildReviewSeedText(space);
+          reviewSeedDropdown.style.display = "none";
+          if (!seedText) return;
+          // Feed the full criteria blob to the LLM, but keep a short, readable
+          // query (the research question, falling back to the review name) in
+          // the box and as the free-text fallback.
+          const revision = getActiveProtocolRevision(space.protocol);
+          const displayQuery = (
+            revision?.researchQuestion?.trim() ||
+            space.name ||
+            "Systematic review query"
+          ).trim();
+          pendingRefineSeed = { llmInput: seedText, displayQuery };
+          searchInput.value = displayQuery;
+          currentSearchState.query = displayQuery;
+          currentSearchState.queryIR = undefined;
+          aiRefineBtn.click();
+        });
+        reviewSeedDropdown.appendChild(item);
       }
     });
 
@@ -7887,12 +7994,14 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     searchInputContainer.appendChild(searchInput);
     searchInputContainer.appendChild(suggestionsBtn);
     searchInputContainer.appendChild(aiRefineBtn);
+    searchInputContainer.appendChild(reviewSeedBtn);
     searchInputContainer.appendChild(pastSearchesBtn);
     searchInputContainer.appendChild(syntaxHelp);
     searchInputContainer.appendChild(searchBtn);
     searchInputContainer.appendChild(searchSettingsBtn);
     searchInputContainer.appendChild(suggestionsDropdown);
     searchInputContainer.appendChild(aiRefineDropdown);
+    searchInputContainer.appendChild(reviewSeedDropdown);
     searchInputContainer.appendChild(pastSearchesDropdown);
 
     // === FILTERS (shown first) ===
@@ -7984,17 +8093,13 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
         gap: "8px",
       },
     });
-    const addText = (label: string, key: string, placeholder = "") => {
+    const addDate = (label: string, key: string) => {
       const wrapper = ztoolkit.UI.createElement(doc, "label", {
         styles: { fontSize: "10px", color: "var(--text-secondary)" },
       });
       wrapper.append(label);
       const input = ztoolkit.UI.createElement(doc, "input", {
-        attributes: {
-          type: key.toLowerCase().includes("date") ? "date" : "text",
-          value: String(values[key] || ""),
-          placeholder,
-        },
+        attributes: { type: "date", value: String(values[key] || "") },
         styles: {
           display: "block",
           width: "100%",
@@ -8013,11 +8118,7 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
       wrapper.appendChild(input);
       controls.appendChild(wrapper);
     };
-    const addSelect = (
-      label: string,
-      key: string,
-      options: Array<[string, string]>,
-    ) => {
+    const addSelect = (label: string, key: string, options: FilterOption[]) => {
       const wrapper = ztoolkit.UI.createElement(doc, "label", {
         styles: { fontSize: "10px", color: "var(--text-secondary)" },
       });
@@ -8034,12 +8135,25 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
           color: "var(--text-primary)",
         },
       }) as HTMLSelectElement;
-      for (const [value, text] of options) {
+      // Render <optgroup>s for long, grouped vocabularies (e.g. arXiv taxonomy).
+      const groups = new Map<string, HTMLOptGroupElement>();
+      for (const opt of options) {
         const option = doc.createElement("option");
-        option.value = value;
-        option.textContent = text;
-        option.selected = values[key] === value;
-        select.appendChild(option);
+        option.value = opt.value;
+        option.textContent = opt.label;
+        option.selected = String(values[key] ?? "") === opt.value;
+        if (opt.group) {
+          let group = groups.get(opt.group);
+          if (!group) {
+            group = doc.createElement("optgroup");
+            group.label = opt.group;
+            groups.set(opt.group, group);
+            select.appendChild(group);
+          }
+          group.appendChild(option);
+        } else {
+          select.appendChild(option);
+        }
       }
       select.addEventListener("change", () => {
         values[key] = select.value || undefined;
@@ -8061,48 +8175,24 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
       controls.appendChild(checkbox);
     };
 
-    if (id === "arxiv") {
-      addSelect("Search field", "field", [
-        ["all", "All fields"],
-        ["ti", "Title"],
-        ["au", "Author"],
-        ["abs", "Abstract"],
-      ]);
-      addText("Category", "category", "cs.AI");
-    } else if (id === "pubmed") {
-      addText("Article type", "articleType", "Clinical Trial");
-    } else if (id === "biorxiv" || id === "medrxiv") {
-      addSelect("Search style", "searchStyle", [
-        ["keyword", "Keyword"],
-        ["browse", "Browse recent/category"],
-      ]);
-      values.browseMode = values.searchStyle === "browse";
-      if (values.browseMode) {
-        addText("Start date", "startDate");
-        addText("End date", "endDate");
-        addText("Category", "category");
+    // Render every per-corpus filter from the controlled-vocabulary registry so
+    // values are always API-valid (strict dropdowns, no free-typing).
+    const config = PROVIDER_FILTERS[id];
+    if (config) {
+      config.normalize?.(values);
+      for (const spec of config.specs) {
+        if (spec.visibleWhen && !spec.visibleWhen(values)) continue;
+        if (spec.type === "checkbox") {
+          addCheck(spec.label, spec.key);
+        } else if (spec.type === "date") {
+          addDate(spec.label, spec.key);
+        } else {
+          const options = spec.optionsFor
+            ? spec.optionsFor(values)
+            : spec.options || [];
+          addSelect(spec.label, spec.key, options);
+        }
       }
-    } else if (id === "europe-pmc") {
-      addCheck("Preprints only", "preprintsOnly");
-      addCheck("Has abstract", "hasAbstract");
-    } else if (id === "core") {
-      addCheck("Full text available", "hasFullText");
-    } else if (id === "base") {
-      addText("Document type", "documentType");
-      addText("Language", "language");
-      addText("Repository/domain", "domain");
-    } else if (id === "zenodo") {
-      addSelect("Record type", "type", [
-        ["publication", "Publication"],
-        ["dataset", "Dataset"],
-        ["software", "Software"],
-      ]);
-      addText("Publication subtype", "subtype", "preprint");
-    } else if (id === "hal") {
-      addText("Document type", "documentType", "ART");
-      addText("Language", "language");
-      addText("Domain", "domain");
-      addCheck("File available", "fileOnly");
     }
     if (controls.childElementCount) container.appendChild(controls);
     return container;
@@ -9114,11 +9204,195 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
    * source of truth shared by live search, BibTeX export, and bulk import so
    * the three paths never drift in how filters/sort/providers are derived.
    */
+  /**
+   * Compose a refine seed from a systematic review's criteria: research
+   * question, PICO/framework dimensions, eligibility rules and keyword lists.
+   * Returns "" when the review has no usable criteria.
+   */
+  private static buildReviewSeedText(space: SystematicReviewSpace): string {
+    const revision = getActiveProtocolRevision(space.protocol);
+    const lines: string[] = [];
+    if (revision?.researchQuestion?.trim()) {
+      lines.push(`Research question: ${revision.researchQuestion.trim()}`);
+    }
+    const dims = (revision?.dimensions || [])
+      .filter((d) => d.value?.trim())
+      .map((d) => `${d.label}: ${d.value.trim()}`);
+    if (dims.length) lines.push(`Criteria — ${dims.join("; ")}`);
+
+    const includes = (revision?.eligibilityRules || [])
+      .filter((r) => r.type === "include" && r.text?.trim())
+      .map((r) => r.text.trim());
+    if (includes.length) lines.push(`Include: ${includes.join("; ")}`);
+    const excludes = (revision?.eligibilityRules || [])
+      .filter((r) => r.type === "exclude" && r.text?.trim())
+      .map((r) => r.text.trim());
+    if (excludes.length) lines.push(`Exclude: ${excludes.join("; ")}`);
+
+    const inc = (space.incKeywords || []).filter(Boolean);
+    if (inc.length) lines.push(`Include keywords: ${inc.join(", ")}`);
+    const exc = (space.excKeywords || []).filter(Boolean);
+    if (exc.length) lines.push(`Exclude keywords: ${exc.join(", ")}`);
+
+    return lines.join("\n").trim();
+  }
+
+  /**
+   * Render the AI-refine result as a per-provider breakdown. In a single-source
+   * search this shows one compiled query; in a smart mode it shows the native
+   * query compiled for each source the mode fans out to. "Use & Search" stores
+   * the structured IR on the search state (kept distinct from the raw query) so
+   * buildScholarlyQuery compiles it per provider at search time.
+   */
+  private static renderRefineResult(
+    doc: Document,
+    dropdown: HTMLElement,
+    ir: SearchQueryIR | null,
+    displayQuery: string,
+    providers: ScholarlyProviderId[],
+    searchInput: HTMLInputElement,
+  ): void {
+    dropdown.innerHTML = "";
+    const container = ztoolkit.UI.createElement(doc, "div", {
+      styles: { padding: "12px" },
+    });
+
+    if (!ir) {
+      const note = ztoolkit.UI.createElement(doc, "div", {
+        styles: {
+          fontSize: "12px",
+          color: "var(--text-secondary)",
+          marginBottom: "10px",
+        },
+      });
+      note.innerText =
+        "Could not structure the query. You can still search your original text.";
+      container.appendChild(note);
+    } else {
+      const header = ztoolkit.UI.createElement(doc, "div", {
+        styles: {
+          fontSize: "11px",
+          color: "var(--text-secondary)",
+          marginBottom: "8px",
+        },
+      });
+      header.innerText =
+        providers.length > 1 ? "Refined query per source:" : "Refined query:";
+      container.appendChild(header);
+
+      for (const id of providers) {
+        const compiled = compileQuery(ir, id);
+        const row = ztoolkit.UI.createElement(doc, "div", {
+          styles: { marginBottom: "8px" },
+        });
+        if (providers.length > 1) {
+          const label = ztoolkit.UI.createElement(doc, "div", {
+            styles: {
+              fontSize: "10px",
+              fontWeight: "600",
+              color: "var(--text-secondary)",
+              marginBottom: "2px",
+            },
+          });
+          label.innerText = getProviderCapability(id).label;
+          row.appendChild(label);
+        }
+        const code = ztoolkit.UI.createElement(doc, "div", {
+          styles: {
+            fontFamily: "monospace",
+            fontSize: "12px",
+            padding: "8px",
+            backgroundColor: "var(--background-secondary)",
+            borderRadius: "4px",
+            wordBreak: "break-word",
+          },
+        });
+        code.innerText = compiled || "(empty)";
+        row.appendChild(code);
+        container.appendChild(row);
+      }
+    }
+
+    const actionsDiv = ztoolkit.UI.createElement(doc, "div", {
+      styles: { display: "flex", gap: "8px", marginTop: "8px" },
+    });
+
+    const useBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
+      properties: {
+        innerHTML: iconMarkup("check", { size: 12 }) + " Use & Search",
+      },
+      styles: {
+        flex: "1",
+        padding: "8px 12px",
+        backgroundColor: "#1976d2",
+        color: "#fff",
+        border: "none",
+        borderRadius: "4px",
+        fontSize: "12px",
+        cursor: "pointer",
+      },
+    });
+    useBtn.addEventListener("click", async () => {
+      // Keep the visible/free-text query short (the typed text, or a review
+      // label when seeded); the IR drives the per-provider compilation.
+      searchInput.value = displayQuery;
+      currentSearchState.query = displayQuery;
+      currentSearchState.queryIR = ir ?? undefined;
+      dropdown.style.display = "none";
+      currentSearchResults = [];
+      await this.performSearch(doc);
+    });
+
+    const copyBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
+      properties: { innerText: "Copy" },
+      styles: {
+        padding: "8px 12px",
+        backgroundColor: "var(--background-secondary)",
+        color: "var(--text-primary)",
+        border: "1px solid var(--border-primary)",
+        borderRadius: "4px",
+        fontSize: "12px",
+        cursor: "pointer",
+      },
+    });
+    copyBtn.addEventListener("click", () => {
+      let text: string;
+      if (!ir) {
+        text = displayQuery;
+      } else if (providers.length > 1) {
+        text = providers
+          .map((id) => `${getProviderCapability(id).label}: ${compileQuery(ir, id)}`)
+          .join("\n");
+      } else {
+        text = compileQuery(ir, providers[0]);
+      }
+      new ztoolkit.Clipboard().addText(text, "text/unicode").copy();
+      copyBtn.innerHTML = iconMarkup("check", { size: 12 }) + " Copied!";
+      setTimeout(() => {
+        copyBtn.innerText = "Copy";
+      }, 1500);
+    });
+
+    actionsDiv.appendChild(useBtn);
+    actionsDiv.appendChild(copyBtn);
+    container.appendChild(actionsDiv);
+    dropdown.appendChild(container);
+  }
+
   private static buildScholarlyQuery(
     overrides: { limit?: number } = {},
   ): ScholarlySearchQuery {
+    const activeProviders =
+      currentSearchState.mode === "source"
+        ? [currentSearchState.provider]
+        : SMART_MODE_PROVIDERS[currentSearchState.mode];
     return {
       text: currentSearchState.query,
+      providerQueries: currentSearchState.queryIR
+        ? compileQueriesForProviders(currentSearchState.queryIR, activeProviders)
+        : undefined,
       mode: currentSearchState.mode,
       providers: [currentSearchState.provider],
       limit: overrides.limit ?? currentSearchState.limit,
@@ -9161,8 +9435,12 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
       // so we don't need to do anything else here
     } else {
       // For fresh searches: clear and show loading
-      // Clear cached AI insights for new query
+      // Clear cached AI insights for new query and invalidate any in-flight
+      // generation from the previous query so its stream is ignored.
       currentSearchState.cachedAiInsights = undefined;
+      currentSearchState.aiInsightsStatus = undefined;
+      insightsGenerationToken++;
+      searchInsightsInFlight = false;
       resultsArea.innerHTML = "";
       const loadingEl = ztoolkit.UI.createElement(doc, "div", {
         properties: { id: "initial-search-loading" },
@@ -9464,6 +9742,38 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
     });
     headerButtons.appendChild(addReviewBtn);
 
+    // Load more / Load maximum per corpus — pull additional results into the
+    // live view (up to each provider's real cap) via bulk pagination.
+    const loadMoreBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
+      properties: {
+        innerHTML: iconMarkup("list", { size: 12 }) + " Load more",
+      },
+      styles: headerBtnStyle,
+      listeners: [
+        {
+          type: "click",
+          listener: async (e: Event) => {
+            e.stopPropagation();
+            const btn = e.currentTarget as HTMLButtonElement;
+            if (scholarlyExportManager.getJob().status === "running") {
+              scholarlyExportManager.cancel();
+              btn.textContent = "Canceling...";
+              return;
+            }
+            const target = await this.chooseFetchTarget(doc, {
+              title: "Load more results into the view",
+              confirmVerb: "Load",
+            });
+            if (target === undefined || target <= currentSearchResults.length)
+              return;
+            await this.loadResultsUpTo(doc, container, item, target, btn);
+          },
+        },
+      ],
+    });
+    headerButtons.appendChild(loadMoreBtn);
+
     // Export BibTeX button (Keep only this button in header)
     const exportBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
@@ -9494,7 +9804,9 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
               return;
             }
             const originalHTML = btn.innerHTML;
-            const target = await this.chooseBibtexExportTarget(doc);
+            const target = await this.chooseFetchTarget(doc, {
+              confirmVerb: "Export",
+            });
             if (target === undefined) return;
             btn.textContent =
               target > currentSearchResults.length
@@ -9559,9 +9871,17 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
       "extensions.seerai.searchAutoAiInsights",
     ) as boolean;
 
-    // Check for cached insights first
-    if (currentSearchState.cachedAiInsights) {
-      // Display cached insights immediately
+    // Restore insights across tab switches without losing or duplicating work:
+    //  - a generation already running (possibly started before this re-render)
+    //    keeps streaming into this container by id; show whatever partial we have
+    //  - otherwise show the cached final result
+    //  - otherwise auto-generate (when enabled)
+    if (searchInsightsInFlight) {
+      this.displayStreamingInsights(
+        doc,
+        currentSearchState.cachedAiInsights || "",
+      );
+    } else if (currentSearchState.cachedAiInsights) {
       this.displayCachedInsights(doc, currentSearchState.cachedAiInsights);
     } else if (autoInsights !== false) {
       // Run asynchronously without blocking the render
@@ -9587,6 +9907,12 @@ Output: "COVID-19"|"SARS-CoV-2"|coronavirus+vaccine|vaccination+effectiveness|ef
       summaryContainer.style.display = "none";
       return;
     }
+
+    // Avoid duplicate concurrent generations (e.g. re-entry after a tab switch).
+    if (searchInsightsInFlight) return;
+    const myToken = ++insightsGenerationToken;
+    searchInsightsInFlight = true;
+    currentSearchState.aiInsightsStatus = "streaming";
 
     // Show loading
     summaryContainer.style.display = "block";
@@ -9643,30 +9969,33 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         messages,
         {
           onToken: (token) => {
+            if (myToken !== insightsGenerationToken) return; // superseded
             fullSummary += token;
-            summaryContainer.innerHTML = `
-                        <div style="font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-primary); padding-bottom: 8px;">
-                            <div style="display: flex; align-items: center; gap: 6px;">
-                                ${iconMarkup("idea", { size: 16 })}
-                                <span>AI Insights Summary</span>
-                            </div>
-                            <span style="font-size: 11px; font-weight: 400; opacity: 0.6; font-style: italic;">AI is thinking...</span>
-                        </div>
-                        <div class="markdown-content" style="font-size: 13px; line-height: 1.6; color: var(--text-primary);">${parseMarkdown(fullSummary)}</div>
-                    `;
-            // Apply citation style live during streaming if indices are already parsed
-            this.applyCitationStyle(summaryContainer);
+            // Persist the partial so a tab switch mid-stream doesn't lose it,
+            // and resolve the container by id so streaming continues into the
+            // live DOM even after the search tab was re-rendered.
+            currentSearchState.cachedAiInsights = fullSummary;
+            this.displayStreamingInsights(doc, fullSummary);
           },
           onComplete: (content) => {
+            if (myToken !== insightsGenerationToken) return; // superseded
             fullSummary = content;
             // Cache the insights for persistence
             currentSearchState.cachedAiInsights = fullSummary;
+            currentSearchState.aiInsightsStatus = "done";
             // Also update the persisted search history entry
             updateSearchHistoryWithInsights(
               currentSearchState.query,
               fullSummary,
             );
-            summaryContainer.innerHTML = `
+            // Resolve by id: the container may have been recreated by a tab
+            // switch while the stream was running.
+            const live = doc.getElementById(
+              "search-ai-summary-container",
+            ) as HTMLElement | null;
+            if (!live) return;
+            live.style.display = "block";
+            live.innerHTML = `
                         <div style="font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-primary); padding-bottom: 8px;">
                             <div style="display: flex; align-items: center; gap: 6px;">
                                 ${iconMarkup("idea", { size: 16 })}
@@ -9714,25 +10043,31 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             doc
               .getElementById("close-summary-btn")
               ?.addEventListener("click", () => {
-                summaryContainer.style.display = "none";
+                live.style.display = "none";
               });
 
             doc
               .getElementById("settings-summary-btn")
               ?.addEventListener("click", (e: Event) => {
                 const btn = e.target as HTMLElement;
-                this.showAiInsightSettingsPopover(doc, btn, summaryContainer);
+                this.showAiInsightSettingsPopover(doc, btn, live);
               });
 
             // Attach click handlers to citation links for navigation
-            this.attachCitationClickHandlers(doc, summaryContainer);
+            this.attachCitationClickHandlers(doc, live);
 
             // Append Follow-up Question UI
-            this.createFollowUpUI(doc, summaryContainer);
+            this.createFollowUpUI(doc, live);
           },
           onError: (error) => {
+            if (myToken !== insightsGenerationToken) return; // superseded
             Zotero.debug(`[seerai] Search insights error: ${error}`);
-            summaryContainer.innerHTML = `<div style="color: var(--error-color, #d32f2f); padding: 10px;">AI Error: ${error.message}</div>`;
+            currentSearchState.aiInsightsStatus = "error";
+            const live = doc.getElementById(
+              "search-ai-summary-container",
+            ) as HTMLElement | null;
+            if (live)
+              live.innerHTML = `<div style="color: var(--error-color, #d32f2f); padding: 10px;">AI Error: ${error.message}</div>`;
           },
         },
         {
@@ -9743,8 +10078,38 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       );
     } catch (e) {
       Zotero.debug(`[seerai] Failed to generate insights: ${e}`);
+      if (myToken === insightsGenerationToken)
+        currentSearchState.aiInsightsStatus = "error";
       summaryContainer.innerHTML = `<div style="color: var(--error-color, #d32f2f); padding: 10px;">Failed to generate insights: ${e}</div>`;
+    } finally {
+      if (myToken === insightsGenerationToken) searchInsightsInFlight = false;
     }
+  }
+
+  /**
+   * Render the in-progress AI insights (partial markdown + "thinking" hint),
+   * resolving the container by id so it targets the current DOM after re-render.
+   */
+  private static displayStreamingInsights(
+    doc: Document,
+    partial: string,
+  ): void {
+    const summaryContainer = doc.getElementById(
+      "search-ai-summary-container",
+    ) as HTMLElement | null;
+    if (!summaryContainer) return;
+    summaryContainer.style.display = "block";
+    summaryContainer.innerHTML = `
+                        <div style="font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-primary); padding-bottom: 8px;">
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                ${iconMarkup("idea", { size: 16 })}
+                                <span>AI Insights Summary</span>
+                            </div>
+                            <span style="font-size: 11px; font-weight: 400; opacity: 0.6; font-style: italic;">AI is thinking...</span>
+                        </div>
+                        <div class="markdown-content" style="font-size: 13px; line-height: 1.6; color: var(--text-primary);">${parseMarkdown(partial)}</div>
+                    `;
+    this.applyCitationStyle(summaryContainer);
   }
 
   /**
@@ -12853,6 +13218,46 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   }
 
   /**
+   * Pull additional results into the live view up to `target` records via bulk
+   * provider pagination, then re-render. Reuses the export manager so the
+   * Load-more button doubles as a cancel control while running. Partial results
+   * (cancel / provider exhaustion) are preserved.
+   */
+  private static async loadResultsUpTo(
+    doc: Document,
+    container: HTMLElement,
+    item: Zotero.Item,
+    target: number,
+    btn: HTMLButtonElement,
+  ): Promise<void> {
+    const originalHTML = btn.innerHTML;
+    const query = this.buildScholarlyQuery({ limit: Math.min(2000, target) });
+    const unsubscribe = scholarlyExportManager.subscribe((job) => {
+      const loaded = job.progress?.unique ?? job.papers.length;
+      btn.textContent = `Cancel (${loaded}/${target})`;
+    });
+    try {
+      const job = await scholarlyExportManager.start(
+        query,
+        target,
+        currentSearchResults,
+        currentScholarlySession,
+      );
+      unsubscribe();
+      if (job.status === "failed") throw new Error(job.error || "Load failed");
+      currentSearchResults = currentSearchState.hideLibraryDuplicates
+        ? await this.filterLibraryDuplicates(job.papers)
+        : job.papers;
+      // Re-render rebuilds the header (and this button) with the new count.
+      this.renderSearchResults(doc, container, item);
+    } catch (err) {
+      unsubscribe();
+      btn.innerHTML = originalHTML;
+      Zotero.debug(`[seerai] Load more failed: ${err}`);
+    }
+  }
+
+  /**
    * Export all current search results as a BibTeX file
    */
   private static async exportResultsAsBibtex(
@@ -12918,10 +13323,18 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     }
   }
 
-  private static chooseBibtexExportTarget(
+  private static chooseFetchTarget(
     doc: Document,
+    opts?: { title?: string; description?: string; confirmVerb?: string },
   ): Promise<number | undefined> {
     return new Promise((resolve) => {
+      const loaded = currentSearchResults.length;
+      // Real ceiling for this query across the selected corpus/corpora.
+      const max = Math.max(
+        loaded,
+        maxResultsForQuery(this.buildScholarlyQuery()),
+      );
+      const confirmVerb = opts?.confirmVerb || "Fetch";
       const overlay = ztoolkit.UI.createElement(doc, "div", {
         styles: {
           position: "fixed",
@@ -12945,45 +13358,66 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         },
       });
       const title = doc.createElement("div");
-      title.textContent = "Export scholarly results as BibTeX";
+      title.textContent = opts?.title || "Export scholarly results as BibTeX";
       title.style.cssText = "font-size:15px;font-weight:600;margin-bottom:6px";
       const description = doc.createElement("div");
-      description.textContent = `${currentSearchResults.length} unique results are loaded. Larger exports continue provider pagination and preserve partial results.`;
+      description.textContent =
+        opts?.description ||
+        `${loaded} unique results are loaded. Larger fetches continue provider pagination (up to ${max.toLocaleString()}) and preserve partial results.`;
       description.style.cssText =
         "font-size:11px;color:var(--text-secondary);line-height:1.45;margin-bottom:14px";
       const choices = doc.createElement("div");
       choices.style.cssText =
         "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px";
-      const provider = getProviderCapability(currentSearchState.provider);
-      const max =
-        currentSearchState.mode === "source"
-          ? provider.supportsBulk
-            ? provider.maxBulkResults
-            : currentSearchResults.length
-          : 2000;
-      const options = [
-        {
-          label: `Loaded (${currentSearchResults.length})`,
-          value: currentSearchResults.length,
-        },
-        { label: "Fetch 100", value: 100 },
-        { label: "Fetch 500", value: 500 },
-        { label: "Fetch 1,000", value: 1000 },
-        { label: "Fetch 2,000", value: 2000 },
-      ];
       const finish = (value?: number) => {
         overlay.remove();
         resolve(value);
       };
-      for (const option of options) {
+      // Preset amounts (multiples) plus the corpus maximum, clamped to `max`.
+      const presets = [loaded, 100, 500, 1000, 2000, 5000].filter(
+        (v) => v > 0 && v <= max,
+      );
+      const values = Array.from(new Set([...presets, max])).sort(
+        (a, b) => a - b,
+      );
+      for (const value of values) {
         const button = doc.createElement("button");
-        button.textContent = option.label;
-        button.disabled = option.value > max;
+        button.textContent =
+          value === loaded
+            ? `Loaded (${value.toLocaleString()})`
+            : value === max
+              ? `Maximum (${value.toLocaleString()})`
+              : `${confirmVerb} ${value.toLocaleString()}`;
         button.style.cssText =
           "padding:9px;border:1px solid var(--border-primary);border-radius:6px;background:var(--background-secondary);color:var(--text-primary);cursor:pointer";
-        button.addEventListener("click", () => finish(option.value));
+        button.addEventListener("click", () => finish(value));
         choices.appendChild(button);
       }
+      // Custom exact amount.
+      const customRow = doc.createElement("div");
+      customRow.style.cssText =
+        "display:flex;gap:8px;align-items:center;margin-top:10px";
+      const customInput = doc.createElement("input");
+      customInput.type = "number";
+      customInput.min = "1";
+      customInput.max = String(max);
+      customInput.placeholder = `Custom amount (max ${max.toLocaleString()})`;
+      customInput.style.cssText =
+        "flex:1;padding:8px;border:1px solid var(--border-primary);border-radius:6px;background:var(--background-primary);color:var(--text-primary)";
+      const customBtn = doc.createElement("button");
+      customBtn.textContent = confirmVerb;
+      customBtn.style.cssText =
+        "padding:8px 12px;border:1px solid var(--border-primary);border-radius:6px;background:var(--highlight-primary,#7c3aed);color:#fff;cursor:pointer";
+      const submitCustom = () => {
+        const n = Math.round(Number(customInput.value));
+        if (!Number.isFinite(n) || n <= 0) return;
+        finish(Math.min(n, max));
+      };
+      customBtn.addEventListener("click", submitCustom);
+      customInput.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (e.key === "Enter") submitCustom();
+      });
+      customRow.append(customInput, customBtn);
       const cancel = doc.createElement("button");
       cancel.textContent = "Cancel";
       cancel.style.cssText =
@@ -12992,7 +13426,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       overlay.addEventListener("click", (event) => {
         if (event.target === overlay) finish();
       });
-      dialog.append(title, description, choices, cancel);
+      dialog.append(title, description, choices, customRow, cancel);
       overlay.appendChild(dialog);
       const mount = doc.body || doc.documentElement;
       if (!mount) return resolve(undefined);
@@ -23521,42 +23955,76 @@ You MUST call the generate_tags function.`;
     wrapper.appendChild(tableContainer);
 
     // === SIDE + BUTTON STRIP (Right Side) ===
+    // Mirrors the Table tab's side strip: a 52px column of icon+caption buttons.
     const sideStrip = ztoolkit.UI.createElement(doc, "div", {
       styles: {
-        width: "30px",
-        minWidth: "30px",
+        width: "52px",
+        minWidth: "52px",
         borderLeft: "1px solid var(--border-primary)",
         backgroundColor: "var(--background-secondary)",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: "8px",
-        paddingTop: "8px",
+        gap: "7px",
+        paddingTop: "10px",
       },
     });
 
-    // Helper for side buttons
+    const sectionLabel = ztoolkit.UI.createElement(doc, "div", {
+      properties: { innerText: "Columns" },
+      styles: {
+        width: "100%",
+        fontSize: "8px",
+        fontWeight: "700",
+        color: "var(--text-tertiary)",
+        textAlign: "center",
+        textTransform: "uppercase",
+        letterSpacing: "0",
+      },
+    });
+    sideStrip.appendChild(sectionLabel);
+
+    // Helper for side buttons — matches the Table tab styling: an icon over a
+    // small wrapping caption so each action is clear and never clipped.
     const createSideBtn = (
       icon: string,
       title: string,
       onClick: (e: Event) => void,
+      caption?: string,
     ) => {
       const btn = ztoolkit.UI.createElement(doc, "button", {
         namespace: "html",
         attributes: { title: title },
-        styles: {
-          width: "24px",
-          height: "24px",
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          border: "1px solid var(--border-primary)",
-          borderRadius: "4px",
-          backgroundColor: "var(--background-primary)",
-          cursor: "pointer",
-          color: "var(--text-primary)",
-          transition: "all 0.2s ease",
-        },
+        styles: caption
+          ? {
+              width: "46px",
+              minHeight: "44px",
+              padding: "5px 2px",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: "3px",
+              border: "1px solid var(--border-primary)",
+              borderRadius: "4px",
+              backgroundColor: "var(--background-primary)",
+              cursor: "pointer",
+              color: "var(--text-primary)",
+              transition: "all 0.2s ease",
+            }
+          : {
+              width: "24px",
+              height: "24px",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center",
+              border: "1px solid var(--border-primary)",
+              borderRadius: "4px",
+              backgroundColor: "var(--background-primary)",
+              cursor: "pointer",
+              color: "var(--text-primary)",
+              transition: "all 0.2s ease",
+            },
         listeners: [
           {
             type: "click",
@@ -23567,6 +24035,13 @@ You MUST call the generate_tags function.`;
       btn.appendChild(
         createSvgIcon(doc, icon as IconName, { size: 14, strokeWidth: 1.7 }),
       );
+      if (caption) {
+        const captionEl = doc.createElement("span");
+        captionEl.textContent = caption;
+        captionEl.style.cssText =
+          "font-size:8px;line-height:1.1;text-align:center;white-space:normal;word-break:break-word;color:inherit;";
+        btn.appendChild(captionEl);
+      }
 
       // Hover effects
       btn.addEventListener("mouseenter", () => {
@@ -23584,10 +24059,15 @@ You MUST call the generate_tags function.`;
     };
 
     // 1. (+) Add Column (Immediate)
-    const addColumnBtn = createSideBtn("add", "Add Analysis Column", (e) => {
-      e.stopPropagation();
-      this.addImmediateSearchColumn(doc, resultsContainer, item);
-    });
+    const addColumnBtn = createSideBtn(
+      "add",
+      "Add Analysis Column",
+      (e) => {
+        e.stopPropagation();
+        this.addImmediateSearchColumn(doc, resultsContainer, item);
+      },
+      "Add column",
+    );
     sideStrip.appendChild(addColumnBtn);
 
     // 2. Generate All
@@ -23598,6 +24078,7 @@ You MUST call the generate_tags function.`;
         e.stopPropagation();
         this.generateAllSearchColumns(doc, wrapper);
       },
+      "Generate all",
     );
     sideStrip.appendChild(generateAllBtn);
 
@@ -23614,6 +24095,7 @@ You MUST call the generate_tags function.`;
           item,
         );
       },
+      "Manage",
     );
     sideStrip.appendChild(settingsBtn);
 
