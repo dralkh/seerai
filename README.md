@@ -1,4 +1,4 @@
-# seerai
+# Seerai The Best Zotero research framework plugin
 
 <p align="center">
   <img width="200" height="200" alt="logo" src="https://github.com/user-attachments/assets/26e6aa5b-4b70-464a-8198-6ec48544593d" />
@@ -75,9 +75,12 @@
 
 - **RAG (Retrieval-Augmented Generation)**: Per-context embeddings with chunking, vector store, and semantic retrieval for large documents.
 - **Web Search**: Integrated Firecrawl, Tavily, and You.com support for finding high-quality full-text content.
-- **Semantic Scholar Agent**: Advanced paper search with:
+- **Federated Scholarly Search**: Search across 11 providers at once — Semantic Scholar, arXiv, PubMed, bioRxiv, medRxiv, IACR, Europe PMC, CORE, BASE, Zenodo, and HAL — with cross-source deduplication and rank fusion.
+  - **Smart Modes**: One-click presets (Broad, Biomedical, Preprints, Cryptography, Repositories) target the right provider sets, or pick sources manually.
+  - **AI Query Refinement**: An AI step extracts your concepts and synonyms once, then compiles them into each provider's native query syntax — so you get precise results without learning 11 query dialects.
   - **Advanced Filters**: Fine-tune results by Year, Venue, and Citation Count.
   - **AI Insights Config**: Configure insight generation directly from the search panel.
+  - **Export**: Export results to BibTeX or CSV.
 - **Smart Import**:
   - **PDF Discovery**: Automatically finds and attaches PDFs during import.
   - **Source Link**: Fallback to source links if PDFs are unavailable.
@@ -101,6 +104,8 @@
   - **Web Tool**: Search the web and fetch content using Firecrawl, Tavily, or You.com.
   - **Workspace Tools**: Create, read, edit, and delete files directly in your workspace.
   - **Todo Tool**: Create and manage task lists for complex multi-step research workflows.
+  - **Skills Tool**: Discover and load on-demand instructions from a bundled library of ~148 agent skills.
+- **Agent Skills Library**: A curated library of self-contained skill packages (scientific computing, bioinformatics, document generation, search, and more) that the agent loads only when relevant — sourced from [K-Dense-AI/scientific-agent-skills](https://github.com/K-Dense-AI/scientific-agent-skills). Add your own bundled, workspace, or custom skills.
 - **Task Completion Signaling**: Agents signal completion explicitly for clean multi-step workflows.
 - **Advanced Orchestration**: Improved tool calling logic with tool filtering, iteration tracking, and observability tracing.
 - **Model-as-a-Tool**: Seamless integration with LLM tool-calling capabilities.
@@ -145,16 +150,17 @@
 
 - **Persistent API Keys**: API keys are saved and persisted across all configured providers.
 - **Model Presets**: Pre-configured settings for popular providers:
-  - OpenAI (GPT-5, o3)
-  - Anthropic (Claude Sonnet 4.5)
-  - Google (Gemini 3 Pro)
-  - DeepSeek, Mistral, Groq, OpenRouter
-  - Local Models (Openai compatible endpoint, [Ollama](https://ollama.com), LM Studio)
-    - 12-16g Vram - Qwen3-4B-Thinking-2507
-    - 24-32g Vram - gpt-oss-20b
-    - 48-64g Vram - QwQ-32B
-    - 96-128g Vram - Qwen3-Next-80B-A3B-Instruct
+  - OpenAI, Anthropic, Google, xAI
+  - DeepSeek, Mistral, Groq, Together, Fireworks, Cohere, OpenRouter
+  - Local Models (Openai compatible endpoint
+    - 4-8g Vram - Qwen3.5 2B / Qwen3.5 4B
+    - 12-16g Vram - Qwen3.5 9B / Gemma 4 12B
+    - 24-32g Vram - Qwen3.6 27B / Qwen3.6 35B A3B / Gemma 4 31B / Gemma 4 26B A4B
+    - 48-96g Vram - Qwen3.5 122B A10B / Mistral Medium 3.5 / NVIDIA Nemotron 3 Super / 
+    - >128g Vram - MiniMax-M3 / MiMo-V2.5-Pro / GLM-5.2 / Kimi K2.6 / DeepSeek V4 Pro / Nemotron 3 Ultra / Qwen3.5 397B A17B / DeepSeek-V4-Flash
 
+- **Local CLI Agents**: Route chat through a CLI you already have installed and logged in — **Codex**, **Claude Code**, **Antigravity**, or **GitHub Copilot**. seerai stores no credentials; it reuses the CLI's own session.
+- **Capability-Based Routing**: Assign separate models per capability — chat, embeddings, image, video, text-to-speech, and speech-to-text — and route each request to the right endpoint automatically.
 - **Smart Rate Limiting**: Per-model configuration for concurrency, RPM, and TPM to prevent provider errors.
 - **Per-Conversation Models**: Switch models dynamically based on the task complexity.
 
@@ -317,8 +323,12 @@ seerai/
 │   ├── modules/           # Core feature modules
 │   │   ├── chat/          # Chat engine & state
 │   │   │   ├── rag/       # RAG pipeline (chunker, embeddings, retrieval, vector store)
-│   │   │   ├── tools/     # Agentic tool system (search, note, table, web, workspace, etc.)
+│   │   │   ├── tools/     # Agentic tool system (search, note, table, web, workspace, skills, etc.)
+│   │   │   ├── cli/       # Local CLI providers (Codex, Claude, Antigravity, Copilot)
+│   │   │   ├── skills/    # Agent skills registry
 │   │   │   └── workspace/ # File workspace (editor, sidebar, git CLI, diff viewer, store)
+│   │   ├── search/        # Federated scholarly search (11 providers, query IR + compilers)
+│   │   ├── systematicReview/ # PRISMA systematic review workflow
 │   │   ├── cloud/         # Cloud storage tab
 │   │   ├── drive/         # Cloud providers (Google, Dropbox, Box, OneDrive, Nextcloud)
 │   │   ├── assistant.ts   # Main assistant logic
@@ -334,6 +344,7 @@ seerai/
 │   │   └── preferenceScript.ts # Preferences logic
 │   ├── utils/             # Utility functions
 │   └── hooks.ts           # Zotero event listeners
+├── skills/                # ~148 bundled agent skill packages
 └── package.json
 ```
 
@@ -366,6 +377,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Acknowledgments
 
 - [Zotero](https://www.zotero.org)
+- [K-Dense-AI](https://github.com/K-Dense-AI/scientific-agent-skills)
 - [Mistral AI](https://mistral.ai)
 - [Semantic Scholar](https://www.semanticscholar.org)
 - [Firecrawl](https://firecrawl.io)

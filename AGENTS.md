@@ -2,10 +2,11 @@
 
 ## Project Overview
 
-**seerai** is an intelligent research assistant plugin for Zotero 8/9 that integrates AI-powered chat, semantic search, RAG, OCR, systematic review, cloud storage, and structured data extraction into the research workflow. The repo is a monorepo containing:
+**seerai** is an intelligent research assistant plugin for Zotero 8/9 that integrates AI-powered chat, federated scholarly search, RAG, OCR, systematic review, cloud storage, an agent skills library, and structured data extraction into the research workflow. The repo is a monorepo containing:
 
 - **Zotero Plugin** (`src/`, `addon/`) — runs inside Zotero's Firefox-based runtime (NOT Node.js)
 - **MCP Server** (`mcp-server/`) — standalone Node.js server exposing Zotero tools via Model Context Protocol
+- **Agent Skills Library** (`skills/`) — ~148 bundled, self-contained skill packages (SKILL.md + references/scripts) surfaced to agents via the skills tools
 
 ## Commands
 
@@ -85,10 +86,11 @@ seerai/
 │   │   │   ├── agenticChat.ts  # Agentic chat loop with tool calling
 │   │   │   ├── stateManager.ts # Chat state (selections, context)
 │   │   │   ├── modelConfig.ts  # Model config CRUD (file-based: {DataDir}/seerai/modelConfigs.json)
-│   │   │   ├── modelDiscovery.ts # /models endpoint discovery and connection testing
-│   │   │   ├── providerTypes.ts # Provider config type definitions
+│   │   │   ├── modelDiscovery.ts # /models endpoint discovery, auth headers, connection testing
+│   │   │   ├── modelResolver.ts # Resolves a ModelRef → ResolvedModel (provider, endpoint, capability)
+│   │   │   ├── providerTypes.ts # Provider/model config types, ModelCapability, inferCapabilities()
 │   │   │   ├── providerRegistry.ts # Provider config CRUD (file-based: {DataDir}/seerai/providerConfigs.json)
-│   │   │   ├── providerPresets.ts # Built-in provider presets (OpenAI, Anthropic, Gemini, etc.)
+│   │   │   ├── providerPresets.ts # Built-in provider presets (OpenAI, Anthropic, Gemini, xAI, CLI agents, etc.)
 │   │   │   ├── types.ts        # Chat/selection type definitions
 │   │   │   ├── tableTypes.ts   # Table/search type definitions
 │   │   │   ├── markdown.ts     # Markdown parsing & rendering
@@ -143,12 +145,43 @@ seerai/
 │   │   │   │   ├── contextManager.ts
 │   │   │   │   ├── contextTypes.ts
 │   │   │   │   └── contextUI.ts
-│   │   │   └── ui/             # Chat UI components
-│   │   │       ├── chatSettings.ts
-│   │   │       ├── messageRenderer.ts
-│   │   │       ├── placeholderDropdown.ts
-│   │   │       ├── promptPicker.ts
-│   │   │       └── icons.ts   # SVG icon registry + factory
+│   │   │   ├── cli/            # Local CLI provider adapters (no stored creds)
+│   │   │   │   ├── agents.ts            # CLI agent registry (getCliAgent/listCliAgents)
+│   │   │   │   ├── cliTypes.ts          # CliAgentDef contract + auth-failure helpers
+│   │   │   │   ├── cliDetection.ts      # PATH/version/auth-status probing
+│   │   │   │   ├── cliRunner.ts         # Spawns CLI, streams stdout → ProviderEvents
+│   │   │   │   ├── cliProvider.ts       # AgentProvider impl flattening chat → one prompt
+│   │   │   │   ├── cliModels.ts         # CLI model listing helpers
+│   │   │   │   ├── codexAgent.ts        # OpenAI Codex CLI
+│   │   │   │   ├── claudeAgent.ts       # Claude Code CLI
+│   │   │   │   ├── antigravityAgent.ts  # Antigravity CLI
+│   │   │   │   └── copilotAgent.ts      # GitHub Copilot CLI
+│   │   │   ├── skills/         # Agent skills registry
+│   │   │   │   └── registry.ts          # Bundled + user/workspace/custom skills; state in .agent/skills.json
+│   │   │   ├── ui/             # Chat UI components
+│   │   │   │   ├── chatSettings.ts
+│   │   │   │   ├── messageRenderer.ts
+│   │   │   │   ├── placeholderDropdown.ts
+│   │   │   │   ├── promptPicker.ts
+│   │   │   │   ├── providerManager.ts   # AI Models / provider config UI
+│   │   │   │   ├── integrationSettings.ts # Search/OCR/cloud integration settings UI
+│   │   │   │   ├── serviceSettings.ts   # Per-service quick settings
+│   │   │   │   └── icons.ts   # SVG icon registry + factory
+│   │   ├── search/             # Federated scholarly search (11 providers)
+│   │   │   ├── index.ts        # Barrel exports
+│   │   │   ├── types.ts        # ScholarlyPaper, provider ids, search modes/queries
+│   │   │   ├── queryIR.ts      # Provider-agnostic query IR (concept groups + synonyms)
+│   │   │   ├── queryCompiler.ts # Per-provider compilers: IR → native query dialect
+│   │   │   ├── providers.ts    # Provider adapters + capability descriptors
+│   │   │   ├── service.ts      # Federated fetch orchestration, result caps
+│   │   │   ├── merge.ts        # Dedup + reciprocal-rank-fusion across providers
+│   │   │   ├── filterOptions.ts # Per-provider filter option catalogs
+│   │   │   ├── http.ts         # Shared HTTP helpers for providers
+│   │   │   ├── bibtex.ts       # BibTeX rendering of results
+│   │   │   ├── exportManager.ts # Result export (BibTeX/CSV)
+│   │   │   ├── controller.ts   # Search session controller
+│   │   │   ├── persistence.ts  # Search session/history persistence
+│   │   │   └── env.ts          # Provider env/key resolution
 │   │   ├── systematicReview/   # Systematic review module
 │   │   │   ├── systematicReviewTab.ts # Review tab UI (12K lines)
 │   │   │   ├── service.ts      # Review pipeline orchestration
@@ -207,6 +240,7 @@ seerai/
 │   │   └── zoteroClient.ts     # HTTP client to plugin API (localhost:23119)
 │   ├── package.json            # Separate package (@seerai/mcp-server)
 │   └── tsconfig.json
+├── skills/                     # ~148 bundled agent skill packages (SKILL.md + references/scripts)
 ├── typings/
 │   ├── global.d.ts             # Global types (addon, ztoolkit, __env__)
 │   ├── prefs.d.ts              # Auto-generated preference type map
@@ -214,6 +248,11 @@ seerai/
 ├── test/                       # Mocha/Chai test files
 │   ├── startup.test.ts
 │   ├── markdown.test.ts
+│   ├── modelRouting.test.ts / modelResolver.test.ts / modelDiscovery.test.ts
+│   ├── providerPresets.test.ts
+│   ├── agentSkills.test.ts / agentStabilization.test.ts
+│   ├── queryCompiler.test.ts / queryThreading.test.ts
+│   ├── scholarly*.test.ts      # Federated search (http, fixtures, search, live)
 │   └── systematicReview*.test.ts
 ├── .github/workflows/
 │   ├── ci.yml                  # Lint → Build
@@ -320,7 +359,7 @@ The main UI has **5 tabs** rendered by `assistant.ts:createTabBar()`:
 1. **Chat** — LLM conversation + workspace sidebar + context selection
 2. **Table** — structured data extraction with AI-powered columns
 3. **Review** — systematic review projects (PRISMA, extraction, synthesis)
-4. **Search** — external paper search (Semantic Scholar) + AI insights
+4. **Search** — federated scholarly search across 11 providers + AI insights (see "Federated Scholarly Search")
 5. **Cloud** — cloud storage integration (Google Drive, Dropbox, Box, OneDrive, Nextcloud)
 
 ### Tool System (Agentic Chat)
@@ -340,6 +379,7 @@ toolDefinitions.ts  →  schemas.ts  →  toolExecutor.ts  →  individual tool 
 - **RAG tools**: `semantic_search`, `keyword_search`, `read_chunks`, `search_similar`
 - **TODO tools**: `todowrite`, `todoread`, `task_complete` — agent task planning and completion signaling
 - **Workspace tools**: `workspace_read_file`, `workspace_write_file`, `workspace_edit_file`, `workspace_glob`, `workspace_grep`, `workspace_bash`, `workspace_diff`, `workspace_log`
+- **Skills tools**: `skills_list`, `skill_view`, `skill_manage`, `skill_reference`, `skill_info` — discover and load agent skills on demand (see "Agent Skills Library")
 - **Tool names**: Constants in `TOOL_NAMES` (toolTypes.ts), not string literals
 
 #### Tool Sensitivity
@@ -384,6 +424,40 @@ Selection via `extensions.zotero.seerai.webSearchProvider` pref.
 - Observable pattern with `subscribe(listener)` for UI reactivity
 - `getMessageStore()` handles conversation persistence per chat ID
 
+### Model Routing & Providers
+
+Models are addressed by a `ModelRef` (provider + local model id) and resolved at call time by `modelResolver.ts` into a `ResolvedModel` (base URL, endpoint, auth headers, capability). Configuration is file-based in `providerConfigs.json` (`providerRegistry.ts`).
+
+- **Capabilities** (`ModelType` in `chat/types.ts`): `chat`, `embedding`, `image`, `video`, `tts`, `stt`. `MODEL_TYPE_ENDPOINTS` maps each to its API path; per-model `endpointOverrides` and adapter-specific routing (e.g. OpenRouter `/videos`, image via `/chat/completions`) are applied in `modelResolver.ts`.
+- **Presets** (`providerPresets.ts`): OpenAI, Anthropic, Google, xAI, Mistral, DeepSeek, Together, Groq, Fireworks, Cohere, OpenRouter, plus the local CLI agents below. `inferCapabilities()` derives capabilities from model id strings.
+- **Discovery**: `modelDiscovery.ts` hits `/models`, builds auth headers, and tests connections.
+
+### Local CLI Providers
+
+`src/modules/chat/cli/` lets seerai delegate a chat turn to a **locally installed agent CLI** instead of an HTTP API. Supported: **Codex** (OpenAI), **Claude Code**, **Antigravity**, **GitHub Copilot**.
+
+- seerai stores **no credentials** — it inherits whatever login session the CLI already holds.
+- Each CLI is described by a `CliAgentDef` (`cliTypes.ts`): binary name, one-shot args, stream format (`json-lines` | `raw-text`), line parser, auth-failure patterns, optional `prepare()` and live `listModels`.
+- `cliRunner.ts` spawns the binary, feeds one flattened prompt over stdin, and streams stdout into `ProviderEvent`s; `cliProvider.ts` implements the `AgentProvider` interface; `cliDetection.ts` probes PATH/version/auth. Provider configs reference an agent via `cliAgentId`.
+- Images are dropped (CLIs receive text only).
+
+### Federated Scholarly Search
+
+`src/modules/search/` powers the **Search** tab and the agent's external search. It queries up to **11 providers** — Semantic Scholar, arXiv, PubMed, bioRxiv, medRxiv, IACR, Europe PMC, CORE, BASE, Zenodo, HAL.
+
+- **Query IR** (`queryIR.ts`): the AI "refine query" feature extracts a provider-agnostic intermediate representation **once** (AND-ed concept groups, each an OR of synonyms, plus MeSH descriptors, exclusions, field scope). Deterministic per-provider compilers (`queryCompiler.ts`) then render it into each source's native dialect — the LLM never has to memorize 11 query syntaxes.
+- **Search modes** (`types.ts`): `broad`, `biomedical`, `preprints`, `cryptography`, `repositories` map to fixed provider sets (`SMART_MODE_PROVIDERS`); `source` mode targets explicitly chosen providers.
+- **Merge** (`merge.ts`): cross-provider deduplication + reciprocal rank fusion; `service.ts` enforces per-provider and federated result caps (`FEDERATED_RESULT_CAP`).
+- Results export to BibTeX/CSV (`bibtex.ts`, `exportManager.ts`); sessions persist via `persistence.ts`.
+
+### Agent Skills Library
+
+The `skills/` top-level directory holds ~148 self-contained skill packages (each a `SKILL.md` with YAML frontmatter plus optional `references/`, `scripts/`, `assets/`). `src/modules/chat/skills/registry.ts` exposes them to the agent.
+
+- **Sources**: `bundled` (in-repo), `user`, `workspace` (`.agent/`-discovered), and `custom`. Enable/trust state persists to `.agent/skills.json` (`SkillRegistryState`).
+- **Agent access**: the skills tools (`skills_list`, `skill_view`, `skill_reference`, `skill_info`, `skill_manage`) let the agent search the catalog, read a skill's body, pull reference files, and manage enable/trust — loading instructions on demand rather than front-loading them into the system prompt.
+- Mirrored in the MCP server (`skills_list`, `skill_view`, etc.) so external LLMs get the same library.
+
 ### Systematic Review Module
 
 Located in `src/modules/systematicReview/`. Provides an end-to-end systematic review workflow:
@@ -426,7 +500,7 @@ Located in `src/modules/drive/` and `src/modules/cloud/`. Provides cloud storage
 - `src/modules/api/handlers.ts` routes requests to `toolExecutor`
 - MCP server (`mcp-server/`) is a separate stdio-based process that calls these HTTP endpoints
 - Default port: 23119
-- The MCP server exposes ~29 tools (mirroring the plugin's tool set including workspace, RAG, and systematic review tools)
+- The MCP server exposes ~46 tools (mirroring the plugin's tool set including workspace, RAG, systematic review, and skills tools)
 
 ## Navigating assistant.ts (32K Lines)
 
@@ -534,7 +608,7 @@ The MCP server is a **separate package** in `mcp-server/` that allows external L
 ### Key Files
 
 - `mcp-server/src/index.ts` — Server setup, stdio transport, tool call routing
-- `mcp-server/src/tools.ts` — Zod v3 schemas mirroring plugin's tool definitions (~29 tools)
+- `mcp-server/src/tools.ts` — Zod v3 schemas mirroring plugin's tool definitions (~46 tools)
 - `mcp-server/src/zoteroClient.ts` — HTTP client to `http://127.0.0.1:23119/seerai/*`
 
 ### Build
