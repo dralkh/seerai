@@ -13419,6 +13419,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     for (const lib of Zotero.Libraries.getAll()) {
       try {
         const items = await Zotero.Items.getAll(lib.libraryID);
+        // Bulk-load all data types up front (one SQL query per data type per
+        // library) so the getField() calls in indexLibraryItem hit memory
+        // instead of triggering per-item lazy loads / UnloadedDataException.
+        const Items = Zotero.Items as any;
+        if (items.length && typeof Items.loadDataTypes === "function") {
+          await Items.loadDataTypes(items);
+        }
         for (const item of items) {
           if (!item.isRegularItem()) continue;
           this.indexLibraryItem(item, { byDoi, byPmid, byTitle });

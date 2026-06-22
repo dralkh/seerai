@@ -264,14 +264,23 @@ function placeholderItemMeta(id: number): ItemMeta {
 async function ensureItemsLoaded(ids: number[]): Promise<void> {
   if (!ids.length) return;
   try {
-    const items = (await Zotero.Items.getAsync(ids)) as any[];
-    await Promise.all(
-      (items || []).map((it) =>
-        it && typeof it.loadAllData === "function"
-          ? Promise.resolve(it.loadAllData()).catch(() => undefined)
-          : Promise.resolve(),
-      ),
-    );
+    const items = ((await Zotero.Items.getAsync(ids)) as any[]) || [];
+    if (!items.length) return;
+    const Items = Zotero.Items as any;
+    // Prefer Zotero's bulk loader: it groups ids by library and issues a single
+    // SQL query per data type per library. Calling item.loadAllData() per item
+    // (even via Promise.all) is the N+1 storm we're fixing (~8 queries x N items).
+    if (typeof Items.loadDataTypes === "function") {
+      await Items.loadDataTypes(items);
+    } else {
+      await Promise.all(
+        items.map((it) =>
+          it && typeof it.loadAllData === "function"
+            ? Promise.resolve(it.loadAllData()).catch(() => undefined)
+            : Promise.resolve(),
+        ),
+      );
+    }
   } catch (e) {
     Zotero.debug(`[seerai] review tab: ensureItemsLoaded failed: ${e}`);
   }
@@ -1252,7 +1261,7 @@ function buildFolderBar(doc: Document): HTMLElement {
   aiBtn3.title = "Generate keyword-based screening suggestions";
   aiBtn3.style.cssText =
     "padding:2px 8px;font-size:10px;font-weight:600;border:1px solid #7c3aed;border-radius:4px;background:#7c3aed;color:#fff;cursor:pointer;font-family:inherit;";
-  aiBtn3.addEventListener("click", () => {
+  aiBtn3.addEventListener("click", async () => {
     if (!currentState) return;
     const und = currentState.papers.filter(
       (p: SystematicReviewPaper) => p.status === "undecided",
@@ -1261,13 +1270,12 @@ function buildFolderBar(doc: Document): HTMLElement {
     const space = getActiveSpace();
     const iks = space?.incKeywords || [];
     const eks = space?.excKeywords || [];
+    // Bulk-load once (no-op for already-loaded items), then read from the warm
+    // metadata cache instead of per-item Zotero.Items.get()/getField().
+    await ensureItemsLoaded(und.map((p: SystematicReviewPaper) => p.id));
     und.forEach((p: SystematicReviewPaper) => {
-      const z = Zotero.Items.get(p.id);
-      const txt = (
-        (z ? (z.getField("title") as string) || "" : "") +
-        " " +
-        (z ? (z.getField("abstractNote") as string) || "" : "")
-      ).toLowerCase();
+      const m = getItemMeta(p.id);
+      const txt = ((m.title || "") + " " + (m.abstract || "")).toLowerCase();
       let is = 0,
         es = 0;
       iks.forEach((k: string) => {
@@ -1296,7 +1304,9 @@ function buildFolderBar(doc: Document): HTMLElement {
     });
     saveSRState();
     toast(doc, "Generated suggestions for " + und.length + " papers");
-    reRender(doc);
+    // Refresh just the screening panel; the metadata cache is still valid, so
+    // no full tab rebuild (and no blank flash) is needed.
+    reRenderPanel(doc, "screening");
   });
   bar.appendChild(aiBtn3);
 
@@ -1676,26 +1686,31 @@ function buildNavIcon(doc: Document, panel: string): HTMLElement {
 function renderPanel(doc: Document, panel: SRSubTab): void {
   currentPanel = panel;
   if (!contentArea) return;
+
+  // Build the new panel first, then swap it in. This avoids leaving an empty
+  // contentArea if a builder throws mid-render, and keeps the swap atomic.
+  let panelEl: HTMLElement;
+  switch (panel) {
+    case "screening":
+      panelEl = buildScreeningPanel(doc);
+      break;
+    case "evidence":
+      panelEl = buildEvidencePanel(doc);
+      break;
+    case "gaps":
+      panelEl = buildGapPanel(doc);
+      break;
+    case "prisma":
+      panelEl = buildPrismaPanel(doc);
+      break;
+    default:
+      panelEl = buildScreeningPanel(doc);
+  }
+
   while (contentArea.firstChild) {
     contentArea.removeChild(contentArea.firstChild);
   }
-
-  switch (panel) {
-    case "screening":
-      contentArea.appendChild(buildScreeningPanel(doc));
-      break;
-    case "evidence":
-      contentArea.appendChild(buildEvidencePanel(doc));
-      break;
-    case "gaps":
-      contentArea.appendChild(buildGapPanel(doc));
-      break;
-    case "prisma":
-      contentArea.appendChild(buildPrismaPanel(doc));
-      break;
-    default:
-      contentArea.appendChild(buildScreeningPanel(doc));
-  }
+  contentArea.appendChild(panelEl);
 }
 
 // ============================================================
@@ -7282,18 +7297,67 @@ function getActiveSpace(): SystematicReviewSpace | undefined {
   );
 }
 
+/**
+ * Overlay a non-destructive loading spinner on top of an existing element. The
+ * host already keeps `position:relative`, so the overlay (absolute, inset:0)
+ * covers it while we rebuild, leaving the prior content faintly visible instead
+ * of flashing a blank tab. Mirrors assistant.ts createTabLoadingIndicator.
+ */
+function showReviewLoadingOverlay(
+  doc: Document,
+  host: HTMLElement,
+  label = "Working…",
+): HTMLElement {
+  const overlay = doc.createElement("div");
+  overlay.className = "sr-loading-overlay";
+  overlay.style.cssText =
+    "position:absolute;inset:0;z-index:50;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:var(--background-primary);opacity:0.85;";
+  const spinner = doc.createElement("span");
+  spinner.style.cssText =
+    "width:22px;height:22px;border-radius:50%;border:2.5px solid var(--border-secondary);border-top-color:var(--highlight-primary);animation:seerai-tab-spin 0.8s linear infinite;";
+  overlay.appendChild(spinner);
+  const text = doc.createElement("span");
+  text.textContent = label;
+  text.style.cssText =
+    "font-size:12px;color:var(--text-secondary);animation:seerai-tab-pulse 1.2s infinite;";
+  overlay.appendChild(text);
+  if (!doc.getElementById("seerai-tab-loading-style")) {
+    const style = doc.createElement("style");
+    style.id = "seerai-tab-loading-style";
+    style.textContent =
+      "@keyframes seerai-tab-spin{to{transform:rotate(360deg)}}@keyframes seerai-tab-pulse{0%,100%{opacity:1}50%{opacity:0.4}}";
+    doc.documentElement?.appendChild(style);
+  }
+  host.appendChild(overlay);
+  return overlay;
+}
+
 function reRender(doc: Document): void {
   if (!currentState || !mainWrapper) return;
   const parent = mainWrapper.parentElement;
   if (!parent) return;
-  parent.removeChild(mainWrapper);
-  invalidateItemCache();
+  // Keep the existing tab visible with a spinner overlay while the replacement
+  // is built, then swap it in atomically. Removing the wrapper up front is what
+  // made the tab flash blank during the async rebuild.
+  const oldWrapper = mainWrapper;
+  const overlay = showReviewLoadingOverlay(doc, oldWrapper);
   const anyId = currentState.papers[0]?.id;
   const item = anyId ? (Zotero.Items.get(anyId) as Zotero.Item) : undefined;
-  createSystematicReviewTabContent(doc, item).then((newEl: HTMLElement) => {
-    mainWrapper = newEl;
-    parent.appendChild(newEl);
-  });
+  createSystematicReviewTabContent(doc, item)
+    .then((newEl: HTMLElement) => {
+      mainWrapper = newEl;
+      if (oldWrapper.parentElement === parent) {
+        parent.replaceChild(newEl, oldWrapper);
+      } else {
+        parent.appendChild(newEl);
+      }
+    })
+    .catch((e) => {
+      Zotero.debug(`[seerai] review tab: reRender failed: ${e}`);
+    })
+    .finally(() => {
+      overlay.remove();
+    });
 }
 
 // ============================================================
