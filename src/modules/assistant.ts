@@ -1327,6 +1327,29 @@ async function saveSearchColumnConfig(): Promise<void> {
 // DataLabs service for PDF-to-note conversion
 const ocrService = new OcrService();
 
+function createTabLoadingIndicator(doc: Document, label: string): HTMLElement {
+  const wrapper = doc.createElement("div");
+  wrapper.style.cssText =
+    "display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;width:100%;gap:10px;";
+  const spinner = doc.createElement("span");
+  spinner.style.cssText =
+    "width:22px;height:22px;border-radius:50%;border:2.5px solid var(--border-secondary);border-top-color:var(--highlight-primary);animation:seerai-tab-spin 0.8s linear infinite;";
+  wrapper.appendChild(spinner);
+  const text = doc.createElement("span");
+  text.textContent = label;
+  text.style.cssText =
+    "font-size:12px;color:var(--text-secondary);animation:seerai-tab-pulse 1.2s infinite;";
+  wrapper.appendChild(text);
+  if (!doc.getElementById("seerai-tab-loading-style")) {
+    const style = doc.createElement("style");
+    style.id = "seerai-tab-loading-style";
+    style.textContent =
+      "@keyframes seerai-tab-spin{to{transform:rotate(360deg)}}@keyframes seerai-tab-pulse{0%,100%{opacity:1}50%{opacity:0.4}}";
+    doc.documentElement?.appendChild(style);
+  }
+  return wrapper;
+}
+
 export class Assistant {
   public static getOcrService() {
     return ocrService;
@@ -3107,17 +3130,14 @@ export class Assistant {
             );
             tabContent.appendChild(searchTabContent);
           } else if (activeTab === "systematic") {
-            const { getSystematicReviewState } =
-              await import("./systematicReview/systematicReviewTab");
-            const srTabContent = await createSystematicReviewTabContent(
+            // Put a loading indicator in tabContent so the tab bar stays
+            // visible.  The SR content is loaded AFTER the atomic swap so
+            // the spinner is actually painted.
+            const srLoading = createTabLoadingIndicator(
               doc,
-              item,
+              "Loading review...",
             );
-            const srState = getSystematicReviewState();
-            if (srState && srState.papers) {
-              currentSRPaperIds = srState.papers.map((p: any) => p.id);
-            }
-            tabContent.appendChild(srTabContent);
+            tabContent.appendChild(srLoading);
           }
 
           // Final stale check before committing DOM
@@ -3142,6 +3162,38 @@ export class Assistant {
                 (newMessagesArea as HTMLElement).scrollTop = savedScrollTop;
               }
             }, 0);
+          }
+
+          // Async-load the systematic review tab content AFTER the atomic
+          // swap so the spinner is visible while the heavy work runs.
+          if (activeTab === "systematic") {
+            const srLoading = tabContent.querySelector(
+              ":scope > :first-child",
+            ) as HTMLElement | null;
+            try {
+              const { getSystematicReviewState } =
+                await import("./systematicReview/systematicReviewTab");
+              const srTabContent = await createSystematicReviewTabContent(
+                doc,
+                item,
+              );
+              const srState = getSystematicReviewState();
+              if (srState && srState.papers) {
+                currentSRPaperIds = srState.papers.map((p: any) => p.id);
+              }
+              if (srLoading?.isConnected) {
+                srLoading.replaceWith(srTabContent);
+              }
+            } catch (srError) {
+              Zotero.debug(`[seerai] SR tab content load error: ${srError}`);
+              if (srLoading?.isConnected) {
+                const errDiv = doc.createElement("div");
+                errDiv.style.cssText =
+                  "padding:20px;color:var(--text-secondary);font-size:12px;";
+                errDiv.textContent = `Failed to load review tab: ${srError}`;
+                srLoading.replaceWith(errDiv);
+              }
+            }
           }
 
           Zotero.debug("[seerai] renderInterface: Render complete");
@@ -7537,6 +7589,27 @@ export class Assistant {
         return;
       }
 
+      // Validate the model has the fields needed to make a request.
+      const missingParts: string[] = [];
+      if (!activeModel.apiURL) missingParts.push("URL");
+      if (!activeModel.apiKey) missingParts.push("API key");
+      if (!activeModel.model) missingParts.push("model");
+      if (missingParts.length > 0) {
+        aiRefineDropdown.innerHTML = "";
+        const errorDiv = ztoolkit.UI.createElement(doc, "div", {
+          styles: {
+            padding: "16px",
+            textAlign: "center",
+            color: "var(--error-color, #d32f2f)",
+            fontSize: "12px",
+          },
+        });
+        errorDiv.innerHTML = `AI model is missing ${missingParts.join(", ")} — check Settings`;
+        aiRefineDropdown.appendChild(errorDiv);
+        aiRefineDropdown.style.display = "block";
+        return;
+      }
+
       // Show loading state
       aiRefineDropdown.innerHTML = "";
       const loadingDiv = ztoolkit.UI.createElement(doc, "div", {
@@ -7557,7 +7630,8 @@ export class Assistant {
         const activeProviders =
           currentSearchState.mode === "source"
             ? [currentSearchState.provider]
-            : SMART_MODE_PROVIDERS[currentSearchState.mode];
+            : SMART_MODE_PROVIDERS[currentSearchState.mode] ||
+              SMART_MODE_PROVIDERS.broad;
         const modeHint =
           currentSearchState.mode === "biomedical"
             ? ' The search targets biomedical databases, so populate "mesh" for clinical concepts.'
@@ -7605,14 +7679,21 @@ Input: "Systematic review on COVID-19 vaccine effectiveness, excluding animal st
             onComplete: (content) => {
               raw = (content || raw).trim();
               const ir = parseSearchQueryIR(raw);
-              this.renderRefineResult(
-                doc,
-                aiRefineDropdown,
-                ir,
-                displayQuery,
-                activeProviders,
-                searchInput,
-              );
+              // No dropdown: parse the refined query straight into the search
+              // bar so the user can adjust it or press Enter to search.
+              // Setting `.value` programmatically does NOT fire the input
+              // listener, so the structured IR stays attached for precise
+              // per-source compilation unless the user edits the text.
+              aiRefineDropdown.style.display = "none";
+              if (ir) {
+                searchInput.value = compileQuery(ir, activeProviders[0]);
+                currentSearchState.queryIR = ir;
+              } else {
+                searchInput.value = displayQuery;
+                currentSearchState.queryIR = undefined;
+              }
+              currentSearchState.query = searchInput.value;
+              searchInput.focus();
             },
             onError: (error) => {
               aiRefineDropdown.innerHTML = "";
@@ -7647,7 +7728,7 @@ Input: "Systematic review on COVID-19 vaccine effectiveness, excluding animal st
             fontSize: "12px",
           },
         });
-        errorDiv.innerHTML = "Failed to refine query";
+        errorDiv.innerHTML = `Failed to refine query: ${(e as Error)?.message ?? e}`;
         aiRefineDropdown.appendChild(errorDiv);
       }
     });
@@ -7750,21 +7831,48 @@ Input: "Systematic review on COVID-19 vaccine effectiveness, excluding animal st
           item.style.backgroundColor = "transparent";
         });
         item.addEventListener("click", () => {
-          const seedText = Assistant.buildReviewSeedText(space);
           reviewSeedDropdown.style.display = "none";
-          if (!seedText) return;
-          // Feed the full criteria blob to the LLM, but keep a short, readable
-          // query (the research question, falling back to the review name) in
-          // the box and as the free-text fallback.
           const revision = getActiveProtocolRevision(space.protocol);
           const displayQuery = (
             revision?.researchQuestion?.trim() ||
             space.name ||
             "Systematic review query"
           ).trim();
-          pendingRefineSeed = { llmInput: seedText, displayQuery };
           searchInput.value = displayQuery;
           currentSearchState.query = displayQuery;
+
+          // If the review has a stored search strategy, load it directly —
+          // no LLM round-trip. The IR is compiled per source for the preview,
+          // and "Use & Search" runs the search with the strategy's mode.
+          if (revision?.searchStrategy) {
+            const strategy = revision.searchStrategy;
+            if (strategy.recommendedMode !== currentSearchState.mode) {
+              currentSearchState.mode = strategy.recommendedMode;
+              modeSelect.value = strategy.recommendedMode;
+              sourceSelect.style.display =
+                currentSearchState.mode === "source" ? "block" : "none";
+              setPref("scholarlySearchMode", currentSearchState.mode);
+              resetSearch();
+            }
+            currentSearchState.queryIR = strategy.ir;
+            const providers =
+              currentSearchState.mode === "source"
+                ? [currentSearchState.provider]
+                : SMART_MODE_PROVIDERS[currentSearchState.mode] ||
+                  SMART_MODE_PROVIDERS.broad;
+            // Parse straight into the search bar (no dropdown); the IR drives
+            // precise per-source compilation, the text stays editable.
+            searchInput.value = compileQuery(strategy.ir, providers[0]);
+            currentSearchState.query = searchInput.value;
+            aiRefineDropdown.style.display = "none";
+            searchInput.focus();
+            return;
+          }
+
+          // No stored strategy — fall back to the build-seed-then-refine flow.
+          const seedText = Assistant.buildReviewSeedText(space);
+          if (!seedText) return;
+          pendingRefineSeed = { llmInput: seedText, displayQuery };
           currentSearchState.queryIR = undefined;
           aiRefineBtn.click();
         });
@@ -8047,7 +8155,8 @@ Input: "Systematic review on COVID-19 vaccine effectiveness, excluding animal st
     const ids =
       currentSearchState.mode === "source"
         ? [currentSearchState.provider]
-        : SMART_MODE_PROVIDERS[currentSearchState.mode];
+        : SMART_MODE_PROVIDERS[currentSearchState.mode] ||
+          SMART_MODE_PROVIDERS.broad;
     const statuses = ztoolkit.UI.createElement(doc, "div", {
       styles: { display: "flex", flexWrap: "wrap", gap: "6px" },
     });
@@ -9237,161 +9346,21 @@ Input: "Systematic review on COVID-19 vaccine effectiveness, excluding animal st
     return lines.join("\n").trim();
   }
 
-  /**
-   * Render the AI-refine result as a per-provider breakdown. In a single-source
-   * search this shows one compiled query; in a smart mode it shows the native
-   * query compiled for each source the mode fans out to. "Use & Search" stores
-   * the structured IR on the search state (kept distinct from the raw query) so
-   * buildScholarlyQuery compiles it per provider at search time.
-   */
-  private static renderRefineResult(
-    doc: Document,
-    dropdown: HTMLElement,
-    ir: SearchQueryIR | null,
-    displayQuery: string,
-    providers: ScholarlyProviderId[],
-    searchInput: HTMLInputElement,
-  ): void {
-    dropdown.innerHTML = "";
-    const container = ztoolkit.UI.createElement(doc, "div", {
-      styles: { padding: "12px" },
-    });
-
-    if (!ir) {
-      const note = ztoolkit.UI.createElement(doc, "div", {
-        styles: {
-          fontSize: "12px",
-          color: "var(--text-secondary)",
-          marginBottom: "10px",
-        },
-      });
-      note.innerText =
-        "Could not structure the query. You can still search your original text.";
-      container.appendChild(note);
-    } else {
-      const header = ztoolkit.UI.createElement(doc, "div", {
-        styles: {
-          fontSize: "11px",
-          color: "var(--text-secondary)",
-          marginBottom: "8px",
-        },
-      });
-      header.innerText =
-        providers.length > 1 ? "Refined query per source:" : "Refined query:";
-      container.appendChild(header);
-
-      for (const id of providers) {
-        const compiled = compileQuery(ir, id);
-        const row = ztoolkit.UI.createElement(doc, "div", {
-          styles: { marginBottom: "8px" },
-        });
-        if (providers.length > 1) {
-          const label = ztoolkit.UI.createElement(doc, "div", {
-            styles: {
-              fontSize: "10px",
-              fontWeight: "600",
-              color: "var(--text-secondary)",
-              marginBottom: "2px",
-            },
-          });
-          label.innerText = getProviderCapability(id).label;
-          row.appendChild(label);
-        }
-        const code = ztoolkit.UI.createElement(doc, "div", {
-          styles: {
-            fontFamily: "monospace",
-            fontSize: "12px",
-            padding: "8px",
-            backgroundColor: "var(--background-secondary)",
-            borderRadius: "4px",
-            wordBreak: "break-word",
-          },
-        });
-        code.innerText = compiled || "(empty)";
-        row.appendChild(code);
-        container.appendChild(row);
-      }
-    }
-
-    const actionsDiv = ztoolkit.UI.createElement(doc, "div", {
-      styles: { display: "flex", gap: "8px", marginTop: "8px" },
-    });
-
-    const useBtn = ztoolkit.UI.createElement(doc, "button", {
-      namespace: "html",
-      properties: {
-        innerHTML: iconMarkup("check", { size: 12 }) + " Use & Search",
-      },
-      styles: {
-        flex: "1",
-        padding: "8px 12px",
-        backgroundColor: "#1976d2",
-        color: "#fff",
-        border: "none",
-        borderRadius: "4px",
-        fontSize: "12px",
-        cursor: "pointer",
-      },
-    });
-    useBtn.addEventListener("click", async () => {
-      // Keep the visible/free-text query short (the typed text, or a review
-      // label when seeded); the IR drives the per-provider compilation.
-      searchInput.value = displayQuery;
-      currentSearchState.query = displayQuery;
-      currentSearchState.queryIR = ir ?? undefined;
-      dropdown.style.display = "none";
-      currentSearchResults = [];
-      await this.performSearch(doc);
-    });
-
-    const copyBtn = ztoolkit.UI.createElement(doc, "button", {
-      namespace: "html",
-      properties: { innerText: "Copy" },
-      styles: {
-        padding: "8px 12px",
-        backgroundColor: "var(--background-secondary)",
-        color: "var(--text-primary)",
-        border: "1px solid var(--border-primary)",
-        borderRadius: "4px",
-        fontSize: "12px",
-        cursor: "pointer",
-      },
-    });
-    copyBtn.addEventListener("click", () => {
-      let text: string;
-      if (!ir) {
-        text = displayQuery;
-      } else if (providers.length > 1) {
-        text = providers
-          .map((id) => `${getProviderCapability(id).label}: ${compileQuery(ir, id)}`)
-          .join("\n");
-      } else {
-        text = compileQuery(ir, providers[0]);
-      }
-      new ztoolkit.Clipboard().addText(text, "text/unicode").copy();
-      copyBtn.innerHTML = iconMarkup("check", { size: 12 }) + " Copied!";
-      setTimeout(() => {
-        copyBtn.innerText = "Copy";
-      }, 1500);
-    });
-
-    actionsDiv.appendChild(useBtn);
-    actionsDiv.appendChild(copyBtn);
-    container.appendChild(actionsDiv);
-    dropdown.appendChild(container);
-  }
-
   private static buildScholarlyQuery(
     overrides: { limit?: number } = {},
   ): ScholarlySearchQuery {
     const activeProviders =
       currentSearchState.mode === "source"
         ? [currentSearchState.provider]
-        : SMART_MODE_PROVIDERS[currentSearchState.mode];
+        : SMART_MODE_PROVIDERS[currentSearchState.mode] ||
+          SMART_MODE_PROVIDERS.broad;
     return {
       text: currentSearchState.query,
       providerQueries: currentSearchState.queryIR
-        ? compileQueriesForProviders(currentSearchState.queryIR, activeProviders)
+        ? compileQueriesForProviders(
+            currentSearchState.queryIR,
+            activeProviders,
+          )
         : undefined,
       mode: currentSearchState.mode,
       providers: [currentSearchState.provider],

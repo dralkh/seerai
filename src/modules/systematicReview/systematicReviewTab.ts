@@ -24,6 +24,7 @@ import {
   ZoteroCollectionTreeNode,
   ProtocolGenerationResult,
   ProtocolGenerationStep,
+  SearchStrategyProposal,
 } from "./types";
 import { getSRStore } from "./store";
 import { getSRService } from "./service";
@@ -80,6 +81,15 @@ import {
   resolveItemAbstract,
 } from "./reviewSourceService";
 import { ReviewCancellationController } from "./cancellation";
+import {
+  compileQuery,
+  compileQueriesForProviders,
+} from "../search/queryCompiler";
+import {
+  SMART_MODE_PROVIDERS,
+  type ScholarlyProviderId,
+} from "../search/types";
+import { getProviderCapability } from "../search/providers";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -8867,35 +8877,47 @@ function buildProtocolTemplateTab(
   container.appendChild(section);
 }
 
+function stepSummaryKey(
+  step: ProtocolGenerationStep,
+): keyof ProtocolGenerationResult["summary"] {
+  return step === "search-strategy" ? "searchStrategy" : step;
+}
+
 function openCriteriaModal(doc: Document): void {
   if (!currentState) return;
   const service = getSRService();
   const active = getActiveProtocolRevision(currentState.protocol);
   let draft: ProtocolRevision = JSON.parse(JSON.stringify(active));
   const uploadedDocs: ExtractedDocument[] = [];
-  let activeProtocolTab: "scope" | "eligibility" | "mapping" | "template" =
-    "scope";
+  let activeProtocolTab:
+    | "scope"
+    | "eligibility"
+    | "mapping"
+    | "template"
+    | "search-strategy" = "scope";
   let protocolPresets: ProtocolPreset[] = [];
   let selectedPresetId = "";
   type GenerationStatus = "idle" | "running" | "complete" | "error";
   let generationStatus: Record<
-    "scope" | "eligibility" | "mapping" | "template",
+    "scope" | "eligibility" | "mapping" | "template" | "search-strategy",
     GenerationStatus
   > = {
     scope: "idle",
     eligibility: "idle",
     mapping: "idle",
     template: "idle",
+    "search-strategy": "idle",
   };
   let generationResult: ProtocolGenerationResult | null = null;
   const prefillSteps: Record<
-    "scope" | "eligibility" | "mapping" | "template",
+    "scope" | "eligibility" | "mapping" | "template" | "search-strategy",
     boolean
   > = {
     scope: true,
     eligibility: true,
     mapping: true,
     template: true,
+    "search-strategy": true,
   };
 
   const wrapper = doc.createElement("div");
@@ -8963,7 +8985,7 @@ function openCriteriaModal(doc: Document): void {
   const buildProtocolGeneration = (): HTMLElement => {
     const generation = section(
       "Protocol generation",
-      "Generate the question, framework, criteria, eligibility rules, keyword aids, evidence mappings, and an extraction template from the current draft and optional source documents. Reassess re-runs all four steps using the whole current protocol and active template as context.",
+      "Generate the question, framework, criteria, eligibility rules, keyword aids, evidence mappings, an extraction template, and a search strategy from the current draft and optional source documents. Tick only the steps you want to (re)generate — unticked steps keep their current values and still provide context. Reassess uses the whole current protocol and active template as the baseline.",
     );
     const sourceRow = doc.createElement("div");
     sourceRow.style.cssText =
@@ -9037,6 +9059,11 @@ function openCriteriaModal(doc: Document): void {
         label: "4. Extraction template",
         summary: "",
       },
+      {
+        key: "search-strategy",
+        label: "5. Search strategy",
+        summary: "",
+      },
     ];
 
     const stepRows = new Map<ProtocolGenerationStep, HTMLElement>();
@@ -9054,12 +9081,13 @@ function openCriteriaModal(doc: Document): void {
       label.style.cssText = "min-width:140px;";
       const summary = doc.createElement("span");
       summary.style.cssText =
-        "flex:1;font-size:11px;color:var(--text-tertiary);";
+        "flex:1;font-size:11px;color:var(--text-tertiary);white-space:normal;word-break:break-word;";
       summary.textContent = "idle";
       const checkbox = doc.createElement("input");
       checkbox.type = "checkbox";
       checkbox.checked = prefillSteps[meta.key];
-      checkbox.title = "Uncheck to skip prefilling this step into the draft";
+      checkbox.title =
+        "Generate and apply this step (uncheck to keep current values)";
       checkbox.addEventListener("change", () => {
         prefillSteps[meta.key] = checkbox.checked;
       });
@@ -9130,6 +9158,21 @@ function openCriteriaModal(doc: Document): void {
       } else if (prefillSteps.template && result.errors.template) {
         failed.push("template");
       }
+      if (
+        prefillSteps["search-strategy"] &&
+        !result.errors["search-strategy"] &&
+        result.searchStrategy
+      ) {
+        draft.searchStrategy = JSON.parse(
+          JSON.stringify(result.searchStrategy),
+        );
+        applied++;
+      } else if (
+        prefillSteps["search-strategy"] &&
+        result.errors["search-strategy"]
+      ) {
+        failed.push("search-strategy");
+      }
       if (applied > 0) {
         toast(
           doc,
@@ -9192,23 +9235,43 @@ function openCriteriaModal(doc: Document): void {
     const runGeneration = async (
       mode: "generate" | "reassess",
     ): Promise<void> => {
+      const selectedSteps = (
+        Object.keys(prefillSteps) as ProtocolGenerationStep[]
+      ).filter((step) => prefillSteps[step]);
+      if (selectedSteps.length === 0) {
+        toast(doc, "Select at least one step to generate");
+        return;
+      }
       generate.disabled = true;
       reassess.disabled = true;
       generationStatus = {
-        scope: "running",
-        eligibility: "running",
-        mapping: "running",
-        template: "running",
+        scope: "idle",
+        eligibility: "idle",
+        mapping: "idle",
+        template: "idle",
+        "search-strategy": "idle",
       };
+      selectedSteps.forEach((step) => {
+        generationStatus[step] = "running";
+      });
       generationResult = null;
       resultBanner.replaceChildren();
       resultBanner.style.display = "none";
-      stepRows.forEach((status) => {
-        status.textContent = "…";
-        status.style.color = "#0f766e";
-      });
-      stepSummaries.forEach((summary) => {
-        summary.textContent = "running";
+      stepMeta.forEach((meta) => {
+        const status = stepRows.get(meta.key);
+        const summary = stepSummaries.get(meta.key);
+        const selected = prefillSteps[meta.key];
+        if (status) {
+          status.textContent = selected ? "…" : "○";
+          status.style.color = selected ? "#0f766e" : "var(--text-tertiary)";
+        }
+        if (summary) {
+          summary.textContent = selected
+            ? "running"
+            : "skipped — keeping current";
+          summary.style.color = "var(--text-tertiary)";
+          summary.title = "";
+        }
       });
       const onStep = (
         step: ProtocolGenerationStep,
@@ -9235,7 +9298,7 @@ function openCriteriaModal(doc: Document): void {
           const err = partial.errors[step];
           summary.textContent = err
             ? `error: ${err}`
-            : partial.summary[step] || "complete";
+            : partial.summary[stepSummaryKey(step)] || "complete";
           summary.style.color = err ? "#b91c1c" : "var(--text-tertiary)";
           summary.title = err || "";
         }
@@ -9252,7 +9315,7 @@ function openCriteriaModal(doc: Document): void {
         const result = await service.generateProtocolProposals(
           currentState!,
           uploadedDocs.filter((doc) => !doc.error),
-          { baselineRevision, baselineTemplate },
+          { baselineRevision, baselineTemplate, steps: selectedSteps },
           onStep,
         );
         generationResult = result;
@@ -9279,7 +9342,9 @@ function openCriteriaModal(doc: Document): void {
             if (summary) {
               summary.textContent = err
                 ? `error: ${err}`
-                : result.summary[step as ProtocolGenerationStep] || "complete";
+                : result.summary[
+                    stepSummaryKey(step as ProtocolGenerationStep)
+                  ] || "complete";
               summary.style.color = err ? "#b91c1c" : "var(--text-tertiary)";
               summary.title = err || "";
             }
@@ -9348,13 +9413,14 @@ function openCriteriaModal(doc: Document): void {
 
     const tabs = doc.createElement("div");
     tabs.style.cssText =
-      "display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:5px;border-radius:10px;background:var(--background-secondary);";
+      "display:grid;grid-template-columns:repeat(5,1fr);gap:6px;padding:5px;border-radius:10px;background:var(--background-secondary);";
     (
       [
         ["scope", "1. Scope"],
         ["eligibility", "2. Eligibility"],
         ["mapping", "3. Evidence Mapping"],
         ["template", "4. Extraction Template"],
+        ["search-strategy", "5. Search Strategy"],
       ] as const
     ).forEach(([id, label]) => {
       const tab = doc.createElement("button");
@@ -9848,6 +9914,242 @@ function openCriteriaModal(doc: Document): void {
       buildProtocolTemplateTab(doc, body, draft, () => render());
     }
 
+    if (activeProtocolTab === "search-strategy") {
+      const strategySection = section(
+        "Search strategy",
+        "A search specification compiled from the review concepts into each source's native query dialect. Generate it with AI above, or author it by hand below — every field is editable. Save a revision to persist it; it can be loaded directly from the Search tab.",
+      );
+      const selectable = "user-select:text;-moz-user-select:text;";
+      const strategy: SearchStrategyProposal | undefined = draft.searchStrategy;
+      if (!strategy) {
+        const empty = doc.createElement("div");
+        empty.textContent =
+          "No search strategy yet. Run protocol generation (above) to produce one with AI, or start one by hand:";
+        empty.style.cssText =
+          "padding:12px 4px;font-size:12px;color:var(--text-tertiary);";
+        strategySection.appendChild(empty);
+        const createBlank = doc.createElement("button");
+        createBlank.textContent = "Create blank search strategy";
+        createBlank.style.cssText = `${buttonStyle}font-weight:700;`;
+        createBlank.addEventListener("click", () => {
+          draft.searchStrategy = {
+            ir: { groups: [{ terms: [] }] },
+            recommendedMode: "broad",
+            warnings: [],
+            provenance: [],
+          };
+          render();
+        });
+        strategySection.appendChild(createBlank);
+      } else {
+        const meta = doc.createElement("div");
+        meta.style.cssText =
+          "display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;";
+        const modeBadge = doc.createElement("span");
+        modeBadge.textContent = `Mode: ${strategy.recommendedMode}`;
+        modeBadge.style.cssText =
+          "padding:3px 8px;border-radius:999px;background:var(--background-secondary);border:1px solid var(--border-primary);font-weight:700;font-size:11px;";
+        meta.appendChild(modeBadge);
+        const groupCount = doc.createElement("span");
+        groupCount.textContent = `${strategy.ir.groups.length} concept groups`;
+        groupCount.style.cssText = "font-size:11px;color:var(--text-tertiary);";
+        meta.appendChild(groupCount);
+        if (strategy.ir.exclude && strategy.ir.exclude.length > 0) {
+          const excl = doc.createElement("span");
+          excl.textContent = `${strategy.ir.exclude.length} exclusions`;
+          excl.style.cssText = "font-size:11px;color:var(--text-tertiary);";
+          meta.appendChild(excl);
+        }
+        strategySection.appendChild(meta);
+
+        if (strategy.rationale) {
+          const rationale = doc.createElement("div");
+          rationale.textContent = strategy.rationale;
+          rationale.style.cssText = `font-size:12px;color:var(--text-secondary);margin-bottom:10px;line-height:1.5;${selectable}`;
+          strategySection.appendChild(rationale);
+        }
+
+        if (strategy.warnings.length > 0) {
+          for (const warning of strategy.warnings) {
+            const warn = doc.createElement("div");
+            warn.textContent = `⚠ ${warning}`;
+            warn.style.cssText = `font-size:11px;color:#b45309;margin-bottom:4px;${selectable}`;
+            strategySection.appendChild(warn);
+          }
+        }
+
+        // --- Editable specification (author or tweak without AI) ---
+        const editor = doc.createElement("div");
+        editor.style.cssText =
+          "display:flex;flex-direction:column;gap:8px;margin-bottom:12px;padding:10px;border:1px solid var(--border-secondary);border-radius:8px;background:var(--background-primary);";
+
+        const controlRow = doc.createElement("div");
+        controlRow.style.cssText =
+          "display:flex;gap:8px;flex-wrap:wrap;align-items:center;";
+        const modeSelect = doc.createElement("select");
+        modeSelect.style.cssText = `${inputStyle}width:auto;min-width:140px;`;
+        (
+          [
+            "broad",
+            "biomedical",
+            "preprints",
+            "cryptography",
+            "repositories",
+          ] as const
+        ).forEach((mode) => {
+          const opt = doc.createElement("option");
+          opt.value = mode;
+          opt.textContent = `Mode: ${mode}`;
+          opt.selected = strategy.recommendedMode === mode;
+          modeSelect.appendChild(opt);
+        });
+        modeSelect.addEventListener("change", () => {
+          strategy.recommendedMode =
+            modeSelect.value as SearchStrategyProposal["recommendedMode"];
+          render();
+        });
+        controlRow.appendChild(modeSelect);
+        const fieldSelect = doc.createElement("select");
+        fieldSelect.style.cssText = `${inputStyle}width:auto;min-width:140px;`;
+        (["all", "title", "abstract", "title-abstract"] as const).forEach(
+          (scope) => {
+            const opt = doc.createElement("option");
+            opt.value = scope;
+            opt.textContent = `Field: ${scope}`;
+            opt.selected = (strategy.ir.field || "all") === scope;
+            fieldSelect.appendChild(opt);
+          },
+        );
+        fieldSelect.addEventListener("change", () => {
+          strategy.ir.field = fieldSelect.value as NonNullable<
+            typeof strategy.ir.field
+          >;
+          render();
+        });
+        controlRow.appendChild(fieldSelect);
+        editor.appendChild(controlRow);
+
+        const groupsLabel = doc.createElement("div");
+        groupsLabel.textContent =
+          "Concept groups (comma-separated synonyms; groups are AND-ed, terms within a group OR-ed)";
+        groupsLabel.style.cssText =
+          "font-size:11px;color:var(--text-tertiary);";
+        editor.appendChild(groupsLabel);
+
+        strategy.ir.groups.forEach((group, index) => {
+          const row = doc.createElement("div");
+          row.style.cssText = "display:flex;gap:6px;align-items:center;";
+          const termsInput = doc.createElement("input");
+          termsInput.value = group.terms.join(", ");
+          termsInput.placeholder = `Concept ${index + 1} terms`;
+          termsInput.style.cssText = `${inputStyle}flex:1;`;
+          termsInput.addEventListener("input", () => {
+            group.terms = termsInput.value
+              .split(",")
+              .map((term) => term.trim())
+              .filter(Boolean);
+          });
+          row.appendChild(termsInput);
+          const removeGroup = doc.createElement("button");
+          removeGroup.textContent = "Remove";
+          removeGroup.style.cssText = `${buttonStyle}color:#b91c1c;border-color:#ef4444;`;
+          removeGroup.addEventListener("click", () => {
+            strategy.ir.groups.splice(index, 1);
+            if (strategy.ir.groups.length === 0)
+              strategy.ir.groups.push({ terms: [] });
+            render();
+          });
+          row.appendChild(removeGroup);
+          editor.appendChild(row);
+        });
+
+        const addGroup = doc.createElement("button");
+        addGroup.textContent = "Add concept group";
+        addGroup.style.cssText = buttonStyle;
+        addGroup.addEventListener("click", () => {
+          strategy.ir.groups.push({ terms: [] });
+          render();
+        });
+        editor.appendChild(addGroup);
+
+        const excludeInput = doc.createElement("input");
+        excludeInput.value = (strategy.ir.exclude || []).join(", ");
+        excludeInput.placeholder = "Exclude terms (comma-separated)";
+        excludeInput.style.cssText = inputStyle;
+        excludeInput.addEventListener("input", () => {
+          const excluded = excludeInput.value
+            .split(",")
+            .map((term) => term.trim())
+            .filter(Boolean);
+          if (excluded.length) strategy.ir.exclude = excluded;
+          else delete strategy.ir.exclude;
+        });
+        editor.appendChild(excludeInput);
+
+        const refresh = doc.createElement("button");
+        refresh.textContent = "Update compiled preview";
+        refresh.style.cssText = `${buttonStyle}font-weight:700;`;
+        refresh.addEventListener("click", () => render());
+        editor.appendChild(refresh);
+        strategySection.appendChild(editor);
+
+        // Per-source compiled queries
+        const providers: ScholarlyProviderId[] =
+          SMART_MODE_PROVIDERS[
+            strategy.recommendedMode as Exclude<
+              typeof strategy.recommendedMode,
+              "source"
+            >
+          ] || SMART_MODE_PROVIDERS.broad;
+        // Drop empty groups before compiling so an in-progress manual strategy
+        // (e.g. a freshly added concept) never crashes the per-provider compilers.
+        const previewIr = {
+          ...strategy.ir,
+          groups: strategy.ir.groups.filter((g) => g.terms.length > 0),
+        };
+        const compiled = compileQueriesForProviders(previewIr, providers);
+        const queryList = doc.createElement("div");
+        queryList.style.cssText = "display:flex;flex-direction:column;gap:8px;";
+        for (const id of providers) {
+          const row = doc.createElement("div");
+          row.style.cssText =
+            "border:1px solid var(--border-secondary);border-radius:6px;padding:8px;background:var(--background-secondary);";
+          const label = doc.createElement("div");
+          label.textContent = getProviderCapability(id).label;
+          label.style.cssText =
+            "font-size:10px;font-weight:600;color:var(--text-secondary);margin-bottom:4px;";
+          row.appendChild(label);
+          const code = doc.createElement("div");
+          code.textContent = compiled[id] || "(empty)";
+          code.style.cssText = `font-family:monospace;font-size:12px;word-break:break-word;${selectable}`;
+          row.appendChild(code);
+          queryList.appendChild(row);
+        }
+        strategySection.appendChild(queryList);
+
+        // Copy-all button
+        const copyBtn = doc.createElement("button");
+        copyBtn.textContent = "Copy all queries";
+        copyBtn.style.cssText = `${buttonStyle}margin-top:10px;`;
+        copyBtn.addEventListener("click", () => {
+          const text = providers
+            .map(
+              (id) =>
+                `${getProviderCapability(id).label}: ${compileQuery(previewIr, id)}`,
+            )
+            .join("\n");
+          const clipboard = new (Zotero.getMainWindow() as any).Clipboard();
+          clipboard.addText(text, "text/unicode").copy();
+          copyBtn.textContent = "Copied!";
+          setTimeout(() => {
+            copyBtn.textContent = "Copy all queries";
+          }, 1500);
+        });
+        strategySection.appendChild(copyBtn);
+      }
+      body.appendChild(strategySection);
+    }
+
     const history = doc.createElement("details");
     history.style.cssText =
       "border:1px solid var(--border-secondary);border-radius:8px;padding:10px 12px;background:var(--background-primary);";
@@ -9894,6 +10196,28 @@ function openCriteriaModal(doc: Document): void {
     footer.appendChild(warningText);
     const actions = doc.createElement("div");
     actions.style.cssText = "display:flex;gap:8px;";
+    const clearAll = doc.createElement("button");
+    clearAll.textContent = "Clear all";
+    clearAll.title =
+      "Reset every field in this draft to start fresh (saved revisions are unaffected)";
+    clearAll.style.cssText = `${buttonStyle}color:#b91c1c;border-color:#ef4444;`;
+    clearAll.addEventListener("click", () => {
+      const confirmed = doc.defaultView?.confirm(
+        "Clear all protocol fields in this draft? Saved revisions are not affected.",
+      );
+      if (!confirmed) return;
+      draft.researchQuestion = "";
+      draft.frameworkReason = "";
+      draft.dimensions = dimensionsForFramework(draft.framework, []);
+      draft.eligibilityRules = [];
+      draft.includeKeywordAids = [];
+      draft.excludeKeywordAids = [];
+      draft.provenance = [];
+      draft.searchStrategy = undefined;
+      toast(doc, "Protocol draft cleared");
+      render();
+    });
+    actions.appendChild(clearAll);
     const cancel = doc.createElement("button");
     cancel.textContent = "Cancel";
     cancel.style.cssText = buttonStyle;
@@ -9916,6 +10240,19 @@ function openCriteriaModal(doc: Document): void {
         includeKeywordAids: draft.includeKeywordAids,
         excludeKeywordAids: draft.excludeKeywordAids,
         provenance: draft.provenance,
+        // Drop empty concept groups so persisted strategies stay compilable
+        // (an empty group would crash the per-provider compilers downstream).
+        searchStrategy: draft.searchStrategy
+          ? {
+              ...draft.searchStrategy,
+              ir: {
+                ...draft.searchStrategy.ir,
+                groups: draft.searchStrategy.ir.groups.filter(
+                  (group) => group.terms.length > 0,
+                ),
+              },
+            }
+          : undefined,
       });
       await service.save(currentState!);
       draft = JSON.parse(JSON.stringify(revision));

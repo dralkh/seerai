@@ -22,6 +22,7 @@ import {
   EligibilityProposal,
   MappingProposal,
   ProtocolProvenance,
+  SearchStrategyProposal,
 } from "./types";
 import { openAIService } from "../openai";
 import { z } from "zod";
@@ -39,6 +40,7 @@ import {
   proposeExtractionTemplateFromContext,
 } from "./extractionWorkflow";
 import type { ReviewCancellationSignal } from "./cancellation";
+import type { SearchQueryIR, ConceptGroup } from "../search/queryIR";
 
 export interface ExtractedDocument {
   fileName: string;
@@ -146,6 +148,67 @@ async function callLLMForJSON(
     Zotero.debug(`[seerai] DocumentAnalyzer: LLM call error: ${e}`);
     throw new Error(`AI analysis failed: ${(e as Error).message || String(e)}`);
   }
+}
+
+/** Turn a ZodError into a compact "field path: message" list for the user. */
+export function formatZodIssues(error: z.ZodError): string {
+  return error.issues
+    .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+    .join("; ");
+}
+
+/**
+ * Call the LLM for JSON and validate it against a schema, retrying on
+ * validation failure by feeding the exact issues back to the model. On the
+ * final failure it throws an Error whose message names the offending fields,
+ * so the caller (and UI) can show *where* the response was malformed.
+ */
+export async function generateValidatedJSON<T>(
+  systemPrompt: string,
+  userPrompt: string,
+  schema: z.ZodType<T>,
+  options?: {
+    llm?: LlmChatCompletion;
+    signal?: ReviewCancellationSignal;
+  },
+  maxRetries = 2,
+): Promise<T> {
+  let lastError = "";
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const prompt =
+      attempt === 0
+        ? userPrompt
+        : `${userPrompt}\n\nYour previous response failed validation:\n${lastError}\nReturn corrected JSON that fixes exactly these problems. Output only the JSON object.`;
+    let response: Record<string, unknown> | null = null;
+    try {
+      response = await callLLMForJSON(systemPrompt, prompt, options?.llm);
+    } catch (e) {
+      lastError = (e as Error)?.message || String(e);
+      Zotero.debug(
+        `[seerai] DocumentAnalyzer: generation error (attempt ${attempt + 1}/${maxRetries + 1}): ${lastError}`,
+      );
+      if (attempt === maxRetries) {
+        throw new Error(
+          `AI generation failed after ${maxRetries + 1} attempts — ${lastError}`,
+        );
+      }
+      continue;
+    }
+    if (!response) {
+      lastError = "AI returned an empty response";
+      if (attempt === maxRetries) throw new Error(lastError);
+      continue;
+    }
+    const parsed = schema.safeParse(response);
+    if (parsed.success) return parsed.data;
+    lastError = formatZodIssues(parsed.error);
+    Zotero.debug(
+      `[seerai] DocumentAnalyzer: validation failed (attempt ${attempt + 1}/${maxRetries + 1}): ${lastError}`,
+    );
+  }
+  throw new Error(
+    `AI response failed validation after ${maxRetries + 1} attempts — ${lastError}`,
+  );
 }
 
 export async function extractDocumentContent(
@@ -275,9 +338,9 @@ export async function proposeScope(
   const currentCriteria = currentRevision.dimensions
     .map((dimension) => `${dimension.label}: ${dimension.value}`)
     .join("\n");
-  const response = await callLLMForJSON(
+  const generated = await generateValidatedJSON(
     "You design auditable systematic review protocols. Return valid JSON only. Select the framework that best matches the question rather than defaulting to PICO. Do not invent criteria. Ground document-derived fields with short verbatim quotes. Preserve useful current criteria when sources do not contradict them; you may replace or add values when sources suggest something better.",
-    `Step 1 of 4 — Scope (research question, framework, dimensions).
+    `Step 1 of 5 — Scope (research question, framework, dimensions).
 
 Current research question:
 ${currentRevision.researchQuestion || "(not set)"}
@@ -296,10 +359,9 @@ Return JSON with this exact shape:
 {"researchQuestion":string,"framework":string,"frameworkReason":string,"dimensions":[{"key":string,"value":string,"keywordAids":string[],"evidenceLabels":string[],"source"?:string,"quote"?:string,"confidence"?:number}]}
 
 Use only framework keys listed above. Return exactly one dimensions entry for every dimension in the selected framework.`,
-    options?.llm,
+    ScopeStepSchema,
+    options,
   );
-  if (!response) throw new Error("AI returned no scope proposal");
-  const generated = ScopeStepSchema.parse(response);
   const framework = FRAMEWORK_DEFS[generated.framework]
     ? generated.framework
     : currentRevision.framework;
@@ -382,9 +444,9 @@ export async function proposeEligibility(
   const existingExclude = currentRevision.eligibilityRules
     .filter((rule) => rule.type === "exclude")
     .map((rule) => rule.text);
-  const response = await callLLMForJSON(
+  const generated = await generateValidatedJSON(
     "You design auditable systematic review eligibility criteria. Return valid JSON only. Use the supplied scope and source documents. Keep existing rules that are still well supported; you may add, remove, or rewrite rules when documents warrant it.",
-    `Step 2 of 4 — Eligibility (inclusion/exclusion rules and keyword aids).
+    `Step 2 of 5 — Eligibility (inclusion/exclusion rules and keyword aids).
 
 Research question: ${scope.researchQuestion}
 Framework: ${scope.framework}
@@ -406,10 +468,9 @@ ${sourceText || "(none)"}
 
 Return JSON:
 {"inclusionRules":string[],"exclusionRules":string[],"includeKeywordAids":string[],"excludeKeywordAids":string[],"dimensionKeywordAids":{"<dimensionKey>":string[]}}`,
-    options?.llm,
+    EligibilityStepSchema,
+    options,
   );
-  if (!response) throw new Error("AI returned no eligibility proposal");
-  const generated = EligibilityStepSchema.parse(response);
   return {
     inclusionRules: generated.inclusionRules
       .map((text) => text.trim())
@@ -453,9 +514,9 @@ export async function proposeEvidenceMapping(
       dimension.evidenceLabels,
     ]),
   );
-  const response = await callLLMForJSON(
+  const generated = await generateValidatedJSON(
     "You connect each protocol dimension to evidence categories used by synthesis and gap analysis. Return valid JSON only. Pick only from the supplied label keys. Keep existing mappings that are still well supported; you may add or remove mappings when documents warrant it.",
-    `Step 3 of 4 — Evidence mapping.
+    `Step 3 of 5 — Evidence mapping.
 
 Research question: ${scope.researchQuestion}
 Framework: ${scope.framework}
@@ -487,10 +548,9 @@ ${sourceText || "(none)"}
 
 Return JSON:
 {"evidenceLabels":{"<dimensionKey>":["labelKey1","labelKey2"]}}`,
-    options?.llm,
+    MappingStepSchema,
+    options,
   );
-  if (!response) throw new Error("AI returned no evidence mapping");
-  const generated = MappingStepSchema.parse(response);
   const allowed = new Set(labelDefs.map((definition) => definition.k));
   const filtered: Record<string, string[]> = {};
   for (const [key, values] of Object.entries(generated.evidenceLabels)) {
@@ -499,6 +559,141 @@ Return JSON:
     );
   }
   return { evidenceLabels: filtered };
+}
+
+const SEARCH_MODES = [
+  "broad",
+  "biomedical",
+  "preprints",
+  "cryptography",
+  "repositories",
+  "source",
+] as const;
+
+const VALID_FIELDS = ["all", "title", "abstract", "title-abstract"] as const;
+
+/** Lenient schema: coerce/ default unknown enum values instead of throwing. */
+export const SearchStrategyStepSchema = z.object({
+  groups: z
+    .array(
+      z.object({
+        terms: z.array(z.string()),
+        mesh: z.array(z.string()).optional(),
+        phrase: z.boolean().optional(),
+      }),
+    )
+    .min(1),
+  exclude: z.array(z.string()).optional(),
+  field: z.enum(VALID_FIELDS).catch("all").optional(),
+  recommendedMode: z.enum(SEARCH_MODES).catch("broad"),
+  rationale: z.string().optional(),
+});
+
+export function normalizeStrategyIR(
+  groups: {
+    terms: string[];
+    mesh?: string[];
+    phrase?: boolean;
+  }[],
+): ConceptGroup[] {
+  return groups
+    .map((g) => {
+      const terms = g.terms.map((t) => t.trim()).filter((t) => t.length > 0);
+      if (terms.length === 0) return null;
+      const group: ConceptGroup = { terms };
+      const mesh = (g.mesh || [])
+        .map((m) => m.trim())
+        .filter((m) => m.length > 0);
+      if (mesh.length > 0) group.mesh = mesh;
+      if (g.phrase === true) group.phrase = true;
+      return group;
+    })
+    .filter((g): g is ConceptGroup => g !== null);
+}
+
+export async function proposeSearchStrategy(
+  scope: ScopeProposal,
+  eligibility: EligibilityProposal,
+  mapping: MappingProposal,
+  currentRevision: ProtocolRevision,
+  options?: {
+    llm?: LlmChatCompletion;
+    signal?: ReviewCancellationSignal;
+  },
+): Promise<SearchStrategyProposal> {
+  const criteriaList = scope.dimensions
+    .map(
+      (dimension) =>
+        `${dimension.key} · ${dimension.label}: ${dimension.value}`,
+    )
+    .join("\n");
+  const includeKeywords = Array.from(
+    new Set([
+      ...scope.dimensions.flatMap((d) => d.keywordAids),
+      ...eligibility.includeKeywordAids,
+    ]),
+  );
+  const excludeKeywords = eligibility.excludeKeywordAids;
+  const mappingLines = Object.entries(mapping.evidenceLabels)
+    .map(([key, labels]) => `${key}: ${labels.join(", ") || "(none)"}`)
+    .join("\n");
+  const generated = await generateValidatedJSON(
+    "You are a systematic review search strategist. Convert the review protocol into a structured, source-agnostic search specification that will be compiled into each database's native query dialect. Return valid JSON only.",
+    `Step 5 of 5 — Search strategy.
+
+Research question: ${scope.researchQuestion}
+Framework: ${scope.framework}
+
+Scope criteria:
+${criteriaList}
+
+Inclusion rules:
+${eligibility.inclusionRules.map((r) => `- ${r}`).join("\n") || "(none)"}
+
+Exclusion rules:
+${eligibility.exclusionRules.map((r) => `- ${r}`).join("\n") || "(none)"}
+
+Include keyword aids: ${includeKeywords.join(", ") || "(none)"}
+Exclude keyword aids: ${excludeKeywords.join(", ") || "(none)"}
+
+Evidence mappings:
+${mappingLines || "(none)"}
+
+Return JSON with this exact shape:
+{"groups":[{"terms":["canonical","synonym","abbreviation"],"mesh":["MeSH Term"],"phrase":false}],"exclude":["term"],"field":"all","recommendedMode":"biomedical","rationale":"1-2 sentences"}
+
+Rules:
+- Each object in "groups" is ONE concept; its "terms" are synonyms that will be OR-ed together. Distinct concepts go in SEPARATE groups (groups are AND-ed).
+- Put the most representative term first in each group's "terms".
+- "mesh": include MeSH / controlled-vocabulary descriptors ONLY for biomedical concepts; omit otherwise.
+- "exclude": concepts to remove from results, derived from exclusion criteria.
+- "field": use "all" unless the protocol clearly implies title-only or abstract scope.
+- "recommendedMode": choose from broad, biomedical, preprints, cryptography, repositories, source. Use "biomedical" for clinical/health questions, "preprints" for fast-moving research, "broad" for general/interdisciplinary, "repositories" for grey literature, "cryptography" for crypto/security, "source" only when a single source is clearly indicated.
+- "rationale": explain the mode choice and key search decisions.`,
+    SearchStrategyStepSchema,
+    options,
+  );
+  const groups = normalizeStrategyIR(generated.groups);
+  if (groups.length === 0) throw new Error("AI returned no concept groups");
+  const ir: SearchQueryIR = { groups };
+  const exclude = (generated.exclude || [])
+    .map((e) => e.trim())
+    .filter((e) => e.length > 0);
+  if (exclude.length > 0) ir.exclude = exclude;
+  if (generated.field) ir.field = generated.field;
+  const warnings: string[] = [];
+  if (groups.length < 2) {
+    warnings.push(
+      "Search strategy has only one concept group — consider adding more to improve specificity.",
+    );
+  }
+  return {
+    ir,
+    recommendedMode: generated.recommendedMode,
+    rationale: generated.rationale?.trim(),
+    warnings,
+    provenance: [],
+  };
 }
 
 export interface RunProtocolGenerationInput {
@@ -511,6 +706,8 @@ export interface RunProtocolGenerationInput {
     step: ProtocolGenerationStep,
     result: ProtocolGenerationResult,
   ) => void;
+  /** When set, only these steps run; the rest keep their baseline values. */
+  steps?: ProtocolGenerationStep[];
   options?: { llm?: LlmChatCompletion; signal?: ReviewCancellationSignal };
 }
 
@@ -558,65 +755,96 @@ export async function runProtocolGeneration(
     summary: {},
     errors: {},
   };
-  try {
-    result.scope = await proposeScope(documents, baselineRevision, options);
-    result.summary.scope = `${result.scope.framework} · ${result.scope.dimensions.length} dimensions`;
-    onStep?.("scope", result);
-  } catch (error) {
-    result.errors.scope =
-      error instanceof Error ? error.message : String(error);
-    onStep?.("scope", result);
+  // A step only runs when selected (or when no selection was given). Skipped
+  // steps keep their baseline-seeded value, so a regenerated step still sees
+  // every other step as context.
+  const shouldRun = (step: ProtocolGenerationStep): boolean =>
+    !input.steps || input.steps.includes(step);
+
+  if (shouldRun("scope")) {
+    try {
+      result.scope = await proposeScope(documents, baselineRevision, options);
+      result.summary.scope = `${result.scope.framework} · ${result.scope.dimensions.length} dimensions`;
+      onStep?.("scope", result);
+    } catch (error) {
+      result.errors.scope =
+        error instanceof Error ? error.message : String(error);
+      onStep?.("scope", result);
+    }
   }
-  try {
-    result.eligibility = await proposeEligibility(
-      result.scope,
-      documents,
-      baselineRevision,
-      options,
-    );
-    result.summary.eligibility = `${result.eligibility.inclusionRules.length} include · ${result.eligibility.exclusionRules.length} exclude`;
-    onStep?.("eligibility", result);
-  } catch (error) {
-    result.errors.eligibility =
-      error instanceof Error ? error.message : String(error);
-    onStep?.("eligibility", result);
+  if (shouldRun("eligibility")) {
+    try {
+      result.eligibility = await proposeEligibility(
+        result.scope,
+        documents,
+        baselineRevision,
+        options,
+      );
+      result.summary.eligibility = `${result.eligibility.inclusionRules.length} include · ${result.eligibility.exclusionRules.length} exclude`;
+      onStep?.("eligibility", result);
+    } catch (error) {
+      result.errors.eligibility =
+        error instanceof Error ? error.message : String(error);
+      onStep?.("eligibility", result);
+    }
   }
-  try {
-    result.mapping = await proposeEvidenceMapping(
-      result.scope,
-      result.eligibility,
-      documents,
-      labelDefs,
-      baselineRevision,
-      options,
-    );
-    const labelCount = Object.values(result.mapping.evidenceLabels).reduce(
-      (sum, values) => sum + values.length,
-      0,
-    );
-    result.summary.mapping = `${labelCount} label mapping${labelCount === 1 ? "" : "s"}`;
-    onStep?.("mapping", result);
-  } catch (error) {
-    result.errors.mapping =
-      error instanceof Error ? error.message : String(error);
-    onStep?.("mapping", result);
+  if (shouldRun("mapping")) {
+    try {
+      result.mapping = await proposeEvidenceMapping(
+        result.scope,
+        result.eligibility,
+        documents,
+        labelDefs,
+        baselineRevision,
+        options,
+      );
+      const labelCount = Object.values(result.mapping.evidenceLabels).reduce(
+        (sum, values) => sum + values.length,
+        0,
+      );
+      result.summary.mapping = `${labelCount} label mapping${labelCount === 1 ? "" : "s"}`;
+      onStep?.("mapping", result);
+    } catch (error) {
+      result.errors.mapping =
+        error instanceof Error ? error.message : String(error);
+      onStep?.("mapping", result);
+    }
   }
-  try {
-    result.template = await proposeExtractionTemplateFromContext(
-      result.scope,
-      result.eligibility,
-      result.mapping,
-      documents,
-      baselineTemplate,
-      baselineRevision.id,
-      options,
-    );
-    result.summary.template = `${result.template.outcomes.length} outcome${result.template.outcomes.length === 1 ? "" : "s"}`;
-    onStep?.("template", result);
-  } catch (error) {
-    result.errors.template =
-      error instanceof Error ? error.message : String(error);
-    onStep?.("template", result);
+  if (shouldRun("template")) {
+    try {
+      result.template = await proposeExtractionTemplateFromContext(
+        result.scope,
+        result.eligibility,
+        result.mapping,
+        documents,
+        baselineTemplate,
+        baselineRevision.id,
+        options,
+      );
+      result.summary.template = `${result.template.outcomes.length} outcome${result.template.outcomes.length === 1 ? "" : "s"}`;
+      onStep?.("template", result);
+    } catch (error) {
+      result.errors.template =
+        error instanceof Error ? error.message : String(error);
+      onStep?.("template", result);
+    }
+  }
+  if (shouldRun("search-strategy")) {
+    try {
+      result.searchStrategy = await proposeSearchStrategy(
+        result.scope,
+        result.eligibility,
+        result.mapping,
+        baselineRevision,
+        options,
+      );
+      result.summary.searchStrategy = `${result.searchStrategy.ir.groups.length} concepts · ${result.searchStrategy.recommendedMode}`;
+      onStep?.("search-strategy", result);
+    } catch (error) {
+      result.errors["search-strategy"] =
+        error instanceof Error ? error.message : String(error);
+      onStep?.("search-strategy", result);
+    }
   }
   return result;
 }

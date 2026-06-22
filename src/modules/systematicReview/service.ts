@@ -168,7 +168,12 @@ export class SystematicReviewService {
     documents: ExtractedDocument[],
     context: ProtocolGenerationContext = {},
     onStep?: (
-      step: "scope" | "eligibility" | "mapping" | "template",
+      step:
+        | "scope"
+        | "eligibility"
+        | "mapping"
+        | "template"
+        | "search-strategy",
       result: ProtocolGenerationResult,
     ) => void,
   ): Promise<ProtocolGenerationResult> {
@@ -182,6 +187,7 @@ export class SystematicReviewService {
       baselineTemplate: context.baselineTemplate,
       labelDefs: state.labelDefs,
       space: project,
+      steps: context.steps,
       onStep,
     };
     return runProtocolGeneration(input);

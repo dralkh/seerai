@@ -479,6 +479,9 @@ export class OpenAIService {
       configOverride?.apiKey || resolved?.provider.apiKey || prefs.apiKey;
     const model =
       configOverride?.model || resolved?.model.modelId || prefs.model;
+    if (!apiURL) {
+      throw new Error("No API URL configured for this model");
+    }
     const rateLimiter = RateLimiter.getInstance();
     if (resolved) {
       const estimatedTokens = JSON.stringify(messages).length / 3.2;

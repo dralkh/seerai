@@ -625,12 +625,14 @@ export function showProviderManagerDialog(
     getPresetById(presetId)?.adapterId === "local-cli";
 
   const applyCliMode = () => {
-    const cli = isLocalCliPreset(presetSelect.value);
+    const presetId = presetSelect.value;
+    const cli = isLocalCliPreset(presetId);
+    const isCustom = presetId === "custom";
     keyField.hidden = cli;
     advanced.hidden = cli;
     cliHint.hidden = !cli;
     if (cli) {
-      const preset = getPresetById(presetSelect.value);
+      const preset = getPresetById(presetId);
       cliHint.textContent =
         preset?.notes ||
         "Uses your locally installed CLI and its login. No API key is stored by seerai.";
@@ -638,10 +640,30 @@ export function showProviderManagerDialog(
     } else {
       testButton.textContent = "Test connection";
     }
+    // Always surface the Base URL field for custom providers so it is editable.
+    if (isCustom && !cli) {
+      advanced.open = true;
+    }
   };
 
   const applyPreset = () => {
-    const preset = getPresetById(presetSelect.value);
+    const presetId = presetSelect.value;
+    if (presetId === "custom") {
+      if (!existing) {
+        nameInput.value = "Custom provider";
+        urlInput.value = "";
+      }
+      urlInput.placeholder = "https://api.example.com/v1";
+      authSelect.value = existing?.authMethod || "bearer";
+      headerInput.value = existing?.authHeaderName || "";
+      keyInput.placeholder = "API key";
+      extraInput.value = existing?.extraHeaders
+        ? JSON.stringify(existing.extraHeaders, null, 2)
+        : "";
+      applyCliMode();
+      return;
+    }
+    const preset = getPresetById(presetId);
     if (!preset) return;
     nameInput.value = preset.name;
     urlInput.value = preset.apiURL;
@@ -750,7 +772,14 @@ export function showProviderManagerDialog(
     try {
       const draft = draftConnection();
       if (!draft.name) throw new Error("Display name is required.");
-      new URL(draft.apiURL);
+      if (!isLocalCliPreset(presetSelect.value)) {
+        if (!draft.apiURL) throw new Error("Base URL is required.");
+        try {
+          new URL(draft.apiURL);
+        } catch {
+          throw new Error("Base URL is not a valid absolute URL.");
+        }
+      }
       const preset = getPresetById(presetSelect.value);
       if (preset?.requiresApiKey && !draft.apiKey) {
         throw new Error("This provider requires an API key.");

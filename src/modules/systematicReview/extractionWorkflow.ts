@@ -184,18 +184,10 @@ export async function proposeExtractionTemplateFromContext(
         .map((outcome) => outcome.name)
         .join(", ")}`
     : "No existing template.";
-  const response = await (
-    options?.llm ?? openAIService.chatCompletion.bind(openAIService)
-  )(
-    [
-      {
-        role: "system",
-        content:
-          "You design practical systematic-review extraction templates. Return one JSON object only. Define outcomes that can be applied consistently across included studies. Use the full protocol context to produce rich outcome definitions (name, aliases, description, measures, timepoints, unit, direction, required). Preserve existing outcomes that remain well supported; add new outcomes, measures, or timepoints when the context warrants it. Do not invent outcome values or study results.",
-      },
-      {
-        role: "user",
-        content: `Step 4 of 4 — Extraction template.
+  const chat = options?.llm ?? openAIService.chatCompletion.bind(openAIService);
+  const systemContent =
+    "You design practical systematic-review extraction templates. Return one JSON object only. Define outcomes that can be applied consistently across included studies. Use the full protocol context to produce rich outcome definitions (name, aliases, description, measures, timepoints, unit, direction, required). Preserve existing outcomes that remain well supported; add new outcomes, measures, or timepoints when the context warrants it. Do not invent outcome values or study results.";
+  const userContent = `Step 4 of 5 — Extraction template.
 
 Research question: ${scope.researchQuestion}
 Framework: ${scope.framework}
@@ -218,15 +210,49 @@ Uploaded source documents (excerpts):
 ${sourceText ? sourceText.substring(0, 60000) : "(none)"}
 
 Return JSON with this exact shape:
-{"name":string,"instructions":string,"outcomes":[{"name":string,"aliases":string[],"description":string,"measures":("OR"|"RR"|"HR"|"MD"|"SMD")[],"timepoints":string[],"unit"?:string,"direction"?:("higher_better"|"lower_better"),"required":boolean}]}`,
-      },
-    ],
-    { signal: options?.signal, timeoutMs: 180000, isolated: true },
-  );
-  if (options?.signal?.aborted) {
-    throw new Error("Request was cancelled");
+{"name":string,"instructions":string,"outcomes":[{"name":string,"aliases":string[],"description":string,"measures":("OR"|"RR"|"HR"|"MD"|"SMD")[],"timepoints":string[],"unit"?:string,"direction"?:("higher_better"|"lower_better"),"required":boolean}]}`;
+
+  // Validate the model output, retrying with the exact issues fed back so a
+  // single malformed field doesn't abort the whole step.
+  const maxRetries = 2;
+  let parsed: z.infer<typeof TemplateProposalSchema> | null = null;
+  let lastError = "";
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const userMessage =
+      attempt === 0
+        ? userContent
+        : `${userContent}\n\nYour previous response failed validation:\n${lastError}\nReturn corrected JSON that fixes exactly these problems. Output only the JSON object.`;
+    const response = await chat(
+      [
+        { role: "system", content: systemContent },
+        { role: "user", content: userMessage },
+      ],
+      { signal: options?.signal, timeoutMs: 180000, isolated: true },
+    );
+    if (options?.signal?.aborted) {
+      throw new Error("Request was cancelled");
+    }
+    let payload: unknown;
+    try {
+      payload = parseJSON(response);
+    } catch (e) {
+      lastError = (e as Error)?.message || String(e);
+      continue;
+    }
+    const result = TemplateProposalSchema.safeParse(payload);
+    if (result.success) {
+      parsed = result.data;
+      break;
+    }
+    lastError = result.error.issues
+      .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
+      .join("; ");
   }
-  const parsed = TemplateProposalSchema.parse(parseJSON(response));
+  if (!parsed) {
+    throw new Error(
+      `Extraction template failed validation after ${maxRetries + 1} attempts — ${lastError}`,
+    );
+  }
   const now = new Date().toISOString();
   const baseId = baselineTemplate?.id || `template_${Date.now()}`;
   const baseRevision = baselineTemplate

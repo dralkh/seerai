@@ -1,4 +1,4 @@
-# Seerai The Best Zotero research framework plugin
+# seerai — AI Research Assistant Plugin for Zotero
 
 <p align="center">
   <img width="200" height="200" alt="logo" src="https://github.com/user-attachments/assets/26e6aa5b-4b70-464a-8198-6ec48544593d" />
@@ -42,6 +42,35 @@
 </p>
 
 **seerai** is an intelligent research assistant plugin for Zotero 9 that integrates AI-powered chat, advanced search, and data extraction capabilities directly into your research workflow. Chat with your papers, extract structured data, and accelerate your literature review with a local-first, privacy-focused design.
+
+
+---
+
+## Installation
+
+### From GitHub (Recommended)
+
+1. Download the latest release (`.xpi` file) from [Releases](https://github.com/dralkh/seerai/releases).
+2. In Zotero, go to **Tools → Add-ons**.
+3. Click the gear icon ⚙️ and select **Install Add-on From File...**.
+4. Select the downloaded `.xpi` file.
+5. Restart Zotero.
+
+### From Source
+
+```bash
+# Clone the repository
+git clone https://github.com/dralkh/seerai.git
+cd seerai
+
+# Install dependencies
+npm install
+
+# Build the plugin
+npm run build
+
+# The .xpi file will be generated in the root directory
+```
 
 ---
 
@@ -152,45 +181,17 @@
 - **Model Presets**: Pre-configured settings for popular providers:
   - OpenAI, Anthropic, Google, xAI
   - DeepSeek, Mistral, Groq, Together, Fireworks, Cohere, OpenRouter
-  - Local Models (Openai compatible endpoint
+  - Local Models (Openai compatible endpoint)
     - 4-8g Vram - Qwen3.5 2B / Qwen3.5 4B
     - 12-16g Vram - Qwen3.5 9B / Gemma 4 12B
     - 24-32g Vram - Qwen3.6 27B / Qwen3.6 35B A3B / Gemma 4 31B / Gemma 4 26B A4B
-    - 48-96g Vram - Qwen3.5 122B A10B / Mistral Medium 3.5 / NVIDIA Nemotron 3 Super / 
-    - >128g Vram - MiniMax-M3 / MiMo-V2.5-Pro / GLM-5.2 / Kimi K2.6 / DeepSeek V4 Pro / Nemotron 3 Ultra / Qwen3.5 397B A17B / DeepSeek-V4-Flash
+    - 48-96g Vram - Qwen3.5 122B A10B / Mistral Medium 3.5 / NVIDIA Nemotron 3 Super /
+    - 128g Vram - MiniMax-M3 / MiMo-V2.5-Pro / GLM-5.2 / Kimi K2.6 / DeepSeek V4 Pro / Nemotron 3 Ultra / Qwen3.5 397B A17B / DeepSeek-V4-Flash
 
 - **Local CLI Agents**: Route chat through a CLI you already have installed and logged in — **Codex**, **Claude Code**, **Antigravity**, or **GitHub Copilot**. seerai stores no credentials; it reuses the CLI's own session.
 - **Capability-Based Routing**: Assign separate models per capability — chat, embeddings, image, video, text-to-speech, and speech-to-text — and route each request to the right endpoint automatically.
 - **Smart Rate Limiting**: Per-model configuration for concurrency, RPM, and TPM to prevent provider errors.
 - **Per-Conversation Models**: Switch models dynamically based on the task complexity.
-
----
-
-## Installation
-
-### From GitHub (Recommended)
-
-1. Download the latest release (`.xpi` file) from [Releases](https://github.com/dralkh/seerai/releases).
-2. In Zotero, go to **Tools → Add-ons**.
-3. Click the gear icon ⚙️ and select **Install Add-on From File...**.
-4. Select the downloaded `.xpi` file.
-5. Restart Zotero.
-
-### From Source
-
-```bash
-# Clone the repository
-git clone https://github.com/dralkh/seerai.git
-cd seerai
-
-# Install dependencies
-npm install
-
-# Build the plugin
-npm run build
-
-# The .xpi file will be generated in the root directory
-```
 
 ---
 
