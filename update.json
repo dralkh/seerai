@@ -3,6 +3,17 @@
     "seerai@zotero.org": {
       "updates": [
         {
+          "version": "1.9.0",
+          "update_link": "https://github.com/dralkh/seerai/releases/download/1.9.0/seerai.xpi",
+          "update_hash": "sha512:0a7141a40f199cb488eb7a06a238543019a7e58f8acee52e9abbc9ba9bf52f38dc6e48e17e565b2490bf673cd6d0968170a63d1a642270a19ab25a878dec5ae3",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "8.0",
+              "strict_max_version": "9.*"
+            }
+          }
+        },
+        {
           "version": "1.8.2",
           "update_link": "https://github.com/dralkh/seerai/releases/download/1.8.2/seerai.xpi",
           "update_hash": "sha512:2505c3a506b76ab67a8a1bdbe715b4ff96bf2e2d9cc60cc93db78097dc20c5f409ab0fe81a0e16a041aebbb79c459806308dff805c004eadabed0f1c16c09184",
