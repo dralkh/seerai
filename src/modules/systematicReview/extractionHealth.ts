@@ -3,7 +3,6 @@ import {
   PaperExtractionLog,
   SystematicReviewState,
 } from "./types";
-import { getSRService } from "./service";
 
 export function getIncludedPapers(state: SystematicReviewState) {
   return state.papers.filter(
@@ -16,7 +15,9 @@ export function getIncludedPapers(state: SystematicReviewState) {
 export function getActiveExtractionTemplateOutcomes(
   state: SystematicReviewState,
 ): Array<{ id: string; name: string; required: boolean }> {
-  const template = getSRService().getExtractionTemplate(state);
+  const template = state.extractionTemplates.find(
+    (candidate) => candidate.id === state.activeExtractionTemplateId,
+  );
   if (!template) return [];
   return template.outcomes.map((outcome) => ({
     id: outcome.id,

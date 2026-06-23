@@ -142,34 +142,34 @@ describe("Required outcomes are informational, not failures", function () {
     ] as unknown as SystematicReviewState["reviewJobs"];
     assert.isTrue(hasFailedExtractionMetrics(state, 1));
   });
-});
 
-describe("Extraction no longer requires manual template approval", function () {
-  const service = new SystematicReviewService({} as SystematicReviewStore);
+  describe("Extraction no longer requires manual template approval", function () {
+    const service = new SystematicReviewService({} as SystematicReviewStore);
 
-  it("auto-activates the latest draft template when none is approved", async function () {
-    const state = baseState(template("draft"));
-    assert.isUndefined(state.activeExtractionTemplateId);
-    try {
-      await service.startReviewJob(state, "extraction", [1]);
-    } catch {
-      // Persisting via the stub store rejects; the auto-activation has already
-      // happened synchronously before the save.
-    }
-    assert.equal(state.activeExtractionTemplateId, "tpl");
-    assert.equal(state.extractionTemplates[0].status, "active");
-  });
+    it("auto-activates the latest draft template when none is approved", async function () {
+      const state = baseState(template("draft"));
+      assert.isUndefined(state.activeExtractionTemplateId);
+      try {
+        await service.startReviewJob(state, "extraction", [1]);
+      } catch {
+        // Persisting via the stub store rejects; the auto-activation has already
+        // happened synchronously before the save.
+      }
+      assert.equal(state.activeExtractionTemplateId, "tpl");
+      assert.equal(state.extractionTemplates[0].status, "active");
+    });
 
-  it("errors clearly when no template exists at all", async function () {
-    const state = baseState(template("draft"));
-    state.extractionTemplates = [];
-    state.activeExtractionTemplateId = undefined;
-    let message = "";
-    try {
-      await service.startReviewJob(state, "extraction", [1]);
-    } catch (error) {
-      message = error instanceof Error ? error.message : String(error);
-    }
-    assert.include(message, "Generate an extraction template");
+    it("errors clearly when no template exists at all", async function () {
+      const state = baseState(template("draft"));
+      state.extractionTemplates = [];
+      state.activeExtractionTemplateId = undefined;
+      let message = "";
+      try {
+        await service.startReviewJob(state, "extraction", [1]);
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      assert.include(message, "Generate an extraction template");
+    });
   });
 });

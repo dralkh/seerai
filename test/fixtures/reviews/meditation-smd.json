@@ -1,0 +1,189 @@
+{
+  "id": "meditation-smd",
+  "title": "Mindfulness meditation programs for psychological stress and well-being: a meta-analysis",
+  "citation": "Modeled on Goyal M et al., 'Meditation Programs for Psychological Stress and Well-being', JAMA Internal Medicine 2014;174(3):357-368. Per-study standardized mean differences are representative test data structured to match the review's design (pooled SMD for anxiety; heterogeneous well-being evidence); they are NOT verbatim transcriptions. Grounding is evaluated against the source text in this fixture.",
+  "regime": "continuous",
+  "protocol": {
+    "framework": "PICOTS",
+    "researchQuestion": "In adults with psychological stress, do structured mindfulness meditation programs compared with active or inactive controls improve anxiety and well-being?",
+    "values": {
+      "P": "Adults experiencing psychological stress",
+      "I": "Structured mindfulness meditation programs (e.g., MBSR, MBCT)",
+      "C": "Active control, usual care, or waitlist",
+      "O": "Anxiety symptoms; psychological well-being",
+      "T": "8 weeks (post-program)",
+      "S": "Randomized controlled trials"
+    }
+  },
+  "template": {
+    "id": "tpl_med",
+    "revisionId": "tpl_med_r1",
+    "protocolRevisionId": "rev",
+    "name": "Meditation continuous outcomes",
+    "instructions": "Extract the reported standardized mean difference (SMD) with its 95% confidence interval for each outcome at the end of the program, plus the total number of participants analyzed.",
+    "outcomes": [
+      {
+        "id": "anx",
+        "name": "Anxiety symptoms",
+        "aliases": ["anxiety", "anxiety symptoms", "anxiety score"],
+        "description": "Standardized mean difference in anxiety symptoms, meditation vs control (negative favors meditation).",
+        "measures": ["SMD"],
+        "timepoints": [],
+        "unit": "",
+        "direction": "lower_better",
+        "required": false
+      },
+      {
+        "id": "wb",
+        "name": "Psychological well-being",
+        "aliases": [
+          "well-being",
+          "wellbeing",
+          "quality of life",
+          "psychological well-being"
+        ],
+        "description": "Standardized mean difference in psychological well-being, meditation vs control.",
+        "measures": ["SMD"],
+        "timepoints": [],
+        "unit": "",
+        "direction": "lower_better",
+        "required": false
+      }
+    ],
+    "status": "active",
+    "source": "user",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  "studies": [
+    {
+      "paperId": 201,
+      "label": "MBSR anxiety trial A",
+      "source": "Randomized trial of an 8-week mindfulness-based stress reduction program. A total of 120 adults with elevated stress were analyzed. Compared with an active control, the program reduced anxiety symptoms (standardized mean difference -0.38; 95% CI, -0.62 to -0.14). A negative value favors meditation.",
+      "expected": [
+        {
+          "outcomeId": "anx",
+          "effectType": "SMD",
+          "effectSize": -0.38,
+          "ciLow": -0.62,
+          "ciHigh": -0.14,
+          "n": 120,
+          "quote": "standardized mean difference -0.38; 95% CI, -0.62 to -0.14",
+          "tolerance": 0.03
+        }
+      ]
+    },
+    {
+      "paperId": 202,
+      "label": "MBCT anxiety trial B",
+      "source": "Randomized controlled trial of mindfulness-based cognitive therapy. Among 156 participants analyzed at 8 weeks, anxiety symptoms were lower in the meditation arm (standardized mean difference -0.31; 95% CI, -0.52 to -0.10).",
+      "expected": [
+        {
+          "outcomeId": "anx",
+          "effectType": "SMD",
+          "effectSize": -0.31,
+          "ciLow": -0.52,
+          "ciHigh": -0.1,
+          "n": 156,
+          "quote": "standardized mean difference -0.31; 95% CI, -0.52 to -0.10",
+          "tolerance": 0.03
+        }
+      ]
+    },
+    {
+      "paperId": 203,
+      "label": "Meditation anxiety trial C",
+      "source": "In this randomized study of 98 stressed adults, an 8-week meditation program was compared with a waitlist control. Anxiety symptoms improved with meditation (standardized mean difference -0.45; 95% CI, -0.86 to -0.04).",
+      "expected": [
+        {
+          "outcomeId": "anx",
+          "effectType": "SMD",
+          "effectSize": -0.45,
+          "ciLow": -0.86,
+          "ciHigh": -0.04,
+          "n": 98,
+          "quote": "standardized mean difference -0.45; 95% CI, -0.86 to -0.04",
+          "tolerance": 0.03
+        }
+      ]
+    },
+    {
+      "paperId": 204,
+      "label": "Meditation anxiety trial D",
+      "source": "A randomized trial enrolling 140 participants evaluated a structured meditation program against an active education control. At program end, anxiety was reduced in the meditation group (standardized mean difference -0.34; 95% CI, -0.58 to -0.10).",
+      "expected": [
+        {
+          "outcomeId": "anx",
+          "effectType": "SMD",
+          "effectSize": -0.34,
+          "ciLow": -0.58,
+          "ciHigh": -0.1,
+          "n": 140,
+          "quote": "standardized mean difference -0.34; 95% CI, -0.58 to -0.10",
+          "tolerance": 0.03
+        }
+      ]
+    },
+    {
+      "paperId": 205,
+      "label": "Well-being trial E (positive)",
+      "source": "Randomized trial of a mindfulness program focused on psychological well-being. Among 110 adults analyzed, the program improved well-being relative to control (standardized mean difference 0.42; 95% CI, 0.17 to 0.67), where a positive value favors meditation on this well-being scale.",
+      "expected": [
+        {
+          "outcomeId": "wb",
+          "effectType": "SMD",
+          "effectSize": 0.42,
+          "ciLow": 0.17,
+          "ciHigh": 0.67,
+          "n": 110,
+          "quote": "standardized mean difference 0.42; 95% CI, 0.17 to 0.67",
+          "tolerance": 0.03
+        }
+      ]
+    },
+    {
+      "paperId": 206,
+      "label": "Well-being trial F (null/negative)",
+      "source": "Randomized controlled trial measuring psychological well-being after an 8-week meditation course. Among 132 participants analyzed, the meditation group reported lower well-being scores than the active control on the primary instrument (standardized mean difference -0.40; 95% CI, -0.64 to -0.16).",
+      "expected": [
+        {
+          "outcomeId": "wb",
+          "effectType": "SMD",
+          "effectSize": -0.4,
+          "ciLow": -0.64,
+          "ciHigh": -0.16,
+          "n": 132,
+          "quote": "standardized mean difference -0.40; 95% CI, -0.64 to -0.16",
+          "tolerance": 0.03
+        }
+      ]
+    }
+  ],
+  "gold": {
+    "synthesis": [
+      {
+        "outcome": "Anxiety symptoms",
+        "measure": "SMD",
+        "method": "random_effects",
+        "status": "poolable",
+        "direction": "positive",
+        "minStudies": 3,
+        "estimate": { "value": -0.36, "tolerance": 0.2 },
+        "i2Max": 60
+      },
+      {
+        "outcome": "Psychological well-being",
+        "measure": "SMD",
+        "method": "random_effects",
+        "status": "poolable",
+        "direction": "mixed",
+        "minStudies": 2
+      }
+    ],
+    "narrativeOutcomes": [],
+    "gaps": {
+      "expectGapOutcomes": ["Psychological well-being"],
+      "expectAdequateOutcomes": ["Anxiety symptoms"]
+    }
+  }
+}

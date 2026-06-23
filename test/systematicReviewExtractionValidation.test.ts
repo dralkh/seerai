@@ -148,56 +148,56 @@ describe("buildExtractionRows safeguards", function () {
       auroc.issues?.find((issue) => issue.code === "unrecognized_measure"),
     );
   });
-});
 
-describe("validateExtractionRow by measure family", function () {
-  const base = {
-    id: "r",
-    outcome: "Discriminative Performance",
-    verificationStatus: "proposed" as const,
-  };
+  describe("validateExtractionRow by measure family", function () {
+    const base = {
+      id: "r",
+      outcome: "Discriminative Performance",
+      verificationStatus: "proposed" as const,
+    };
 
-  it("accepts a non-poolable diagnostic row with a single value", function () {
-    const row = {
-      ...base,
-      effectType: "AUROC",
-      effectSize: 0.91,
-    } as ExtractionRow;
-    assert.isTrue(validateExtractionRow(row).valid);
-  });
+    it("accepts a non-poolable diagnostic row with a single value", function () {
+      const row = {
+        ...base,
+        effectType: "AUROC",
+        effectSize: 0.91,
+      } as ExtractionRow;
+      assert.isTrue(validateExtractionRow(row).valid);
+    });
 
-  it("still requires full effect + CI for poolable ratio measures", function () {
-    const incomplete = {
-      ...base,
-      outcome: "Mortality",
-      effectType: "RR",
-      effectSize: 0.8,
-    } as ExtractionRow;
-    const result = validateExtractionRow(incomplete);
-    assert.isFalse(result.valid);
-    assert.isOk(
-      result.errors.find((error) => /confidence interval/i.test(error)),
-    );
+    it("still requires full effect + CI for poolable ratio measures", function () {
+      const incomplete = {
+        ...base,
+        outcome: "Mortality",
+        effectType: "RR",
+        effectSize: 0.8,
+      } as ExtractionRow;
+      const result = validateExtractionRow(incomplete);
+      assert.isFalse(result.valid);
+      assert.isOk(
+        result.errors.find((error) => /confidence interval/i.test(error)),
+      );
 
-    const complete = {
-      ...base,
-      outcome: "Mortality",
-      effectType: "RR",
-      effectSize: 0.8,
-      ciLow: 0.6,
-      ciHigh: 1.0,
-      n: 100,
-      events: 10,
-    } as ExtractionRow;
-    assert.isTrue(validateExtractionRow(complete).valid);
-  });
+      const complete = {
+        ...base,
+        outcome: "Mortality",
+        effectType: "RR",
+        effectSize: 0.8,
+        ciLow: 0.6,
+        ciHigh: 1.0,
+        n: 100,
+        events: 10,
+      } as ExtractionRow;
+      assert.isTrue(validateExtractionRow(complete).valid);
+    });
 
-  it("rejects an unrecognised measure", function () {
-    const row = {
-      ...base,
-      effectType: "Flux capacitance",
-      effectSize: 1,
-    } as ExtractionRow;
-    assert.isFalse(validateExtractionRow(row).valid);
+    it("rejects an unrecognised measure", function () {
+      const row = {
+        ...base,
+        effectType: "Flux capacitance",
+        effectSize: 1,
+      } as ExtractionRow;
+      assert.isFalse(validateExtractionRow(row).valid);
+    });
   });
 });

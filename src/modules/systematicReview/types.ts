@@ -631,6 +631,7 @@ export interface ReviewJob {
   error?: string;
   synthesisRunId?: string;
   gapAnalysisRunId?: string;
+  compatibilityIssueCount?: number;
 }
 
 export interface RoBAssessment {
@@ -715,6 +716,28 @@ export interface SynthesisStudyEstimate {
   sourcePage?: string;
 }
 
+export type CompatibilityIssueSeverity = "warning" | "blocker";
+
+export interface ExtractionCompatibilityIssue {
+  paperId: number;
+  rowId?: string;
+  outcome: string;
+  measure: string;
+  severity: CompatibilityIssueSeverity;
+  reason: string;
+}
+
+export interface ExtractionCompatibilityReport {
+  includedRows: number;
+  excludedRows: number;
+  compatibleDomains: number;
+  blockedDomains: number;
+  incompletePoolableRows: number;
+  duplicateRows: number;
+  narrativeReadyDomains: number;
+  issues: ExtractionCompatibilityIssue[];
+}
+
 export interface GradeJudgment {
   certainty: "high" | "moderate" | "low" | "verylow" | "not_applicable";
   riskOfBias: 0 | -1 | -2;
@@ -749,6 +772,7 @@ export interface SynthesisDomainResult {
   methodConfirmed: boolean;
   grade: GradeJudgment;
   narrativeConfirmed: boolean;
+  excludedRows?: ExtractionCompatibilityIssue[];
 }
 
 export interface MetaAnalysisSummary {
@@ -776,6 +800,7 @@ export interface SynthesisRun {
   warnings: string[];
   model?: string;
   domains: SynthesisDomainResult[];
+  compatibilityReport?: ExtractionCompatibilityReport;
 }
 
 export type GapCellStatus =

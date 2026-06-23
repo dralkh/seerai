@@ -1,0 +1,225 @@
+{
+  "id": "dl-imaging-diagnostic",
+  "title": "Deep learning versus health-care professionals in detecting disease from medical imaging: a diagnostic accuracy meta-analysis",
+  "citation": "Modeled on Liu X et al., 'A comparison of deep learning performance against health-care professionals in detecting diseases from medical imaging', Lancet Digital Health 2019;1(6):e271-e297. Per-study discrimination and accuracy values are representative test data structured to match the review's design (AUROC, sensitivity, specificity reported per study; not pooled with inverse-variance methods); they are NOT verbatim transcriptions. Grounding is evaluated against the source text in this fixture.",
+  "regime": "diagnostic",
+  "protocol": {
+    "framework": "PICOTS",
+    "researchQuestion": "For detection of disease from medical imaging, how does the diagnostic performance of deep learning models compare with health-care professionals?",
+    "values": {
+      "P": "Patients undergoing diagnostic medical imaging",
+      "I": "Deep learning diagnostic model",
+      "C": "Health-care professionals (e.g., radiologists)",
+      "O": "Discrimination (AUROC); diagnostic accuracy (sensitivity, specificity)",
+      "T": "Internal/external validation",
+      "S": "Diagnostic accuracy studies"
+    }
+  },
+  "template": {
+    "id": "tpl_dl",
+    "revisionId": "tpl_dl_r1",
+    "protocolRevisionId": "rev",
+    "name": "Diagnostic model performance",
+    "instructions": "Extract the model's reported discrimination (AUROC, with 95% CI when available) and diagnostic accuracy (sensitivity and specificity) for each study.",
+    "outcomes": [
+      {
+        "id": "disc",
+        "name": "Discrimination",
+        "aliases": ["discrimination", "AUROC", "AUC", "area under the curve"],
+        "description": "Area under the ROC curve for the deep learning model.",
+        "measures": ["AUROC"],
+        "timepoints": [],
+        "direction": "higher_better",
+        "required": false
+      },
+      {
+        "id": "acc",
+        "name": "Diagnostic accuracy",
+        "aliases": [
+          "diagnostic accuracy",
+          "sensitivity",
+          "specificity",
+          "operating point"
+        ],
+        "description": "Sensitivity and specificity of the deep learning model at the reported operating point.",
+        "measures": ["Sensitivity", "Specificity"],
+        "timepoints": [],
+        "direction": "higher_better",
+        "required": false
+      }
+    ],
+    "status": "active",
+    "source": "user",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  "studies": [
+    {
+      "paperId": 301,
+      "label": "DL diabetic retinopathy",
+      "source": "Deep learning for detection of diabetic retinopathy from fundus photographs. On the external validation set, the model achieved an area under the receiver operating characteristic curve (AUROC) of 0.93 (95% CI, 0.90 to 0.95). At the operating threshold, sensitivity was 0.91 and specificity was 0.88.",
+      "expected": [
+        {
+          "outcomeId": "disc",
+          "effectType": "AUROC",
+          "effectSize": 0.93,
+          "ciLow": 0.9,
+          "ciHigh": 0.95,
+          "quote": "area under the receiver operating characteristic curve (AUROC) of 0.93 (95% CI, 0.90 to 0.95)",
+          "tolerance": 0.01
+        },
+        {
+          "outcomeId": "acc",
+          "effectType": "Sensitivity",
+          "effectSize": 0.91,
+          "quote": "sensitivity was 0.91",
+          "tolerance": 0.02
+        },
+        {
+          "outcomeId": "acc",
+          "effectType": "Specificity",
+          "effectSize": 0.88,
+          "quote": "specificity was 0.88",
+          "tolerance": 0.02
+        }
+      ]
+    },
+    {
+      "paperId": 302,
+      "label": "DL skin cancer",
+      "source": "Deep learning classification of skin lesions. The convolutional neural network reached an AUROC of 0.95 (95% CI, 0.93 to 0.97) on the held-out test set, with sensitivity of 0.94 and specificity of 0.90.",
+      "expected": [
+        {
+          "outcomeId": "disc",
+          "effectType": "AUROC",
+          "effectSize": 0.95,
+          "ciLow": 0.93,
+          "ciHigh": 0.97,
+          "quote": "AUROC of 0.95 (95% CI, 0.93 to 0.97)",
+          "tolerance": 0.01
+        },
+        {
+          "outcomeId": "acc",
+          "effectType": "Sensitivity",
+          "effectSize": 0.94,
+          "quote": "sensitivity of 0.94",
+          "tolerance": 0.02
+        },
+        {
+          "outcomeId": "acc",
+          "effectType": "Specificity",
+          "effectSize": 0.9,
+          "quote": "specificity of 0.90",
+          "tolerance": 0.02
+        }
+      ]
+    },
+    {
+      "paperId": 303,
+      "label": "DL chest radiograph",
+      "source": "Deep learning detection of pneumonia on chest radiographs. The model's discrimination was an AUROC of 0.88 (95% CI, 0.84 to 0.92). Reported sensitivity was 0.86 and specificity was 0.85.",
+      "expected": [
+        {
+          "outcomeId": "disc",
+          "effectType": "AUROC",
+          "effectSize": 0.88,
+          "ciLow": 0.84,
+          "ciHigh": 0.92,
+          "quote": "AUROC of 0.88 (95% CI, 0.84 to 0.92)",
+          "tolerance": 0.01
+        },
+        {
+          "outcomeId": "acc",
+          "effectType": "Sensitivity",
+          "effectSize": 0.86,
+          "quote": "sensitivity was 0.86",
+          "tolerance": 0.02
+        },
+        {
+          "outcomeId": "acc",
+          "effectType": "Specificity",
+          "effectSize": 0.85,
+          "quote": "specificity was 0.85",
+          "tolerance": 0.02
+        }
+      ]
+    },
+    {
+      "paperId": 304,
+      "label": "DL mammography",
+      "source": "Deep learning for breast cancer detection on mammography. The system achieved an AUROC of 0.91 (95% CI, 0.88 to 0.94), with a sensitivity of 0.89 and a specificity of 0.87 at the chosen operating point.",
+      "expected": [
+        {
+          "outcomeId": "disc",
+          "effectType": "AUROC",
+          "effectSize": 0.91,
+          "ciLow": 0.88,
+          "ciHigh": 0.94,
+          "quote": "AUROC of 0.91 (95% CI, 0.88 to 0.94)",
+          "tolerance": 0.01
+        },
+        {
+          "outcomeId": "acc",
+          "effectType": "Sensitivity",
+          "effectSize": 0.89,
+          "quote": "sensitivity of 0.89",
+          "tolerance": 0.02
+        },
+        {
+          "outcomeId": "acc",
+          "effectType": "Specificity",
+          "effectSize": 0.87,
+          "quote": "specificity of 0.87",
+          "tolerance": 0.02
+        }
+      ]
+    },
+    {
+      "paperId": 305,
+      "label": "DL CT nodule",
+      "source": "Deep learning for pulmonary nodule malignancy classification on CT. On external validation the model obtained an AUROC of 0.90 (95% CI, 0.86 to 0.94); sensitivity was 0.88 and specificity was 0.84.",
+      "expected": [
+        {
+          "outcomeId": "disc",
+          "effectType": "AUROC",
+          "effectSize": 0.9,
+          "ciLow": 0.86,
+          "ciHigh": 0.94,
+          "quote": "AUROC of 0.90 (95% CI, 0.86 to 0.94)",
+          "tolerance": 0.01
+        },
+        {
+          "outcomeId": "acc",
+          "effectType": "Sensitivity",
+          "effectSize": 0.88,
+          "quote": "sensitivity was 0.88",
+          "tolerance": 0.02
+        },
+        {
+          "outcomeId": "acc",
+          "effectType": "Specificity",
+          "effectSize": 0.84,
+          "quote": "specificity was 0.84",
+          "tolerance": 0.02
+        }
+      ]
+    }
+  ],
+  "gold": {
+    "synthesis": [
+      {
+        "outcome": "Discrimination",
+        "measure": "AUROC",
+        "method": "narrative",
+        "status": "not_poolable",
+        "direction": "unclear",
+        "minStudies": 3
+      }
+    ],
+    "narrativeOutcomes": ["Discrimination", "Diagnostic accuracy"],
+    "gaps": {
+      "expectGapOutcomes": ["Discrimination", "Diagnostic accuracy"],
+      "expectAdequateOutcomes": []
+    }
+  }
+}

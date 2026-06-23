@@ -11,9 +11,10 @@ import {
   SynthesisRun,
   SystematicReviewState,
 } from "./types";
-import { fixedEffectMetaAnalysis, validateExtractionRow } from "./scientific";
+import { fixedEffectMetaAnalysis } from "./scientific";
 import { isPoolableMeasure } from "./measures";
 import { getActiveProtocolRevision } from "./protocol";
+import { buildExtractionCompatibility } from "./compatibility";
 
 function stableHash(value: unknown): string {
   const text = JSON.stringify(value);
@@ -260,38 +261,15 @@ export function buildSynthesisRun(state: SystematicReviewState): SynthesisRun {
       paper.status === "included" &&
       (paper.screeningStage === "final" || !paper.screeningStage),
   );
-  const groups = new Map<
-    string,
-    { rows: ExtractionRow[]; paperIds: number[]; rowIndexes: number[] }
-  >();
-  for (const paper of included) {
-    (state.extractions[paper.id] || []).forEach((row, index) => {
-      if (
-        row.verificationStatus !== "verified" ||
-        row.issues?.some((issue) => issue.severity === "error") ||
-        !row.sourceQuote?.trim() ||
-        !validateExtractionRow(row).valid
-      ) {
-        return;
-      }
-      const key = [
-        row.outcomeId || normalizeKey(row.outcome),
-        row.effectType,
-        normalizeKey(row.timepoint),
-        normalizeKey(row.unit),
-        row.direction || "",
-      ].join("|");
-      const group = groups.get(key) || {
-        rows: [],
-        paperIds: [],
-        rowIndexes: [],
-      };
-      group.rows.push(row);
-      group.paperIds.push(paper.id);
-      group.rowIndexes.push(index);
-      groups.set(key, group);
-    });
-  }
+  const template = state.extractionTemplates.find(
+    (candidate) => candidate.id === state.activeExtractionTemplateId,
+  );
+  const compatibility = buildExtractionCompatibility(
+    included,
+    state.extractions,
+    template,
+  );
+  const groups = compatibility.groups;
   const domains: SynthesisDomainResult[] = [];
   for (const [key, group] of groups) {
     const first = group.rows[0];
@@ -385,6 +363,7 @@ export function buildSynthesisRun(state: SystematicReviewState): SynthesisRun {
         nullValue,
       ),
       narrativeConfirmed: false,
+      excludedRows: group.excludedRows.length ? group.excludedRows : undefined,
     });
   }
   const existingOutcomes = new Set(
@@ -439,10 +418,20 @@ export function buildSynthesisRun(state: SystematicReviewState): SynthesisRun {
     updatedAt: now,
     status: "draft",
     staleReasons: [],
-    warnings: domains.length
-      ? []
-      : ["No verified extraction or grounded outcome is available."],
+    warnings: [
+      ...(domains.length
+        ? []
+        : ["No verified extraction or grounded outcome is available."]),
+      ...compatibility.report.issues
+        .filter((issue) => issue.severity === "blocker")
+        .slice(0, 5)
+        .map(
+          (issue) =>
+            `Paper ${issue.paperId}: ${issue.outcome} ${issue.measure} excluded - ${issue.reason}`,
+        ),
+    ],
     domains,
+    compatibilityReport: compatibility.report,
   };
 }
 

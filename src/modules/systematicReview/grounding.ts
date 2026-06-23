@@ -21,7 +21,7 @@ const TRAILING_REF =
 const DASHES = /[‐-―−﹘﹣－]/g;
 // Whitespace variants → " ": NBSP, en/em spaces, thin/hair/zero-width, narrow
 // no-break, medium math, ideographic.
-const SPACES = /[  -​  　]/g;
+const SPACES = /[\u00a0\u2000-\u200b\u202f\u205f\u3000]/g;
 const SINGLE_QUOTES = /[‘’‚‛′]/g;
 const DOUBLE_QUOTES = /[“”„‟″]/g;
 

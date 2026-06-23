@@ -28,6 +28,7 @@ import {
   buildSynthesisRun,
   computeSynthesisFingerprint,
 } from "./analysisEngine";
+import { buildExtractionCompatibility } from "./compatibility";
 import { analyzeReviewPaper } from "./paperAnalyzer";
 import { validateExtractionRow } from "./scientific";
 import {
@@ -530,6 +531,30 @@ export class SystematicReviewService {
               job.kind === "evidence_analysis" ||
               job.kind === "gap_analysis"
             ) {
+              if (
+                (job.kind === "evidence_analysis" ||
+                  job.kind === "gap_analysis") &&
+                !paper.analysis
+              ) {
+                const result = await analyzeReviewPaper(item, project, {
+                  signal: controller.signal,
+                  sourcePreference: paper.sourcePreference,
+                  onStage: async (stage) => {
+                    task.stage = stage;
+                    job.updatedAt = new Date().toISOString();
+                    await this.save(state);
+                  },
+                });
+                paper.analysis = result.analysis;
+                paper.recommendation = result.recommendation;
+                paper.modelConfidence = result.recommendation?.confidence;
+                paper.design = result.analysis.studyDesign;
+                paper.pop = result.analysis.population;
+                paper.methods = result.analysis.methods;
+                paper.lim = result.analysis.limitations;
+                paper.sample = result.analysis.sampleSize;
+                task.evidenceCount = result.analysis.evidence.length;
+              }
               task.stage = "reading_source";
               const extraction = await extractReviewPaper(
                 item,
@@ -641,6 +666,27 @@ export class SystematicReviewService {
             `[seerai] Review job ${job.id}: auto-verified ${autoVerified.verifiedRows} valid proposal(s) across ${autoVerified.papers} paper(s) before synthesis`,
           );
           await this.save(state);
+        }
+        const compatibility = buildExtractionCompatibility(
+          state.papers,
+          state.extractions,
+          template,
+        ).report;
+        const blockers = compatibility.issues.filter(
+          (issue) => issue.severity === "blocker",
+        );
+        job.compatibilityIssueCount = blockers.length;
+        if (blockers.length) {
+          job.status = "completed_with_issues";
+          job.error =
+            "Extraction compatibility issues must be reviewed before synthesis";
+          job.updatedAt = new Date().toISOString();
+          job.completedAt = job.updatedAt;
+          await this.save(state);
+          Zotero.debug(
+            `[seerai] Review job ${job.id}: paused before synthesis with ${blockers.length} compatibility issue(s)`,
+          );
+          return job;
         }
         const synthesis = this.runSynthesis(state, true);
         job.synthesisRunId = synthesis.id;
@@ -775,6 +821,10 @@ export class SystematicReviewService {
     quarantined: number;
     complete: number;
     synthesisReady: number;
+    compatibleDomains: number;
+    blockedDomains: number;
+    incompletePoolableRows: number;
+    narrativeReadyDomains: number;
   } {
     const included = state.papers.filter(
       (paper) =>
@@ -816,10 +866,7 @@ export class SystematicReviewService {
       invalid += rows.filter(
         (row) =>
           row.verificationStatus !== "rejected" &&
-          (!row.sourceQuote?.trim() ||
-            !Number.isFinite(row.effectSize) ||
-            !Number.isFinite(row.ciLow) ||
-            !Number.isFinite(row.ciHigh)),
+          (!row.sourceQuote?.trim() || !validateExtractionRow(row).valid),
       ).length;
       quarantined += rows.filter((row) =>
         row.issues?.some((issue) => issue.severity === "error"),
@@ -848,6 +895,11 @@ export class SystematicReviewService {
         synthesisReady++;
       }
     }
+    const compatibility = buildExtractionCompatibility(
+      included,
+      state.extractions,
+      template,
+    ).report;
     return {
       included: included.length,
       analyzed: included.filter((paper) => !!paper.analysis).length,
@@ -860,6 +912,10 @@ export class SystematicReviewService {
       quarantined,
       complete,
       synthesisReady,
+      compatibleDomains: compatibility.compatibleDomains,
+      blockedDomains: compatibility.blockedDomains,
+      incompletePoolableRows: compatibility.incompletePoolableRows,
+      narrativeReadyDomains: compatibility.narrativeReadyDomains,
     };
   }
 

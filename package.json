@@ -28,6 +28,7 @@
     "release": "zotero-plugin release",
     "test": "zotero-plugin test",
     "test:extraction-eval": "tsx test/extractionModelEval.ts",
+    "test:pipeline-eval": "tsx test/pipelineEval.ts",
     "update-deps": "npm update --save"
   },
   "dependencies": {

@@ -1,0 +1,180 @@
+{
+  "id": "corticosteroids-or",
+  "title": "Systemic corticosteroids and mortality in critically ill patients with COVID-19: a meta-analysis of randomized trials",
+  "citation": "Modeled on the WHO REACT Working Group prospective meta-analysis (Sterne JAC et al., JAMA 2020;324(13):1330-1341). Per-study numbers are representative test data structured to match the review's design (pooled odds ratio for 28-day mortality across RCTs); they are NOT verbatim transcriptions. Grounding is evaluated against the source text in this fixture, so the values are internally consistent and replaceable with real extracted PDF text.",
+  "regime": "ratio",
+  "protocol": {
+    "framework": "PICOTS",
+    "researchQuestion": "In critically ill adults with COVID-19, does systemic corticosteroid therapy compared with usual care or placebo reduce 28-day all-cause mortality?",
+    "values": {
+      "P": "Critically ill hospitalized adults with COVID-19",
+      "I": "Systemic corticosteroids (dexamethasone, hydrocortisone, methylprednisolone)",
+      "C": "Usual care or placebo",
+      "O": "28-day all-cause mortality; serious adverse events",
+      "T": "28 days",
+      "S": "Randomized controlled trials"
+    }
+  },
+  "template": {
+    "id": "tpl_cs",
+    "revisionId": "tpl_cs_r1",
+    "protocolRevisionId": "rev",
+    "name": "Corticosteroid RCT outcomes",
+    "instructions": "Extract the reported treatment-effect odds ratio with its 95% confidence interval for each outcome, plus the total number of participants analyzed and the number of events.",
+    "outcomes": [
+      {
+        "id": "mort",
+        "name": "28-day all-cause mortality",
+        "aliases": [
+          "mortality",
+          "death",
+          "28-day mortality",
+          "all-cause mortality"
+        ],
+        "description": "Odds of all-cause death by 28 days, corticosteroid vs control.",
+        "measures": ["OR"],
+        "timepoints": [],
+        "unit": "",
+        "direction": "lower_better",
+        "required": false
+      },
+      {
+        "id": "sae",
+        "name": "Serious adverse events",
+        "aliases": ["serious adverse events", "SAE", "safety"],
+        "description": "Odds of a serious adverse event, corticosteroid vs control.",
+        "measures": ["OR"],
+        "timepoints": [],
+        "unit": "",
+        "direction": "lower_better",
+        "required": false
+      }
+    ],
+    "status": "active",
+    "source": "user",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  "studies": [
+    {
+      "paperId": 101,
+      "label": "RECOVERY (dexamethasone)",
+      "source": "RECOVERY trial, critically ill subgroup. In this randomized controlled trial, a total of 403 critically ill patients with COVID-19 receiving invasive mechanical ventilation were analyzed, and 116 deaths occurred by 28 days. Dexamethasone was associated with lower 28-day all-cause mortality compared with usual care (odds ratio 0.66; 95% CI, 0.51 to 0.85). No excess of serious adverse events was attributed to the steroid arm.",
+      "expected": [
+        {
+          "outcomeId": "mort",
+          "effectType": "OR",
+          "effectSize": 0.66,
+          "ciLow": 0.51,
+          "ciHigh": 0.85,
+          "n": 403,
+          "events": 116,
+          "quote": "odds ratio 0.66; 95% CI, 0.51 to 0.85",
+          "tolerance": 0.03
+        }
+      ]
+    },
+    {
+      "paperId": 102,
+      "label": "REMAP-CAP (hydrocortisone)",
+      "source": "REMAP-CAP corticosteroid domain. Among 324 critically ill adults with COVID-19 in the intensive care unit who were randomized to hydrocortisone or no hydrocortisone, 95 deaths were recorded at 28 days. Hydrocortisone was associated with reduced 28-day all-cause mortality (odds ratio 0.64; 95% CI, 0.42 to 0.97). Serious adverse events were uncommon: among the 324 patients, 64 serious adverse events were reported, with no significant difference between groups (odds ratio 1.20; 95% CI, 0.80 to 1.79).",
+      "expected": [
+        {
+          "outcomeId": "mort",
+          "effectType": "OR",
+          "effectSize": 0.64,
+          "ciLow": 0.42,
+          "ciHigh": 0.97,
+          "n": 324,
+          "events": 95,
+          "quote": "odds ratio 0.64; 95% CI, 0.42 to 0.97",
+          "tolerance": 0.03
+        },
+        {
+          "outcomeId": "sae",
+          "effectType": "OR",
+          "effectSize": 1.2,
+          "ciLow": 0.8,
+          "ciHigh": 1.79,
+          "n": 324,
+          "events": 64,
+          "quote": "odds ratio 1.20; 95% CI, 0.80 to 1.79",
+          "tolerance": 0.05
+        }
+      ]
+    },
+    {
+      "paperId": 103,
+      "label": "CoDEX (dexamethasone)",
+      "source": "CoDEX trial. A total of 299 patients with COVID-19 and moderate-to-severe acute respiratory distress syndrome were analyzed, with 88 deaths by 28 days. Dexamethasone showed an association with lower 28-day all-cause mortality (odds ratio 0.70; 95% CI, 0.48 to 1.01).",
+      "expected": [
+        {
+          "outcomeId": "mort",
+          "effectType": "OR",
+          "effectSize": 0.7,
+          "ciLow": 0.48,
+          "ciHigh": 1.01,
+          "n": 299,
+          "events": 88,
+          "quote": "odds ratio 0.70; 95% CI, 0.48 to 1.01",
+          "tolerance": 0.03
+        }
+      ]
+    },
+    {
+      "paperId": 104,
+      "label": "CAPE COVID (hydrocortisone)",
+      "source": "CAPE COVID trial. In this randomized study, 149 critically ill patients with COVID-19 were analyzed and 41 deaths occurred at 28 days. Low-dose hydrocortisone was associated with reduced 28-day all-cause mortality, although the estimate was imprecise (odds ratio 0.69; 95% CI, 0.40 to 1.19).",
+      "expected": [
+        {
+          "outcomeId": "mort",
+          "effectType": "OR",
+          "effectSize": 0.69,
+          "ciLow": 0.4,
+          "ciHigh": 1.19,
+          "n": 149,
+          "events": 41,
+          "quote": "odds ratio 0.69; 95% CI, 0.40 to 1.19",
+          "tolerance": 0.03
+        }
+      ]
+    },
+    {
+      "paperId": 105,
+      "label": "Steroids-SARI (methylprednisolone)",
+      "source": "Steroids-SARI trial. Among 197 critically ill patients with COVID-19 analyzed, 60 deaths were observed by day 28. Methylprednisolone was associated with lower 28-day all-cause mortality (odds ratio 0.80; 95% CI, 0.48 to 1.33).",
+      "expected": [
+        {
+          "outcomeId": "mort",
+          "effectType": "OR",
+          "effectSize": 0.8,
+          "ciLow": 0.48,
+          "ciHigh": 1.33,
+          "n": 197,
+          "events": 60,
+          "quote": "odds ratio 0.80; 95% CI, 0.48 to 1.33",
+          "tolerance": 0.03
+        }
+      ]
+    }
+  ],
+  "gold": {
+    "synthesis": [
+      {
+        "outcome": "28-day all-cause mortality",
+        "measure": "OR",
+        "method": "random_effects",
+        "status": "poolable",
+        "direction": "positive",
+        "minStudies": 4,
+        "estimate": { "value": 0.68, "tolerance": 0.18 },
+        "i2Max": 60
+      }
+    ],
+    "narrativeOutcomes": ["Serious adverse events"],
+    "gaps": {
+      "expectGapOutcomes": ["Serious adverse events"],
+      "expectAdequateOutcomes": ["28-day all-cause mortality"]
+    }
+  }
+}

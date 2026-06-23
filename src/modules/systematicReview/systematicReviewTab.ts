@@ -4276,6 +4276,15 @@ function buildEvidencePanel(doc: Document): HTMLElement {
         return;
       }
     }
+    const nextReadiness = getSRService().getSynthesisReadiness(currentState);
+    if (nextReadiness.incompletePoolableRows || nextReadiness.quarantined) {
+      toast(
+        doc,
+        "Review extraction compatibility issues before generating synthesis",
+      );
+      openExtractionLogsModal(doc);
+      return;
+    }
     const run = getSRService().runSynthesis(currentState, true);
     getSRService().generateGaps(currentState, run.id, true);
     await getSRService().save(currentState);
@@ -4499,6 +4508,9 @@ function buildEvidencePanel(doc: Document): HTMLElement {
       ["Quarantined", readiness.quarantined],
       ["Complete", readiness.complete],
       ["Synthesis ready", readiness.synthesisReady],
+      ["Compatible", readiness.compatibleDomains],
+      ["Narrative ready", readiness.narrativeReadyDomains],
+      ["Blocked", readiness.blockedDomains],
     ].forEach(([label, value]) => {
       const card = doc.createElement("div");
       card.style.cssText =
@@ -4517,6 +4529,7 @@ function buildEvidencePanel(doc: Document): HTMLElement {
     if (
       readiness.proposed > 0 ||
       readiness.quarantined > 0 ||
+      readiness.incompletePoolableRows > 0 ||
       readiness.complete < readiness.included
     ) {
       const readinessWarning = doc.createElement("div");
@@ -4526,6 +4539,9 @@ function buildEvidencePanel(doc: Document): HTMLElement {
           : "",
         readiness.quarantined
           ? `${readiness.quarantined} row(s) need correction`
+          : "",
+        readiness.incompletePoolableRows
+          ? `${readiness.incompletePoolableRows} incomplete poolable row(s) block synthesis`
           : "",
         readiness.complete < readiness.included
           ? `${readiness.included - readiness.complete} paper(s) have incomplete required outcomes`
@@ -5963,6 +5979,16 @@ function buildGapPanel(doc: Document): HTMLElement {
         doc,
         `Auto-verified ${auto.verifiedRows} valid proposal(s) before regenerating gaps`,
       );
+    }
+    const nextReadiness = getSRService().getSynthesisReadiness(currentState);
+    if (nextReadiness.incompletePoolableRows || nextReadiness.quarantined) {
+      toast(
+        doc,
+        "Review extraction compatibility issues before regenerating gaps",
+      );
+      currentPanel = "evidence";
+      reRenderPanel(doc, "evidence");
+      return;
     }
     const synthesis = getSRService().runSynthesis(currentState, true);
     if (!synthesis.domains.length) {

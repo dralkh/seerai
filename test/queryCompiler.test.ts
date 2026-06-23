@@ -108,40 +108,40 @@ describe("Query compiler", function () {
     assert.notMatch(out["semantic-scholar"] || "", /[+|~*]/);
     assert.include(out.pubmed || "", "[tiab]");
   });
-});
 
-describe("parseSearchQueryIR", function () {
-  it("parses well-formed JSON", function () {
-    const ir = parseSearchQueryIR(
-      '{"groups":[{"terms":["a","b"]}],"exclude":["c"],"field":"title"}',
-    );
-    assert.isNotNull(ir);
-    assert.lengthOf(ir!.groups, 1);
-    assert.deepEqual(ir!.exclude, ["c"]);
-    assert.equal(ir!.field, "title");
-  });
+  describe("parseSearchQueryIR", function () {
+    it("parses well-formed JSON", function () {
+      const ir = parseSearchQueryIR(
+        '{"groups":[{"terms":["a","b"]}],"exclude":["c"],"field":"title"}',
+      );
+      assert.isNotNull(ir);
+      assert.lengthOf(ir!.groups, 1);
+      assert.deepEqual(ir!.exclude, ["c"]);
+      assert.equal(ir!.field, "title");
+    });
 
-  it("recovers JSON wrapped in code fences or prose", function () {
-    const ir = parseSearchQueryIR(
-      'Here you go:\n```json\n{"groups":[{"terms":["x"]}]}\n```\nThanks!',
-    );
-    assert.isNotNull(ir);
-    assert.deepEqual(ir!.groups[0].terms, ["x"]);
-  });
+    it("recovers JSON wrapped in code fences or prose", function () {
+      const ir = parseSearchQueryIR(
+        'Here you go:\n```json\n{"groups":[{"terms":["x"]}]}\n```\nThanks!',
+      );
+      assert.isNotNull(ir);
+      assert.deepEqual(ir!.groups[0].terms, ["x"]);
+    });
 
-  it("returns null for malformed or empty output", function () {
-    assert.isNull(parseSearchQueryIR("not json at all"));
-    assert.isNull(parseSearchQueryIR("{}"));
-    assert.isNull(parseSearchQueryIR('{"groups":[]}'));
-    assert.isNull(parseSearchQueryIR(""));
-  });
+    it("returns null for malformed or empty output", function () {
+      assert.isNull(parseSearchQueryIR("not json at all"));
+      assert.isNull(parseSearchQueryIR("{}"));
+      assert.isNull(parseSearchQueryIR('{"groups":[]}'));
+      assert.isNull(parseSearchQueryIR(""));
+    });
 
-  it("drops invalid field values and empty terms", function () {
-    const ir = parseSearchQueryIR(
-      '{"groups":[{"terms":["a","",123]}],"field":"bogus"}',
-    );
-    assert.isNotNull(ir);
-    assert.deepEqual(ir!.groups[0].terms, ["a"]);
-    assert.isUndefined(ir!.field);
+    it("drops invalid field values and empty terms", function () {
+      const ir = parseSearchQueryIR(
+        '{"groups":[{"terms":["a","",123]}],"field":"bogus"}',
+      );
+      assert.isNotNull(ir);
+      assert.deepEqual(ir!.groups[0].terms, ["a"]);
+      assert.isUndefined(ir!.field);
+    });
   });
 });

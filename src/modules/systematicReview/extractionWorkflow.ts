@@ -551,15 +551,35 @@ export async function extractReviewPaper(
   const source = await getReviewSourceDocument(item, signal, sourcePreference);
   const content = source.text;
   const chat = llm ?? openAIService.chatCompletion.bind(openAIService);
-  const response = await chat(
-    buildExtractionMessages(template, content, title),
-    {
-      signal,
-      timeoutMs: 180000,
-      isolated: true,
-    },
-  );
-  const parsed = ExtractionProposalSchema.parse(parseJSON(response));
+  const messages = buildExtractionMessages(template, content, title);
+  let response = await chat(messages, {
+    signal,
+    timeoutMs: 180000,
+    isolated: true,
+  });
+  let parsed: z.infer<typeof ExtractionProposalSchema>;
+  try {
+    parsed = ExtractionProposalSchema.parse(parseJSON(response));
+  } catch (error) {
+    response = await chat(
+      [
+        ...messages,
+        {
+          role: "user",
+          content:
+            "Your previous response could not be parsed as the required JSON object. " +
+            `Validation error: ${error instanceof Error ? error.message : String(error)}\n\n` +
+            'Return only corrected JSON with the exact shape {"extractions":[...]} and no prose.',
+        },
+      ],
+      {
+        signal,
+        timeoutMs: 180000,
+        isolated: true,
+      },
+    );
+    parsed = ExtractionProposalSchema.parse(parseJSON(response));
+  }
   const { rows, issues } = buildExtractionRows({
     proposals: parsed.extractions,
     template,
