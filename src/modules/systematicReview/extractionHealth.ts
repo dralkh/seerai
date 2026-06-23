@@ -56,12 +56,13 @@ export function hasFailedExtractionMetrics(
   state: SystematicReviewState,
   paperId: number,
 ): boolean {
-  const rows = state.extractions[paperId] || [];
-  if (rows.some(getRowHasErrorIssue)) return true;
-  if (getMissingRequiredOutcomes(state, paperId).length > 0) return true;
+  // A paper only counts as a genuine extraction failure (eligible for retry)
+  // when its last job actually failed. Row-level quality flags (ungrounded
+  // quotes, unrecognised measures) and missing-required outcomes are surfaced
+  // in the extraction log for review but must NOT re-queue the paper — that is
+  // what produced the endless retry loop on diagnostic/prognostic reviews.
   const lastJob = getLastExtractionJobForPaper(state, paperId);
-  if (lastJob?.stage === "failed") return true;
-  return false;
+  return lastJob?.stage === "failed";
 }
 
 export function getPapersNeedingExtraction(

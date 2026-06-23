@@ -1,0 +1,39 @@
+{
+  "title": "Scoring model to predict ICU stay and mortality after emergency admission in atrial fibrillation",
+  "template": {
+    "id": "tpl_af",
+    "revisionId": "tpl_af_r1",
+    "protocolRevisionId": "rev",
+    "name": "Clinical outcomes",
+    "instructions": "Extract the reported event rates for each outcome.",
+    "outcomes": [
+      {
+        "id": "mort",
+        "name": "Mortality",
+        "aliases": ["death", "in-hospital mortality"],
+        "description": "Proportion of patients who died.",
+        "measures": ["percentage"],
+        "timepoints": [],
+        "required": false
+      },
+      {
+        "id": "icu",
+        "name": "ICU Admission",
+        "aliases": ["intensive care unit admission", "ICU stay"],
+        "description": "Proportion of patients admitted to the ICU.",
+        "measures": ["percentage"],
+        "timepoints": [],
+        "required": false
+      }
+    ],
+    "status": "active",
+    "source": "user",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  "source": "Scoring model to predict ICU stay and mortality after emergency admission in atrial fibrillation: a retrospective study. Among 30,366 patients admitted via the emergency department, in-hospital mortality occurred in 8.2% of the cohort, and 14.5% required intensive care unit (ICU) admission. The 3-day mortality rate was 3.1%.",
+  "gold": [
+    { "outcomeId": "mort", "measureFamily": "proportion", "measure": "PERCENTAGE", "value": 8.2, "tolerance": 0.1 },
+    { "outcomeId": "icu", "measureFamily": "proportion", "measure": "PERCENTAGE", "value": 14.5, "tolerance": 0.1 }
+  ]
+}

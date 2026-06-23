@@ -185,7 +185,9 @@ const ExtractionOutcomeDefinitionSchema = z.object({
   name: z.string().min(1),
   aliases: z.array(z.string()),
   description: z.string(),
-  measures: z.array(z.enum(["OR", "RR", "HR", "MD", "SMD"])).min(1),
+  // Canonical measure labels — poolable codes (OR/RR/HR/MD/SMD) plus
+  // diagnostic/prognostic labels (AUROC, Sensitivity, Brier score, …).
+  measures: z.array(z.string().min(1)).min(1),
   timepoints: z.array(z.string()),
   unit: z.string().optional(),
   direction: z.enum(["higher_better", "lower_better"]).optional(),
@@ -1129,7 +1131,7 @@ export class SystematicReviewStore {
         name: string;
         aliases: string[];
         description: string;
-        measures: ("OR" | "RR" | "HR" | "MD" | "SMD")[];
+        measures: string[];
         timepoints: string[];
         unit?: string;
         direction?: "higher_better" | "lower_better";
@@ -1140,9 +1142,7 @@ export class SystematicReviewStore {
       for (const row of rows) {
         const key = row.outcome.trim().toLowerCase();
         if (!key || legacyOutcomes.has(key)) continue;
-        const measure = ["OR", "RR", "HR", "MD", "SMD"].includes(row.effectType)
-          ? (row.effectType as "OR" | "RR" | "HR" | "MD" | "SMD")
-          : "OR";
+        const measure = row.effectType?.trim() || "OR";
         legacyOutcomes.set(key, {
           id: `outcome_legacy_${legacyOutcomes.size + 1}`,
           name: row.outcome,

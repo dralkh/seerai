@@ -24,6 +24,7 @@
 import type { ReviewCancellationSignal } from "./cancellation";
 import type { SearchQueryIR } from "../search/queryIR";
 import type { ScholarlySearchMode } from "../search/types";
+import type { MeasureFamily } from "./measures";
 
 export type SRSubTab =
   | "screening"
@@ -473,6 +474,8 @@ export interface ExtractionRow {
   outcomeId?: string;
   outcome: string;
   effectType: string;
+  measureFamily?: MeasureFamily;
+  poolable?: boolean;
   effectSize?: number;
   ciLow?: number;
   ciHigh?: number;
@@ -547,7 +550,10 @@ export interface ExtractionOutcomeDefinition {
   name: string;
   aliases: string[];
   description: string;
-  measures: ("OR" | "RR" | "HR" | "MD" | "SMD")[];
+  // Canonical measure labels (see measures.ts). Poolable measures use the
+  // codes OR/RR/HR/MD/SMD; diagnostic/prognostic measures use labels such as
+  // AUROC, Sensitivity, Brier score, NRI.
+  measures: string[];
   timepoints: string[];
   unit?: string;
   direction?: "higher_better" | "lower_better";

@@ -1,0 +1,30 @@
+{
+  "title": "Machine learning for ECG diagnosis and risk stratification of occlusion myocardial infarction",
+  "template": {
+    "id": "tpl_ecg",
+    "revisionId": "tpl_ecg_r1",
+    "protocolRevisionId": "rev",
+    "name": "Diagnostic performance",
+    "instructions": "Extract reported model discrimination and diagnostic accuracy.",
+    "outcomes": [
+      {
+        "id": "disc",
+        "name": "Discriminative Performance",
+        "aliases": ["discrimination", "model performance", "diagnostic accuracy"],
+        "description": "Discrimination and diagnostic accuracy of the model versus comparators.",
+        "measures": ["AUROC", "Sensitivity", "Specificity", "PPV", "NPV"],
+        "timepoints": [],
+        "required": false
+      }
+    ],
+    "status": "active",
+    "source": "user",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  },
+  "source": "Machine learning for ECG diagnosis of occlusion myocardial infarction. In the held-out test set, the random forest (RF) model achieved an area under the receiver operating characteristic (AUROC) of 0.91 (95% CI, 0.87–0.96), outperforming practicing clinicians (AUROC 0.79, 95% CI 0.73–0.86) and the commercial ECG system (AUROC 0.78, 95% CI 0.70–0.85). At the optimal operating threshold, sensitivity was 0.88 and specificity was 0.83, with a positive predictive value (PPV) of 0.71 and a negative predictive value (NPV) of 0.94.",
+  "gold": [
+    { "outcomeId": "disc", "measureFamily": "discrimination", "measure": "AUROC", "value": 0.91, "tolerance": 0.01 },
+    { "outcomeId": "disc", "measureFamily": "diagnostic", "measure": "Sensitivity", "value": 0.88, "tolerance": 0.02 }
+  ]
+}

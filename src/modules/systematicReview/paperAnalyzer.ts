@@ -10,6 +10,7 @@ import { getActiveProtocolRevision } from "./protocol";
 import { ReviewCancellationSignal } from "./cancellation";
 import { modelConfidenceSchema } from "./modelOutput";
 import { getReviewSourceDocument } from "./reviewSourceService";
+import { isGrounded, normalizeText } from "./grounding";
 
 const AnalysisSchema = z.object({
   studyDesign: z.string().nullish(),
@@ -56,7 +57,7 @@ function parseJSON(text: string): unknown {
 }
 
 function normalize(text: string): string {
-  return text.replace(/\s+/g, " ").trim().toLowerCase();
+  return normalizeText(text);
 }
 
 export function deriveScreeningRecommendation(
@@ -191,7 +192,7 @@ Return:
     value === null ? undefined : (value as T | undefined);
   const normalizedContent = normalize(content);
   const evidence = parsed.evidence.filter((entry) =>
-    normalizedContent.includes(normalize(entry.quote)),
+    isGrounded(entry.quote, normalizedContent),
   );
   const groundedFields = new Set(evidence.map((entry) => entry.field));
   const requireEvidence = <T>(field: string, value: T | undefined) =>
@@ -224,7 +225,7 @@ Return:
   const groundedCriteria = expectedCriteria.map((expected) => {
     const criterion = returnedCriteria.get(expected.id);
     const quote = stripNull(criterion?.quote);
-    const grounded = quote && normalizedContent.includes(normalize(quote));
+    const grounded = !!quote && isGrounded(quote, normalizedContent);
     return {
       criterionId: expected.id,
       verdict:

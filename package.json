@@ -27,6 +27,7 @@
     "lint:fix": "prettier --write . && eslint . --fix",
     "release": "zotero-plugin release",
     "test": "zotero-plugin test",
+    "test:extraction-eval": "tsx test/extractionModelEval.ts",
     "update-deps": "npm update --save"
   },
   "dependencies": {

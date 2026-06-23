@@ -220,7 +220,7 @@ export const SystematicReviewParamsSchema = z.discriminatedUnion("action", [
           name: z.string().trim().min(1),
           aliases: z.array(z.string()).optional(),
           description: z.string().optional(),
-          measures: z.array(z.enum(["OR", "RR", "HR", "MD", "SMD"])).min(1),
+          measures: z.array(z.string().trim().min(1)).min(1),
           timepoints: z.array(z.string()).optional(),
           unit: z.string().optional(),
           direction: z.enum(["higher_better", "lower_better"]).optional(),
@@ -297,7 +297,7 @@ export const SystematicReviewParamsSchema = z.discriminatedUnion("action", [
     extraction: z.object({
       id: z.string().optional(),
       outcome: z.string().trim().min(1),
-      effect_type: z.enum(["OR", "RR", "HR", "MD", "SMD"]),
+      effect_type: z.string().trim().min(1),
       effect_size: z.number(),
       ci_low: z.number(),
       ci_high: z.number(),

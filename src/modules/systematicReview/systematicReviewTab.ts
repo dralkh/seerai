@@ -34,6 +34,29 @@ import {
   validateExtractionRow,
 } from "./scientific";
 import { calculateKeywordConfidence } from "./modelOutput";
+import { classifyMeasure } from "./measures";
+
+// Measure options offered in the manual extraction-row editors. Poolable codes
+// first, then common diagnostic/prognostic measures.
+const MEASURE_OPTIONS = [
+  "OR",
+  "RR",
+  "HR",
+  "MD",
+  "SMD",
+  "AUROC",
+  "AUC",
+  "Sensitivity",
+  "Specificity",
+  "PPV",
+  "NPV",
+  "Accuracy",
+  "C-index",
+  "AUPRC",
+  "Brier score",
+  "NRI",
+  "percentage",
+];
 import {
   ICONS,
   createSvgIcon,
@@ -4335,9 +4358,10 @@ function buildEvidencePanel(doc: Document): HTMLElement {
     "padding:2px 8px;font-size:10px;border:1px solid #7c3aed;border-radius:4px;background:#7c3aed;color:#fff;cursor:pointer;font-family:inherit;margin-left:4px;font-weight:600;";
   analyzeAllBtn.addEventListener("click", async () => {
     if (!currentState) return;
-    const template = getSRService().getExtractionTemplate(currentState);
+    const template =
+      getSRService().ensureActiveExtractionTemplate(currentState);
     if (!template) {
-      toast(doc, "Approve an extraction template first");
+      toast(doc, "Generate an extraction template first");
       openExtractionWorkspace(doc);
       return;
     }
@@ -5962,9 +5986,10 @@ function buildGapPanel(doc: Document): HTMLElement {
     "padding:2px 8px;font-size:10px;border:1px solid #7c3aed;border-radius:4px;background:#7c3aed;color:#fff;cursor:pointer;font-family:inherit;font-weight:600;";
   analyzeAllBtn.addEventListener("click", async () => {
     if (!currentState) return;
-    const template = getSRService().getExtractionTemplate(currentState);
+    const template =
+      getSRService().ensureActiveExtractionTemplate(currentState);
     if (!template) {
-      toast(doc, "Approve an extraction template first");
+      toast(doc, "Generate an extraction template first");
       openExtractionWorkspace(doc);
       return;
     }
@@ -7520,15 +7545,16 @@ function openExtractionWorkspace(doc: Document, pid?: number): void {
         row.appendChild(outcomeName);
         const measures = doc.createElement("input");
         measures.value = outcome.measures.join(", ");
-        measures.placeholder = "OR, RR, MD";
+        measures.placeholder = "OR, RR, AUROC, Sensitivity";
         measures.title = "Allowed measures separated by commas";
         measures.addEventListener("input", () => {
+          const seen = new Set<string>();
           outcome.measures = measures.value
             .split(",")
-            .map((value) => value.trim().toUpperCase())
-            .filter((value) =>
-              ["OR", "RR", "HR", "MD", "SMD"].includes(value),
-            ) as typeof outcome.measures;
+            .map((value) => value.trim())
+            .filter(Boolean)
+            .map((value) => classifyMeasure(value).canonical)
+            .filter((value) => (seen.has(value) ? false : seen.add(value)));
         });
         row.appendChild(measures);
         const timepoints = doc.createElement("input");
@@ -7699,7 +7725,7 @@ function openExtractionWorkspace(doc: Document, pid?: number): void {
       });
       form.appendChild(outcomeSelect);
       const measureSelect = doc.createElement("select");
-      ["OR", "RR", "HR", "MD", "SMD"].forEach((measure) => {
+      MEASURE_OPTIONS.forEach((measure) => {
         const option = doc.createElement("option");
         option.value = measure;
         option.textContent = measure;
@@ -7913,7 +7939,10 @@ function openExtractionWorkspace(doc: Document, pid?: number): void {
         editor.style.cssText =
           "display:grid;grid-template-columns:repeat(5,minmax(80px,1fr));gap:5px;margin-top:7px;";
         const measure = doc.createElement("select");
-        ["OR", "RR", "HR", "MD", "SMD"].forEach((value) => {
+        const measureValues = MEASURE_OPTIONS.includes(row.effectType)
+          ? MEASURE_OPTIONS
+          : [row.effectType, ...MEASURE_OPTIONS];
+        measureValues.forEach((value) => {
           const option = doc.createElement("option");
           option.value = value;
           option.textContent = value;
@@ -8779,17 +8808,19 @@ function buildProtocolTemplateTab(
       });
       const measuresField = doc.createElement("input");
       measuresField.value = outcome.measures.join(", ");
-      measuresField.placeholder = "OR, RR, MD";
-      measuresField.title = "Allowed measures (OR, RR, HR, MD, SMD)";
+      measuresField.placeholder = "OR, RR, AUROC, Sensitivity";
+      measuresField.title =
+        "Allowed measures (ratio: OR/RR/HR, continuous: MD/SMD, or AUROC, Sensitivity, Brier score, NRI, …)";
       measuresField.style.cssText =
         "padding:4px;border:1px solid var(--border-primary);border-radius:4px;background:var(--background-primary);color:var(--text-primary);font-size:11px;";
       measuresField.addEventListener("input", () => {
+        const seen = new Set<string>();
         outcome.measures = measuresField.value
           .split(",")
-          .map((value) => value.trim().toUpperCase())
-          .filter((value) =>
-            ["OR", "RR", "HR", "MD", "SMD"].includes(value),
-          ) as typeof outcome.measures;
+          .map((value) => value.trim())
+          .filter(Boolean)
+          .map((value) => classifyMeasure(value).canonical)
+          .filter((value) => (seen.has(value) ? false : seen.add(value)));
       });
       const timepointsField = doc.createElement("input");
       timepointsField.value = outcome.timepoints.join(", ");

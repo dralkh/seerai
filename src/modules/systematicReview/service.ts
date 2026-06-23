@@ -134,6 +134,28 @@ export class SystematicReviewService {
     );
   }
 
+  // Users no longer manually approve a template before extracting. Return the
+  // active template, or auto-activate the most recent usable one (newest draft,
+  // otherwise newest non-archived). Returns undefined only when none exists.
+  ensureActiveExtractionTemplate(
+    state: SystematicReviewState,
+  ): ExtractionTemplate | undefined {
+    const active = this.getExtractionTemplate(state);
+    if (active) return active;
+    const candidate = [...state.extractionTemplates]
+      .filter((existing) => existing.status !== "archived")
+      .sort((a, b) => {
+        const draftRank =
+          (a.status === "draft" ? 0 : 1) - (b.status === "draft" ? 0 : 1);
+        if (draftRank !== 0) return draftRank;
+        return (
+          Date.parse(b.updatedAt || b.createdAt || "") -
+          Date.parse(a.updatedAt || a.createdAt || "")
+        );
+      })[0];
+    return candidate ? this.activateTemplate(state, candidate.id) : undefined;
+  }
+
   getExtractionTemplateRevision(
     state: SystematicReviewState,
     revisionId: string | undefined,
@@ -314,10 +336,10 @@ export class SystematicReviewService {
       kind === "evidence_analysis" ||
       kind === "gap_analysis";
     const template = requiresTemplate
-      ? this.getExtractionTemplate(state)
+      ? this.ensureActiveExtractionTemplate(state)
       : undefined;
     if (requiresTemplate && !template) {
-      throw new Error("Approve an extraction template before extracting data");
+      throw new Error("Generate an extraction template before extracting data");
     }
     const now = new Date().toISOString();
     const job: ReviewJob = {

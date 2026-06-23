@@ -1194,7 +1194,8 @@ export const agentTools: ToolDefinition[] = [
                   type: "array",
                   items: {
                     type: "string",
-                    enum: ["OR", "RR", "HR", "MD", "SMD"],
+                    description:
+                      "Measure label: ratio codes OR/RR/HR, continuous MD/SMD, or diagnostic/prognostic labels (AUROC, AUC, Sensitivity, Specificity, PPV, NPV, Accuracy, C-index, AUPRC, Brier score, NRI, percentage).",
                   },
                 },
                 timepoints: { type: "array", items: { type: "string" } },
@@ -1253,7 +1254,8 @@ export const agentTools: ToolDefinition[] = [
               outcome: { type: "string" },
               effect_type: {
                 type: "string",
-                enum: ["OR", "RR", "HR", "MD", "SMD"],
+                description:
+                  "Reported measure: ratio codes OR/RR/HR, continuous MD/SMD, or a diagnostic/prognostic label (AUROC, Sensitivity, Specificity, PPV, NPV, C-index, AUPRC, Brier score, NRI, percentage).",
               },
               effect_size: { type: "number" },
               ci_low: { type: "number" },

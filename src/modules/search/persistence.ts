@@ -21,8 +21,15 @@ export function migrateSearchHistoryData(input: unknown): {
   let migrated = false;
   const entries = input.flatMap((value: any): PersistedSearchHistoryEntry[] => {
     if (!value || typeof value.query !== "string" || !value.state) return [];
+    // Entries written before the multi-provider schema (v2) came from the
+    // Semantic Scholar-only era; pin their mode/provider to that source so they
+    // migrate sensibly rather than inheriting the current default provider.
+    const isLegacy = value.schemaVersion !== 2;
     const state: SearchState = {
       ...defaultSearchState,
+      ...(isLegacy
+        ? { mode: "source" as const, provider: "semantic-scholar" as const }
+        : {}),
       ...value.state,
       providerFilters: value.state.providerFilters || {},
     };

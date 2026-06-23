@@ -12,6 +12,7 @@ import {
   SystematicReviewState,
 } from "./types";
 import { fixedEffectMetaAnalysis, validateExtractionRow } from "./scientific";
+import { isPoolableMeasure } from "./measures";
 import { getActiveProtocolRevision } from "./protocol";
 
 function stableHash(value: unknown): string {
@@ -295,15 +296,18 @@ export function buildSynthesisRun(state: SystematicReviewState): SynthesisRun {
   for (const [key, group] of groups) {
     const first = group.rows[0];
     const domainId = stableId("domain", [revision.id, key]);
-    const commonEffect =
-      group.rows.length >= 2 ? commonEffectSummary(group.rows) : undefined;
-    const randomEffects =
-      group.rows.length >= 2
-        ? randomEffectsMetaAnalysis(group.rows)
-        : undefined;
+    // Only ratio/continuous measures are pooled. Diagnostic/prognostic measures
+    // (AUROC, sensitivity, Brier, NRI, …) are recognised and summarised
+    // narratively instead of fed to the inverse-variance machinery.
+    const poolable = isPoolableMeasure(first.effectType);
+    const canPool = poolable && group.rows.length >= 2;
+    const commonEffect = canPool ? commonEffectSummary(group.rows) : undefined;
+    const randomEffects = canPool
+      ? randomEffectsMetaAnalysis(group.rows)
+      : undefined;
     const nullValue = ["MD", "SMD"].includes(first.effectType) ? 0 : 1;
     const observedSides = new Set(
-      group.rows
+      (poolable ? group.rows : [])
         .map((row) =>
           row.ciLow! <= nullValue && row.ciHigh! >= nullValue
             ? 0
@@ -313,8 +317,9 @@ export function buildSynthesisRun(state: SystematicReviewState): SynthesisRun {
         )
         .filter((side) => side !== 0),
     );
-    const direction =
-      observedSides.size > 1
+    const direction = !poolable
+      ? "unclear"
+      : observedSides.size > 1
         ? "mixed"
         : commonEffect === undefined
           ? "unclear"
@@ -333,8 +338,8 @@ export function buildSynthesisRun(state: SystematicReviewState): SynthesisRun {
       outcome: first.outcome,
       timepoint: first.timepoint,
       measure: first.effectType,
-      method: group.rows.length >= 2 ? "random_effects" : "narrative",
-      status: group.rows.length >= 2 ? "poolable" : "not_poolable",
+      method: canPool ? "random_effects" : "narrative",
+      status: canPool ? "poolable" : "not_poolable",
       studies: group.rows.map((row, index) => ({
         extractionId: extractionId(
           group.paperIds[index],
@@ -356,13 +361,18 @@ export function buildSynthesisRun(state: SystematicReviewState): SynthesisRun {
       paperIds: Array.from(new Set(group.paperIds)),
       direction,
       summary:
-        group.rows.length >= 2 && randomEffects
+        canPool && randomEffects
           ? `${group.rows.length} verified estimates; random-effects estimate ${randomEffects.estimate.toFixed(2)} (${randomEffects.ciLow.toFixed(2)} to ${randomEffects.ciHigh.toFixed(2)}), I2 ${randomEffects.i2.toFixed(0)}%.`
-          : "One verified estimate is available; quantitative pooling is not appropriate.",
-      nonPoolableReasons:
-        group.rows.length >= 2
-          ? []
-          : ["At least two compatible verified estimates are required."],
+          : poolable
+            ? "One verified estimate is available; quantitative pooling is not appropriate."
+            : `${group.rows.length} verified ${first.effectType} estimate(s) reported; this measure is summarised narratively, not pooled.`,
+      nonPoolableReasons: canPool
+        ? []
+        : poolable
+          ? ["At least two compatible verified estimates are required."]
+          : [
+              `${first.effectType} is a non-poolable measure; results are summarised narratively.`,
+            ],
       commonEffect,
       randomEffects,
       methodConfirmed: false,

@@ -40,8 +40,8 @@ export function redactScholarlyUrl(value: string): string {
     return url.toString();
   } catch {
     return value.replace(
-      /([?&](?:apikey|api_key|access_token|token|key)=)[^&]+/gi,
-      "$1REDACTED",
+      /\b(apikey|api_key|access_token|token|key)=[^&\s]+/gi,
+      "$1=REDACTED",
     );
   }
 }

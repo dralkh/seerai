@@ -1,4 +1,5 @@
 import { ExtractionRow, SystematicReviewState } from "./types";
+import { classifyMeasure } from "./measures";
 
 export type RatioMeasure = "OR" | "RR" | "HR";
 export type SupportedMeasure = RatioMeasure | "MD" | "SMD";
@@ -39,18 +40,52 @@ export function validateExtractionRow(
 ): ExtractionValidation {
   const errors: string[] = [];
   if (!row.outcome.trim()) errors.push("Outcome is required");
-  if (!["OR", "RR", "HR", "MD", "SMD"].includes(row.effectType)) {
-    errors.push("Effect measure must be OR, RR, HR, MD, or SMD");
+  const info = classifyMeasure(row.effectType);
+  if (info.family === "other") {
+    errors.push("A recognized effect or performance measure is required");
   }
   const hasEffect = Number.isFinite(row.effectSize);
   const hasLow = Number.isFinite(row.ciLow);
   const hasHigh = Number.isFinite(row.ciHigh);
-  if (
-    !requireComplete &&
-    ![row.effectSize, row.ciLow, row.ciHigh, row.n, row.events].some(
-      (value) => value !== undefined,
-    )
-  ) {
+  const hasAnyValue = [
+    row.effectSize,
+    row.ciLow,
+    row.ciHigh,
+    row.n,
+    row.events,
+  ].some((value) => value !== undefined);
+
+  if (!info.poolable) {
+    // Diagnostic / prognostic / proportion measures are recognised and retained
+    // but never pooled, so they only need one quantitative value plus basic
+    // sanity — not a full effect size with both confidence-interval bounds.
+    if (info.family !== "other" && !hasAnyValue) {
+      errors.push("Enter at least one quantitative value");
+    }
+    if (
+      hasEffect &&
+      hasLow &&
+      hasHigh &&
+      (row.ciLow! > row.effectSize! || row.effectSize! > row.ciHigh!)
+    ) {
+      errors.push("Confidence interval must contain the effect estimate");
+    }
+    if (row.n !== undefined && (!Number.isInteger(row.n) || row.n < 0)) {
+      errors.push("Sample size must be a non-negative integer");
+    }
+    if (
+      row.events !== undefined &&
+      (!Number.isInteger(row.events) || row.events < 0)
+    ) {
+      errors.push("Events must be a non-negative integer");
+    }
+    if (row.events !== undefined && row.n !== undefined && row.events > row.n) {
+      errors.push("Events cannot exceed sample size");
+    }
+    return { valid: errors.length === 0, errors };
+  }
+
+  if (!requireComplete && !hasAnyValue) {
     errors.push("Enter at least one quantitative value");
   }
   if (requireComplete && !hasEffect) errors.push("Effect size is required");
@@ -62,7 +97,7 @@ export function validateExtractionRow(
     errors.push("Confidence interval must contain the effect estimate");
   }
   if (
-    ["OR", "RR", "HR"].includes(row.effectType) &&
+    info.family === "ratio" &&
     ((hasEffect && row.effectSize! <= 0) ||
       (hasLow && row.ciLow! <= 0) ||
       (hasHigh && row.ciHigh! <= 0))
@@ -74,7 +109,7 @@ export function validateExtractionRow(
   } else if (row.n !== undefined && (!Number.isInteger(row.n) || row.n < 0)) {
     errors.push("Sample size must be a non-negative integer");
   }
-  const eventsRequired = ["OR", "RR"].includes(row.effectType);
+  const eventsRequired = info.canonical === "OR" || info.canonical === "RR";
   if (requireComplete && eventsRequired && !Number.isInteger(row.events)) {
     errors.push("Event count is required for OR and RR");
   } else if (

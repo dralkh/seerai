@@ -879,7 +879,7 @@ export type SystematicReviewParams =
         name: string;
         aliases?: string[];
         description?: string;
-        measures: ("OR" | "RR" | "HR" | "MD" | "SMD")[];
+        measures: string[];
         timepoints?: string[];
         unit?: string;
         direction?: "higher_better" | "lower_better";
@@ -950,7 +950,7 @@ export type SystematicReviewParams =
       extraction: {
         id?: string;
         outcome: string;
-        effect_type: "OR" | "RR" | "HR" | "MD" | "SMD";
+        effect_type: string;
         effect_size: number;
         ci_low: number;
         ci_high: number;
