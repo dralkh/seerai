@@ -119,15 +119,16 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 const SR_SIDEBAR_MIN_WIDTH = 160;
 const SR_SIDEBAR_COLLAPSED_WIDTH = 30;
 const SR_SIDEBAR_MAX_WIDTH = 500;
-const SR_AUTO_COLLAPSE_THRESHOLD = 480;
-const SR_FILTERS_AUTO_COLLAPSE_THRESHOLD = 400;
-const SR_ARTICLE_LIST_AUTO_COLLAPSE_THRESHOLD = 320;
 const SR_RESERVED_FOR_CONTENT = 360;
 // Hysteresis band for auto-collapse decisions. A panel collapses when the width
 // drops below its threshold, but only re-expands once the width climbs back past
 // threshold + this band. The gap (larger than any scrollbar) prevents the
 // collapse/expand flip-flop that made the layout "jitter" near a boundary.
 const SR_COLLAPSE_HYSTERESIS = 56;
+const SR_LAYOUT_NARROW_WIDTH = 760;
+const SR_LAYOUT_TINY_WIDTH = 560;
+const SR_DETAIL_MIN_WIDTH = 180;
+const SR_LAYOUT_WIDTH_BUCKET = 4;
 
 function appendToBody(doc: Document, el: HTMLElement): void {
   const target = doc.body || doc.documentElement;
@@ -238,7 +239,9 @@ let reviewFiltersWidth = 200;
 let articleListCollapsed = false;
 let refreshReviewLayout: (() => void) | null = null;
 let lastReviewLayoutWidth = 0;
+let lastResponsiveSignature = "";
 let reviewLayoutRafPending = false;
+let screeningLayoutMode: ScreeningLayoutMode = "wide";
 
 interface ItemMeta {
   id: number;
@@ -559,6 +562,89 @@ function selectItemInZotero(itemId: number): void {
   if (zp2) zp2.selectItem(itemId);
 }
 
+async function openFirstPdfAttachment(itemId: number): Promise<boolean> {
+  const item = Zotero.Items.get(itemId);
+  if (!item) return false;
+  const attachmentIds = item.getAttachments();
+  for (const attachId of attachmentIds) {
+    const attachment = Zotero.Items.get(attachId);
+    if (
+      attachment &&
+      attachment.isPDFAttachment &&
+      attachment.isPDFAttachment()
+    ) {
+      try {
+        const tabs = ztoolkit.getGlobal("Zotero_Tabs");
+        if (tabs && typeof tabs.select === "function") {
+          tabs.select("zotero-pane");
+        }
+        await Zotero.Reader.open(attachment.id);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+  return false;
+}
+
+function wirePaperTitleOpenBehavior(
+  titleEl: HTMLElement,
+  paperId: number,
+  onSingleClick?: () => void,
+): void {
+  titleEl.title = "Click to select in Zotero library; double-click to open PDF";
+  titleEl.style.cursor = "pointer";
+  titleEl.addEventListener("mouseenter", () => {
+    titleEl.style.textDecoration = "underline";
+  });
+  titleEl.addEventListener("mouseleave", () => {
+    titleEl.style.textDecoration = "none";
+  });
+  titleEl.addEventListener("click", async (event: MouseEvent) => {
+    event.stopPropagation();
+    if (event.shiftKey || event.ctrlKey || event.metaKey) return;
+    if (event.detail === 2) {
+      if (await openFirstPdfAttachment(paperId)) return;
+    }
+    if (onSingleClick) {
+      onSingleClick();
+      return;
+    }
+    selectItemInZotero(paperId);
+  });
+}
+
+function wirePressTwiceToConfirm(
+  button: HTMLButtonElement,
+  confirmText: string,
+  action: () => void | Promise<void>,
+): void {
+  const originalText = button.textContent || "";
+  let pending = false;
+  let resetTimer: number | undefined;
+  button.addEventListener("click", async () => {
+    const ownerDoc = button.ownerDocument;
+    const win = ownerDoc?.defaultView;
+    if (!pending) {
+      pending = true;
+      button.textContent = confirmText;
+      button.title = confirmText;
+      resetTimer = win?.setTimeout(() => {
+        pending = false;
+        button.textContent = originalText;
+        button.title = "";
+      }, 2500);
+      return;
+    }
+    pending = false;
+    if (resetTimer !== undefined) win?.clearTimeout(resetTimer);
+    button.textContent = originalText;
+    button.title = "";
+    await action();
+  });
+}
+
 const labelHierarchy: Record<string, { labels: string[] }> = {
   "Study Design": {
     labels: ["rct", "meta", "cohort", "review", "guideline", "ml"],
@@ -609,6 +695,7 @@ function saveSRState(): void {
   getSRService().save(currentState);
 }
 interface ResponsiveSizes {
+  mode: ScreeningLayoutMode;
   autoCollapseSidebar: boolean;
   autoCollapseFilters: boolean;
   autoCollapseArticleList: boolean;
@@ -620,17 +707,47 @@ interface ResponsiveSizes {
   filtersMinWidth: number;
 }
 
+type ScreeningLayoutMode = "wide" | "narrow" | "tiny";
+
+function bucketResponsiveWidth(width: number): number {
+  return Math.round(width / SR_LAYOUT_WIDTH_BUCKET) * SR_LAYOUT_WIDTH_BUCKET;
+}
+
+function resolveScreeningLayoutMode(outerWidth: number): ScreeningLayoutMode {
+  if (screeningLayoutMode === "tiny") {
+    if (outerWidth < SR_LAYOUT_TINY_WIDTH + SR_COLLAPSE_HYSTERESIS) {
+      return "tiny";
+    }
+    return outerWidth < SR_LAYOUT_NARROW_WIDTH + SR_COLLAPSE_HYSTERESIS
+      ? "narrow"
+      : "wide";
+  }
+  if (screeningLayoutMode === "narrow") {
+    if (outerWidth < SR_LAYOUT_TINY_WIDTH) return "tiny";
+    if (outerWidth >= SR_LAYOUT_NARROW_WIDTH + SR_COLLAPSE_HYSTERESIS) {
+      return "wide";
+    }
+    return "narrow";
+  }
+  if (outerWidth < SR_LAYOUT_TINY_WIDTH) return "tiny";
+  if (outerWidth < SR_LAYOUT_NARROW_WIDTH) return "narrow";
+  return "wide";
+}
+
+function clampPanelWidth(
+  preferred: number,
+  minimum: number,
+  maximum: number,
+): number {
+  return Math.max(minimum, Math.min(Math.max(minimum, maximum), preferred));
+}
+
 function computeResponsiveSizes(outerWidth: number): ResponsiveSizes {
-  // Auto-collapse purely on available width. We intentionally do NOT exempt
-  // panels the user has manually resized: honoring a manual width when there is
-  // no room is exactly what created the "stuck" minimum width and truncation.
-  // Compaction always wins over truncation; the manual width is still used as
-  // the preferred size whenever the panel is expanded.
-  const autoCollapseSidebar =
-    !sidebarCollapsed &&
-    outerWidth <
-      SR_AUTO_COLLAPSE_THRESHOLD +
-        (sidebarAutoCollapsed ? SR_COLLAPSE_HYSTERESIS : 0);
+  const stableOuterWidth = bucketResponsiveWidth(outerWidth);
+  const mode = resolveScreeningLayoutMode(stableOuterWidth);
+  screeningLayoutMode = mode;
+
+  const autoCollapseSidebar = !sidebarCollapsed && mode === "tiny";
   const effectiveCollapsed = sidebarCollapsed || autoCollapseSidebar;
 
   let sidebarWidth: number;
@@ -639,32 +756,27 @@ function computeResponsiveSizes(outerWidth: number): ResponsiveSizes {
     sidebarWidth = SR_SIDEBAR_COLLAPSED_WIDTH;
     sidebarMinWidth = SR_SIDEBAR_COLLAPSED_WIDTH;
   } else {
-    sidebarWidth = Math.max(
+    sidebarWidth = clampPanelWidth(
+      reviewSidebarWidth,
       SR_SIDEBAR_MIN_WIDTH,
-      Math.min(reviewSidebarWidth, outerWidth - SR_RESERVED_FOR_CONTENT),
+      stableOuterWidth - SR_RESERVED_FOR_CONTENT,
     );
     sidebarMinWidth = SR_SIDEBAR_MIN_WIDTH;
   }
 
-  const contentWidth = Math.max(0, outerWidth - sidebarWidth - 5);
+  const contentWidth = Math.max(0, stableOuterWidth - sidebarWidth - 5);
   const autoCollapseFilters =
-    !filtersCollapsed &&
-    contentWidth <
-      SR_FILTERS_AUTO_COLLAPSE_THRESHOLD +
-        (filtersAutoCollapsed ? SR_COLLAPSE_HYSTERESIS : 0);
+    !filtersCollapsed && (mode === "narrow" || mode === "tiny");
   const effectiveFiltersCollapsed = filtersCollapsed || autoCollapseFilters;
 
-  const autoCollapseArticleList =
-    !articleListCollapsed &&
-    contentWidth <
-      SR_ARTICLE_LIST_AUTO_COLLAPSE_THRESHOLD +
-        (articleListAutoCollapsed ? SR_COLLAPSE_HYSTERESIS : 0);
+  const autoCollapseArticleList = !articleListCollapsed && mode === "tiny";
   const effectiveArticleListCollapsed =
     articleListCollapsed || autoCollapseArticleList;
 
-  const detailMinimum = contentWidth < 560 ? 120 : 260;
-  const listMinimum = contentWidth < 400 ? 60 : contentWidth < 560 ? 84 : 100;
-  const filterMinimum = contentWidth < 400 ? 60 : 80;
+  const detailMinimum =
+    mode === "wide" ? 260 : mode === "narrow" ? 220 : SR_DETAIL_MIN_WIDTH;
+  const listMinimum = mode === "wide" ? 100 : 84;
+  const filterMinimum = 80;
   const articleListCollapsedWidth = 32;
   const filterCollapsedWidth = 30;
   const filterRequested = effectiveFiltersCollapsed
@@ -711,6 +823,7 @@ function computeResponsiveSizes(outerWidth: number): ResponsiveSizes {
   );
 
   return {
+    mode,
     autoCollapseSidebar,
     autoCollapseFilters,
     autoCollapseArticleList,
@@ -865,9 +978,8 @@ export async function createSystematicReviewTabContent(
   const runResponsiveLayout = () => {
     reviewLayoutRafPending = false;
     if (!mainWrapper || !sideNav) return;
-    // Round to whole pixels so sub-pixel fluctuations never trigger relayout.
-    const availableWidth = Math.round(
-      mainWrapper.getBoundingClientRect().width,
+    const availableWidth = bucketResponsiveWidth(
+      Math.round(mainWrapper.getBoundingClientRect().width),
     );
     if (
       !availableWidth ||
@@ -876,8 +988,6 @@ export async function createSystematicReviewTabContent(
     ) {
       return;
     }
-    if (availableWidth === lastReviewLayoutWidth) return;
-    lastReviewLayoutWidth = availableWidth;
     const layoutWidth = availableWidth;
     const filters = mainWrapper.querySelector(
       ".sr-filters-panel",
@@ -892,18 +1002,27 @@ export async function createSystematicReviewTabContent(
       ".sr-filter-handle",
     ) as HTMLElement | null;
 
-    const wasNarrow = mainWrapper.classList.contains("sr-layout-narrow");
-    const wasTight = mainWrapper.classList.contains("sr-layout-tight");
-    mainWrapper.classList.toggle(
-      "sr-layout-narrow",
-      layoutWidth < 760 + (wasNarrow ? SR_COLLAPSE_HYSTERESIS : 0),
-    );
-    mainWrapper.classList.toggle(
-      "sr-layout-tight",
-      layoutWidth < 560 + (wasTight ? SR_COLLAPSE_HYSTERESIS : 0),
-    );
-
     const sizes = computeResponsiveSizes(layoutWidth);
+    const signature = [
+      layoutWidth,
+      sizes.mode,
+      sidebarCollapsed,
+      filtersCollapsed,
+      articleListCollapsed,
+      sizes.autoCollapseSidebar,
+      sizes.autoCollapseFilters,
+      sizes.autoCollapseArticleList,
+      Math.round(sizes.sidebarWidth),
+      Math.round(sizes.articleListWidth),
+      Math.round(sizes.filtersWidth),
+    ].join("|");
+    if (signature === lastResponsiveSignature) return;
+    lastResponsiveSignature = signature;
+    lastReviewLayoutWidth = layoutWidth;
+
+    mainWrapper.classList.toggle("sr-layout-narrow", sizes.mode !== "wide");
+    mainWrapper.classList.toggle("sr-layout-tight", sizes.mode === "tiny");
+
     if (sizes.autoCollapseSidebar !== sidebarAutoCollapsed) {
       sidebarAutoCollapsed = sizes.autoCollapseSidebar;
     }
@@ -1022,6 +1141,7 @@ export async function createSystematicReviewTabContent(
   refreshReviewLayout = applyResponsiveLayout;
   // Fresh layout pass for this render: re-measure cleanly.
   lastReviewLayoutWidth = 0;
+  lastResponsiveSignature = "";
   const ResizeObserverCtor = doc.defaultView?.ResizeObserver;
   if (ResizeObserverCtor) {
     const layoutObserver = new ResizeObserverCtor(applyResponsiveLayout);
@@ -1455,7 +1575,7 @@ function buildSidebar(
   const nav = doc.createElement("div");
   nav.className = "sr-sidebar";
   nav.style.cssText =
-    "border-right:1px solid var(--border-primary);background:var(--background-secondary);display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0;";
+    "box-sizing:border-box;border-right:1px solid var(--border-primary);background:var(--background-secondary);display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0;";
 
   // Header with toggle
   const hdr = doc.createElement("div");
@@ -1770,8 +1890,14 @@ function buildScreeningPanel(doc: Document): HTMLElement {
   if (initialSizes.autoCollapseArticleList !== articleListAutoCollapsed) {
     articleListAutoCollapsed = initialSizes.autoCollapseArticleList;
   }
-  mainWrapper?.classList.toggle("sr-layout-narrow", outerWidth < 760);
-  mainWrapper?.classList.toggle("sr-layout-tight", outerWidth < 560);
+  mainWrapper?.classList.toggle(
+    "sr-layout-narrow",
+    initialSizes.mode !== "wide",
+  );
+  mainWrapper?.classList.toggle(
+    "sr-layout-tight",
+    initialSizes.mode === "tiny",
+  );
 
   // Left: Article list
   const left = buildArticleList(doc, initialSizes);
@@ -1791,17 +1917,18 @@ function buildScreeningPanel(doc: Document): HTMLElement {
       const rect = left.getBoundingClientRect();
       const rowWidth = row.getBoundingClientRect().width;
       const rightWidth = right?.getBoundingClientRect().width || 0;
-      const w = Math.max(
-        100,
-        Math.min(
-          Math.min(450, rowWidth - rightWidth - 220),
-          ev.clientX - rect.left,
-        ),
+      const sizes = computeResponsiveSizes(
+        mainWrapper?.getBoundingClientRect().width || rowWidth,
       );
+      const minWidth = Math.max(84, sizes.articleListMinWidth);
+      const maxWidth = Math.max(
+        minWidth,
+        Math.min(450, rowWidth - rightWidth - SR_DETAIL_MIN_WIDTH - 8),
+      );
+      const w = Math.max(minWidth, Math.min(maxWidth, ev.clientX - rect.left));
       reviewArticleListWidth = Math.round(w);
       left.style.setProperty("width", `${w}px`, "important");
       left.style.setProperty("min-width", `${w}px`, "important");
-      left.style.setProperty("max-width", `${w}px`, "important");
     };
     const onUp = () => {
       dragLeftActive = false;
@@ -1841,12 +1968,21 @@ function buildScreeningPanel(doc: Document): HTMLElement {
       const rightRect = right.getBoundingClientRect();
       const rowWidth = row.getBoundingClientRect().width;
       const leftWidth = left.getBoundingClientRect().width;
-      const maxWidth = Math.max(80, Math.min(450, rowWidth - leftWidth - 220));
-      const w = Math.max(80, Math.min(maxWidth, rightRect.right - ev.clientX));
+      const sizes = computeResponsiveSizes(
+        mainWrapper?.getBoundingClientRect().width || rowWidth,
+      );
+      const minWidth = Math.max(80, sizes.filtersMinWidth);
+      const maxWidth = Math.max(
+        minWidth,
+        Math.min(450, rowWidth - leftWidth - SR_DETAIL_MIN_WIDTH - 8),
+      );
+      const w = Math.max(
+        minWidth,
+        Math.min(maxWidth, rightRect.right - ev.clientX),
+      );
       reviewFiltersWidth = Math.round(w);
       right.style.setProperty("width", `${w}px`, "important");
       right.style.setProperty("min-width", `${w}px`, "important");
-      right.style.setProperty("max-width", `${w}px`, "important");
     };
     const onUp = () => {
       dragRightActive = false;
@@ -1961,7 +2097,7 @@ function buildArticleList(
   left.className = "sr-paper-list";
   const initialWidth = initialSizes?.articleListWidth ?? reviewArticleListWidth;
   const initialMin = initialSizes?.articleListMinWidth ?? 60;
-  left.style.cssText = `width:${initialWidth}px;min-width:${initialMin}px;max-width:450px;flex-shrink:0;border-right:1px solid var(--border-primary);display:flex;flex-direction:column;overflow:hidden;`;
+  left.style.cssText = `box-sizing:border-box;width:${initialWidth}px;min-width:${initialMin}px;max-width:450px;flex-shrink:0;border-right:1px solid var(--border-primary);display:flex;flex-direction:column;overflow:hidden;`;
 
   // Header with filter controls
   const hdr = doc.createElement("div");
@@ -2619,44 +2755,9 @@ function buildDetailView(doc: Document): HTMLElement {
   const titleEl = doc.createElement("div");
   titleEl.textContent = title;
   titleEl.className = "sr-detail-title";
-  titleEl.title = "Click to select in Zotero library";
   titleEl.style.cssText =
     "font-size:14px;font-weight:600;color:var(--text-primary);line-height:1.4;margin-bottom:8px;cursor:pointer;overflow-wrap:break-word;word-break:break-word;max-width:100%;min-width:0;";
-  titleEl.addEventListener("mouseenter", () => {
-    titleEl.style.textDecoration = "underline";
-  });
-  titleEl.addEventListener("mouseleave", () => {
-    titleEl.style.textDecoration = "none";
-  });
-  titleEl.addEventListener("click", async (e: MouseEvent) => {
-    if (e.shiftKey || e.ctrlKey || e.metaKey) return;
-    if (e.detail === 2) {
-      const item = Zotero.Items.get(paper.id);
-      if (item) {
-        const attachmentIds = item.getAttachments();
-        for (const attachId of attachmentIds) {
-          const attachment = Zotero.Items.get(attachId);
-          if (
-            attachment &&
-            attachment.isPDFAttachment &&
-            attachment.isPDFAttachment()
-          ) {
-            try {
-              const tabs = ztoolkit.getGlobal("Zotero_Tabs");
-              if (tabs && typeof tabs.select === "function") {
-                tabs.select("zotero-pane");
-              }
-              await Zotero.Reader.open(attachment.id);
-              return;
-            } catch {
-              // fall through to selectItem
-            }
-          }
-        }
-      }
-    }
-    selectItemInZotero(paper.id);
-  });
+  wirePaperTitleOpenBehavior(titleEl, paper.id);
   body.appendChild(titleEl);
 
   // Status + Confidence row
@@ -3500,7 +3601,7 @@ function buildFiltersPanel(
   right.className = "sr-filters-panel";
   const initialWidth = initialSizes?.filtersWidth ?? reviewFiltersWidth;
   const initialMin = initialSizes?.filtersMinWidth ?? 60;
-  right.style.cssText = `width:${initialWidth}px;min-width:${initialMin}px;max-width:350px;flex-shrink:0;border-left:1px solid var(--border-primary);display:flex;flex-direction:column;overflow:hidden;`;
+  right.style.cssText = `box-sizing:border-box;width:${initialWidth}px;min-width:${initialMin}px;max-width:350px;flex-shrink:0;border-left:1px solid var(--border-primary);display:flex;flex-direction:column;overflow:hidden;`;
   const hdr = doc.createElement("div");
   hdr.setAttribute("data-sr-filters-hdr", "true");
   hdr.style.cssText =
@@ -4253,6 +4354,42 @@ function buildEvidencePanel(doc: Document): HTMLElement {
     reRenderPanel(doc, "evidence");
   });
   tabRow.appendChild(aiBtn2);
+  const acceptAiBtn = doc.createElement("button");
+  acceptAiBtn.textContent = "Accept All AI Reviews";
+  acceptAiBtn.title =
+    "Accept every valid grounded AI extraction proposal, then refresh draft synthesis";
+  acceptAiBtn.style.cssText =
+    "padding:2px 8px;font-size:10px;border:1px solid #16a34a;border-radius:4px;background:transparent;color:#16a34a;cursor:pointer;font-family:inherit;margin-left:8px;";
+  acceptAiBtn.addEventListener("click", async () => {
+    if (!currentState) return;
+    const result = getSRService().autoVerifyValidProposals(currentState);
+    const readiness = getSRService().getSynthesisReadiness(currentState);
+    let synthesisDomains = 0;
+    if (
+      readiness.verified > 0 &&
+      !readiness.incompletePoolableRows &&
+      !readiness.quarantined
+    ) {
+      const run = getSRService().runSynthesis(currentState, true);
+      getSRService().generateGaps(currentState, run.id, true);
+      synthesisDomains = run.domains.length;
+    }
+    await getSRService().save(currentState);
+    evTab = "ai";
+    if (result.verifiedRows === 0) {
+      toast(doc, "No valid AI proposals were ready to accept");
+    } else {
+      toast(
+        doc,
+        `Accepted ${result.verifiedRows} AI proposal(s) across ${result.papers} paper(s)` +
+          (synthesisDomains
+            ? ` and refreshed ${synthesisDomains} synthesis domain(s)`
+            : ""),
+      );
+    }
+    reRenderPanel(doc, "evidence");
+  });
+  tabRow.appendChild(acceptAiBtn);
   const runBtn = doc.createElement("button");
   runBtn.textContent = "Generate Draft Synthesis";
   runBtn.style.cssText =
@@ -4703,9 +4840,12 @@ function renderExtractionReviewQueue(
       getItemMeta(paper.id).title || `Paper ${paper.id}`,
       54,
     );
-    title.title = getItemMeta(paper.id).title;
     title.style.cssText =
       "padding:6px;border-bottom:1px solid var(--border-secondary);font-weight:500;";
+    wirePaperTitleOpenBehavior(title, paper.id, () => {
+      scrActive = paper.id;
+      selectItemInZotero(paper.id);
+    });
     row.appendChild(title);
     [
       task ? formatJobStage(task.stage) : "Not processed",
@@ -5177,6 +5317,12 @@ function renderEvPaperChip(
   titleEl.textContent = title;
   titleEl.style.cssText =
     "font-weight:600;font-size:10px;color:var(--text-primary);line-height:1.3;";
+  wirePaperTitleOpenBehavior(titleEl, p.id, () => {
+    evSelectedLabel = null;
+    scrActive = p.id;
+    currentPanel = "screening";
+    reRenderPanel(doc, "screening");
+  });
   item.appendChild(titleEl);
 
   const subEl = doc.createElement("div");
@@ -5342,8 +5488,7 @@ function buildEvAISynthesis(
         studItem.style.cssText =
           "padding:4px 6px;margin:2px 0;background:var(--background-primary);border-radius:4px;font-size:9px;color:var(--text-primary);cursor:pointer;";
         studItem.textContent = author + " (" + year + ") " + trunc(title, 50);
-        studItem.addEventListener("click", (e: Event) => {
-          e.stopPropagation();
+        wirePaperTitleOpenBehavior(studItem, p.id, () => {
           scrActive = p.id;
           currentPanel = "screening";
           reRenderPanel(doc, "screening");
@@ -6708,6 +6853,13 @@ function showGapCellPapers(
     t.textContent = title;
     t.style.cssText =
       "font-size:10px;font-weight:500;color:var(--text-primary);";
+    wirePaperTitleOpenBehavior(t, p.id, () => {
+      scrActive = p.id;
+      currentPanel = "screening";
+      const p2 = overlay.parentElement;
+      if (p2) p2.removeChild(overlay);
+      reRenderPanel(doc, "screening");
+    });
     item.appendChild(t);
     const s = doc.createElement("div");
     s.textContent =
@@ -7699,13 +7851,48 @@ function openExtractionWorkspace(doc: Document, pid?: number): void {
       body.appendChild(templateOnly);
       return;
     }
-    const meta = getItemMeta(pid);
+    const currentPid = pid;
+    const meta = getItemMeta(currentPid);
     const paperHeader = doc.createElement("div");
     paperHeader.style.cssText =
       "display:flex;align-items:center;gap:8px;margin-bottom:8px;";
+    const reviewablePapers = currentState.papers.filter(
+      (candidate) =>
+        candidate.status === "included" &&
+        (candidate.screeningStage === "final" || !candidate.screeningStage),
+    );
+    const paperIndex = reviewablePapers.findIndex(
+      (candidate) => candidate.id === currentPid,
+    );
+    const back = doc.createElement("button");
+    back.textContent = "Back";
+    back.disabled = paperIndex <= 0;
+    back.style.cssText =
+      "padding:5px 10px;border:1px solid var(--border-primary);border-radius:4px;background:transparent;color:var(--text-secondary);cursor:pointer;";
+    back.addEventListener("click", () => {
+      if (paperIndex <= 0) return;
+      pid = reviewablePapers[paperIndex - 1].id;
+      render();
+    });
+    paperHeader.appendChild(back);
     const paperTitle = doc.createElement("strong");
-    paperTitle.textContent = meta.title || `Paper ${pid}`;
+    paperTitle.textContent = meta.title || `Paper ${currentPid}`;
+    paperTitle.style.cssText = "overflow-wrap:anywhere;";
+    wirePaperTitleOpenBehavior(paperTitle, currentPid, () =>
+      selectItemInZotero(currentPid),
+    );
     paperHeader.appendChild(paperTitle);
+    const next = doc.createElement("button");
+    next.textContent = "Next";
+    next.disabled = paperIndex < 0 || paperIndex >= reviewablePapers.length - 1;
+    next.style.cssText =
+      "padding:5px 10px;border:1px solid var(--border-primary);border-radius:4px;background:transparent;color:var(--text-secondary);cursor:pointer;";
+    next.addEventListener("click", () => {
+      if (paperIndex < 0 || paperIndex >= reviewablePapers.length - 1) return;
+      pid = reviewablePapers[paperIndex + 1].id;
+      render();
+    });
+    paperHeader.appendChild(next);
     const paperSpacer = doc.createElement("span");
     paperSpacer.style.flex = "1";
     paperHeader.appendChild(paperSpacer);
@@ -7719,7 +7906,7 @@ function openExtractionWorkspace(doc: Document, pid?: number): void {
         const job = await getSRService().startReviewJob(
           currentState,
           "extraction",
-          [pid],
+          [currentPid],
         );
         toast(doc, `Extraction job ${job.id} started`);
         overlay.remove();
@@ -7786,7 +7973,7 @@ function openExtractionWorkspace(doc: Document, pid?: number): void {
         );
         if (!selectedOutcome) return;
         const row: ExtractionRow = {
-          id: `ext_${pid}_${Date.now()}_manual`,
+          id: `ext_${currentPid}_${Date.now()}_manual`,
           outcomeId: selectedOutcome.id,
           outcome: selectedOutcome.name,
           effectType: measureSelect.value,
@@ -7808,8 +7995,8 @@ function openExtractionWorkspace(doc: Document, pid?: number): void {
           toast(doc, validation.errors.join("; "));
           return;
         }
-        currentState.extractions[pid] ||= [];
-        currentState.extractions[pid].push(row);
+        currentState.extractions[currentPid] ||= [];
+        currentState.extractions[currentPid].push(row);
         await getSRService().save(currentState);
         render();
       });
@@ -7827,10 +8014,10 @@ function openExtractionWorkspace(doc: Document, pid?: number): void {
     verifyAll.textContent = "Verify Valid Proposals";
     verifyAll.style.cssText =
       "padding:5px 10px;border:1px solid #16a34a;border-radius:4px;background:transparent;color:#16a34a;cursor:pointer;";
-    verifyAll.addEventListener("click", async () => {
+    wirePressTwiceToConfirm(verifyAll, "Are you sure?", async () => {
       if (!currentState) return;
-      const proposals = (currentState.extractions[pid] || []).filter(
-        (row) =>
+      const proposals = (currentState.extractions[currentPid] || []).filter(
+        (row: ExtractionRow) =>
           row.verificationStatus === "proposed" &&
           !!row.sourceQuote?.trim() &&
           validateExtractionRow(row).valid,
@@ -7839,18 +8026,11 @@ function openExtractionWorkspace(doc: Document, pid?: number): void {
         toast(doc, "No grounded valid proposals are ready for verification");
         return;
       }
-      if (
-        !doc.defaultView?.confirm(
-          `Verify ${proposals.length} grounded proposal(s) for this paper?`,
-        )
-      ) {
-        return;
-      }
       proposals.forEach((row) => {
         if (row.id) {
           getSRService().reviewExtraction(
             currentState!,
-            pid,
+            currentPid,
             row.id,
             "verified",
           );
@@ -7862,7 +8042,7 @@ function openExtractionWorkspace(doc: Document, pid?: number): void {
     paperHeader.appendChild(verifyAll);
     body.appendChild(paperHeader);
 
-    const rows = currentState.extractions[pid] || [];
+    const rows = currentState.extractions[currentPid] || [];
     if (!rows.length) {
       const noRows = doc.createElement("div");
       noRows.textContent =
@@ -7932,7 +8112,7 @@ function openExtractionWorkspace(doc: Document, pid?: number): void {
           try {
             getSRService().reviewExtraction(
               currentState,
-              pid,
+              currentPid,
               row.id,
               nextStatus,
             );

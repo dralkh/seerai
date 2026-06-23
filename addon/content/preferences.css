@@ -401,6 +401,22 @@ body.dark {
   font-size: 12px;
 }
 
+.seerai-cli-hint,
+.seerai-cli-disclaimer {
+  margin: 8px 0 0;
+  color: var(--text-secondary, var(--model-item-text-secondary));
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.seerai-cli-disclaimer {
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, #d97706 35%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, #d97706 10%, transparent);
+  color: var(--text-primary, var(--model-item-text-primary));
+}
+
 .seerai-connection-status {
   color: var(--text-secondary, var(--model-item-text-secondary));
   font-size: 11px;

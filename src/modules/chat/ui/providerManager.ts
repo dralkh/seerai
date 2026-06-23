@@ -392,6 +392,10 @@ export function showProviderManagerDialog(
   // auth is inherited from the installed CLI's own login session.
   const cliHint = element(doc, "p", "seerai-cli-hint");
   cliHint.hidden = true;
+  const cliDisclaimer = element(doc, "p", "seerai-cli-disclaimer");
+  cliDisclaimer.textContent =
+    "CLI providers run through your own third-party account. You are responsible for complying with that provider's terms, policies, and usage limits. Misuse may result in account restrictions, suspension, or bans. seerai does not control third-party CLI services and is not responsible for enforcement actions taken by those providers.";
+  cliDisclaimer.hidden = true;
 
   const advanced = element(doc, "details", "seerai-provider-advanced");
   const advancedSummary = element(doc, "summary");
@@ -453,6 +457,7 @@ export function showProviderManagerDialog(
     nameField,
     keyField,
     cliHint,
+    cliDisclaimer,
     advanced,
     connectionActions,
   );
@@ -631,6 +636,7 @@ export function showProviderManagerDialog(
     keyField.hidden = cli;
     advanced.hidden = cli;
     cliHint.hidden = !cli;
+    cliDisclaimer.hidden = !cli;
     if (cli) {
       const preset = getPresetById(presetId);
       cliHint.textContent =
