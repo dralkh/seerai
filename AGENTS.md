@@ -12,11 +12,13 @@
 
 ```bash
 npm start              # Dev server with hot reload (zotero-plugin serve)
-npm run build          # Production build: plugin .xpi + MCP bundle + tsc --noEmit + copies artifacts to root
+npm run build          # Production build: MCP bundle → plugin .xpi + tsc --noEmit + copies artifacts to root
 npm run lint:check     # Prettier check + ESLint
 npm run lint:fix       # Prettier write + ESLint fix
 npm run release        # Create GitHub release (zotero-plugin release)
 npm run test           # Run test suite (zotero-plugin test → mocha-based)
+npm run test:extraction-eval  # LLM extraction evaluation harness (tsx test/extractionModelEval.ts)
+npm run test:pipeline-eval    # Systematic-review pipeline evaluation harness (tsx test/pipelineEval.ts)
 npm run update-deps    # Update all dependencies to latest (npm update --save)
 
 # MCP server (separate package)
@@ -32,19 +34,19 @@ cd mcp-server && npm run start    # Run compiled MCP server
 
 ## Tech Stack
 
-| Layer          | Technology                                                   |
-| -------------- | ------------------------------------------------------------ |
-| Language       | TypeScript                                                   |
-| Build          | esbuild (target: firefox128), zotero-plugin-scaffold v0.8    |
-| Plugin Runtime | Zotero 8/9 (Firefox 128-based SpiderMonkey engine)           |
-| Validation     | Zod v4 (plugin), Zod v3 (MCP server)                         |
-| Plugin Toolkit | zotero-plugin-toolkit v5 (^5.1.0-beta.13)                    |
-| Types          | zotero-types v4 (^4.1.0-beta.8)                              |
-| Linting        | @zotero-plugin/eslint-config, Prettier                       |
-| Testing        | Mocha + Chai                                                 |
-| Tokenization   | gpt-tokenizer                                                |
-| DOCX/Markdown  | mammoth, docx-preview, turndown                              |
-| MCP Server     | @modelcontextprotocol/sdk, zod, zod-to-json-schema, Node 18+ |
+| Layer              | Technology                                                   |
+| ------------------ | ------------------------------------------------------------ |
+| Language           | TypeScript                                                   |
+| Build              | esbuild (target: firefox128), zotero-plugin-scaffold v0.8    |
+| Plugin Runtime     | Zotero 8/9 (Firefox 128-based SpiderMonkey engine)           |
+| Validation         | Zod v4 (plugin), Zod v3 (MCP server)                         |
+| Plugin Toolkit     | zotero-plugin-toolkit v5 (^5.1.0-beta.13)                    |
+| Types              | zotero-types v4 (^4.1.0-beta.8)                              |
+| Linting            | @zotero-plugin/eslint-config, Prettier                       |
+| Testing            | Mocha + Chai + tsx (evaluation harnesses)                    |
+| Tokenization       | gpt-tokenizer                                                |
+| DOCX/Markdown/Math | mammoth, docx-preview, turndown, katex                       |
+| MCP Server         | @modelcontextprotocol/sdk, zod, zod-to-json-schema, Node 18+ |
 
 ## Project Structure
 
@@ -120,6 +122,7 @@ seerai/
 │   │   │   │   ├── toolExecutor.ts     # Central dispatch: parse → validate → execute
 │   │   │   │   ├── schemas.ts          # Zod validation schemas per tool
 │   │   │   │   ├── searchTool.ts       # search_library, search_external, import_paper
+│   │   │   │   ├── searchExternalAdapter.ts # Adapter: tool params → federated scholarly query
 │   │   │   │   ├── readTool.ts         # get_item_metadata, read_item_content
 │   │   │   │   ├── noteTool.ts         # Unified note create/edit
 │   │   │   │   ├── contextTool.ts      # Unified context add/remove/list
@@ -155,7 +158,12 @@ seerai/
 │   │   │   │   ├── codexAgent.ts        # OpenAI Codex CLI
 │   │   │   │   ├── claudeAgent.ts       # Claude Code CLI
 │   │   │   │   ├── antigravityAgent.ts  # Antigravity CLI
-│   │   │   │   └── copilotAgent.ts      # GitHub Copilot CLI
+│   │   │   │   ├── hermesAgent.ts       # Hermes (Nous) CLI
+│   │   │   │   ├── openclawAgent.ts     # OpenClaw gateway CLI
+│   │   │   │   ├── mcpBridge.ts         # Bundled MCP server bridge for CLI harnesses
+│   │   │   │   ├── harnessPrompt.ts     # System prompt for CLI agentic turns
+│   │   │   │   ├── toolActivityBridge.ts # Live tool-activity surfacing from harnesses
+│   │   │   │   └── toolNotice.ts        # Formatting for harness tool-activity notices
 │   │   │   ├── skills/         # Agent skills registry
 │   │   │   │   └── registry.ts          # Bundled + user/workspace/custom skills; state in .agent/skills.json
 │   │   │   ├── ui/             # Chat UI components
@@ -166,6 +174,7 @@ seerai/
 │   │   │   │   ├── providerManager.ts   # AI Models / provider config UI
 │   │   │   │   ├── integrationSettings.ts # Search/OCR/cloud integration settings UI
 │   │   │   │   ├── serviceSettings.ts   # Per-service quick settings
+│   │   │   │   ├── harnessBridgeModal.ts # Connect seerai tools to CLI harnesses
 │   │   │   │   └── icons.ts   # SVG icon registry + factory
 │   │   ├── search/             # Federated scholarly search (11 providers)
 │   │   │   ├── index.ts        # Barrel exports
@@ -194,6 +203,9 @@ seerai/
 │   │   │   ├── extractionWorkflow.ts # Data extraction pipeline
 │   │   │   ├── analysisEngine.ts # Evidence synthesis engine
 │   │   │   ├── extractionHealth.ts # Extraction quality monitoring
+│   │   │   ├── compatibility.ts # Extraction compatibility / poolability grouping
+│   │   │   ├── grounding.ts    # Quote-grounding validation (exact + fuzzy)
+│   │   │   ├── measures.ts     # Effect/performance measure taxonomy
 │   │   │   ├── sources.ts      # Review source management
 │   │   │   ├── reviewSourceService.ts # Source sync/import
 │   │   │   ├── scientific.ts   # Scientific notation & stats
@@ -376,6 +388,7 @@ toolDefinitions.ts  →  schemas.ts  →  toolExecutor.ts  →  individual tool 
 - **Execution**: `toolExecutor.ts` → `parseToolCall()` → `safeValidateToolArgs()` → dispatch to tool file
 - **Consolidated tools**: `context`, `collection`, `table`, `note`, `web`, `related_papers`, `systematic_review` each have a unified `action` field instead of separate endpoints
 - **Core tools**: `search_library`, `search_external`, `get_item_metadata`, `read_item_content`, `import_paper`, `generate_item_tags`
+  - `search_external` now supports smart corpus modes (`broad`, `biomedical`, `preprints`, `cryptography`, `repositories`), explicit provider(s), filters, concept groups, exclusions, and field scope — mapped to the federated search pipeline by `searchExternalAdapter.ts`
 - **RAG tools**: `semantic_search`, `keyword_search`, `read_chunks`, `search_similar`
 - **TODO tools**: `todowrite`, `todoread`, `task_complete` — agent task planning and completion signaling
 - **Workspace tools**: `workspace_read_file`, `workspace_write_file`, `workspace_edit_file`, `workspace_glob`, `workspace_grep`, `workspace_bash`, `workspace_diff`, `workspace_log`
@@ -434,12 +447,14 @@ Models are addressed by a `ModelRef` (provider + local model id) and resolved at
 
 ### Local CLI Providers
 
-`src/modules/chat/cli/` lets seerai delegate a chat turn to a **locally installed agent CLI** instead of an HTTP API. Supported: **Codex** (OpenAI), **Claude Code**, **Antigravity**, **GitHub Copilot**.
+`src/modules/chat/cli/` lets seerai delegate a chat turn to a **locally installed agent CLI** instead of an HTTP API. Supported: **Codex** (OpenAI), **Claude Code**, **Antigravity**, **Hermes (Nous)**, **OpenClaw**. (GitHub Copilot's adapter file still exists but is not currently registered.)
 
 - seerai stores **no credentials** — it inherits whatever login session the CLI already holds.
 - Each CLI is described by a `CliAgentDef` (`cliTypes.ts`): binary name, one-shot args, stream format (`json-lines` | `raw-text`), line parser, auth-failure patterns, optional `prepare()` and live `listModels`.
 - `cliRunner.ts` spawns the binary, feeds one flattened prompt over stdin, and streams stdout into `ProviderEvent`s; `cliProvider.ts` implements the `AgentProvider` interface; `cliDetection.ts` probes PATH/version/auth. Provider configs reference an agent via `cliAgentId`.
 - Images are dropped (CLIs receive text only).
+- **Agentic mode**: when seerai's agentic mode is ON, CLI harnesses run as full agents in the chat workspace and can receive seerai's research tools over a bundled MCP bridge (`mcpBridge.ts`). Claude and Codex attach the MCP server automatically per session; Hermes, Antigravity, and OpenClaw are connected via persistent config (and shown a one-click connect modal from `harnessBridgeModal.ts`). When agentic mode is OFF, the harness is forced into a plain-chat turn with no tools or file writes.
+- **Tool-activity surfacing**: harnesses report their own tool calls (built-ins or configured MCP/skills). `toolActivityBridge.ts` relays seerai-MCP tool calls back to the chat UI, and `toolNotice.ts` formats harness tool activity so the user can see what ran — including when it was a harness-native tool rather than a seerai tool.
 
 ### Federated Scholarly Search
 
@@ -465,11 +480,13 @@ Located in `src/modules/systematicReview/`. Provides an end-to-end systematic re
 - **Protocol**: Structured review protocol with research question, framework (PICO/PICOS/PECO/SPICE), inclusion/exclusion criteria, keyword aids, and extraction templates. Supports revision history and rollback.
 - **Sources**: Define review sources (databases, registers, other) from Zotero collections; automatic total/unique/deduplication tracking.
 - **Screening**: PRISMA flow diagram with title/abstract → full-text → final stages. Screen papers as included/excluded/maybe with reasons.
-- **Data Extraction**: AI-powered structured data extraction with customizable templates, outcomes, effect measures (OR/RR/HR/MD/SMD), CI ranges, and timepoints. Supports verification workflow (proposed → verified → rejected).
+- **Data Extraction**: AI-powered structured data extraction with customizable templates, outcomes, effect measures (OR/RR/HR/MD/SMD plus diagnostic, discrimination, calibration, reclassification, and proportion measures), CI ranges, and timepoints. Supports verification workflow (proposed → verified → rejected).
 - **Evidence Synthesis**: Forest-plot generation, effect-size extraction, heterogeneity assessment, random-effects meta-analysis, I² statistics. Supports common-effect and random-effects models with narrative fallback.
 - **Gap Analysis**: AI-generated research gap identification with severity scoring.
 - **Analysis Jobs**: Async extraction/analysis with progress tracking, cancellation, retry for failures.
 - **Extraction Health**: Quality monitoring — captures warnings like missing effect sizes, missing CIs, missing timepoints, negative variances, extreme effect sizes, low sample sizes, and potential duplicate extractions.
+- **Quote Grounding**: Validates supporting quotes against source text with exact and fuzzy matching (`grounding.ts`).
+- **Extraction Compatibility**: Groups verified extraction rows into poolable vs. narrative-ready domains and detects duplicate rows per paper (`compatibility.ts`).
 
 State persisted to `{Zotero.DataDirectory.dir}/seerai/systematicReview.json`.
 
@@ -501,6 +518,7 @@ Located in `src/modules/drive/` and `src/modules/cloud/`. Provides cloud storage
 - MCP server (`mcp-server/`) is a separate stdio-based process that calls these HTTP endpoints
 - Default port: 23119
 - The MCP server exposes ~46 tools (mirroring the plugin's tool set including workspace, RAG, systematic review, and skills tools)
+- **Tool profiles**: set `SEERAI_MCP_TOOL_PROFILE=research` to return only research/Zotero tools (suppressing file/bash/terminal/workspace/task/skill tools). Used when a CLI harness already provides its own coding environment so the two tool sets don't overlap.
 
 ## Navigating assistant.ts (32K Lines)
 

@@ -41,7 +41,7 @@
   </a>
 </p>
 
-**seerai** is an intelligent research assistant plugin for Zotero 9 that integrates AI-powered chat, advanced search, and data extraction capabilities directly into your research workflow. Chat with your papers, extract structured data, and accelerate your literature review with a local-first, privacy-focused design.
+**seerai** is an intelligent research assistant plugin for Zotero 9 that integrates AI-powered chat, advanced search, structured data extraction, and systematic review workflows directly into your research workflow. Chat with your papers, extract structured data, run PRISMA-style reviews, and accelerate your literature review with a local-first, privacy-focused design.
 
 ---
 
@@ -133,7 +133,9 @@ npm run build
   - **Workspace Tools**: Create, read, edit, and delete files directly in your workspace.
   - **Todo Tool**: Create and manage task lists for complex multi-step research workflows.
   - **Skills Tool**: Discover and load on-demand instructions from a bundled library of ~148 agent skills.
+  - **Systematic Review Tool**: Create and update review protocols, sources, and screening decisions from chat.
 - **Agent Skills Library**: A curated library of self-contained skill packages (scientific computing, bioinformatics, document generation, search, and more) that the agent loads only when relevant — sourced from [K-Dense-AI/scientific-agent-skills](https://github.com/K-Dense-AI/scientific-agent-skills). Add your own bundled, workspace, or custom skills.
+- **Tool Activity Notices**: Inline status indicators show when the agent is invoking tools, running workspace commands, or waiting on external results.
 - **Task Completion Signaling**: Agents signal completion explicitly for clean multi-step workflows.
 - **Advanced Orchestration**: Improved tool calling logic with tool filtering, iteration tracking, and observability tracing.
 - **Model-as-a-Tool**: Seamless integration with LLM tool-calling capabilities.
@@ -146,6 +148,22 @@ npm run build
 - **One-Click Generation**: Generate data for individual cells or entire columns instantly.
 - **Bulk Actions**: Regenerate content or add selected papers to collections in bulk.
 - **Side Strip Actions**: Unified controls for adding, removing columns, generating triggers, and settings.
+
+### Systematic Review
+
+End-to-end systematic review workflow built directly into Zotero:
+
+- **Protocol Builder**: Define your research question and choose a structured framework — PICO, PICOS, PICOT, PICOTS, PICOTT, PECO, PICo, PEO, SPIDER, SPICE, or PCC.
+- **Eligibility Criteria**: AI-assisted inclusion/exclusion rules with keyword aids, rationale, and a full revision history.
+- **Search Strategy**: Compile a review-wide strategy into native queries for each scholarly source, or refine it with AI and push it straight into the search input.
+- **Sources**: Import papers from Zotero collections as review sources; track per-source counts, overlap, and deduplication.
+- **PRISMA Flow Diagram**: Visualize title/abstract → full-text → final screening flow with live counts.
+- **Screening**: Title/abstract and full-text screening with include/exclude/maybe decisions, reasons, confidence scores, and AI recommendations.
+- **Data Extraction**: AI-powered structured extraction with customizable templates, outcomes, effect measures (OR, RR, HR, MD, SMD), confidence intervals, timepoints, and a proposed → verified → rejected workflow.
+- **Evidence Synthesis**: Random-effects and common-effect meta-analysis, forest plots, I² heterogeneity, and pooled effect sizes.
+- **Gap Analysis**: AI-generated research gap identification with severity scoring.
+- **Extraction Health Checks**: Automatic warnings for missing effect sizes, missing CIs, missing timepoints, negative variances, extreme effect sizes, low sample sizes, and potential duplicate extractions.
+- **Async Jobs**: Run extraction and analysis jobs in the background with progress tracking and cancellation.
 
 ### Workspace & File Management
 
@@ -188,6 +206,7 @@ npm run build
     - 128g Vram - MiniMax-M3 / MiMo-V2.5-Pro / GLM-5.2 / Kimi K2.6 / DeepSeek V4 Pro / Nemotron 3 Ultra / Qwen3.5 397B A17B / DeepSeek-V4-Flash
 
 - **Local CLI Agents**: Route chat through a CLI you already have installed and logged in — **Codex**, **Claude Code**, **Antigravity**, or **GitHub Copilot**. seerai stores no credentials; it reuses the CLI's own session.
+- **CLI MCP Harness**: Local CLI agents can optionally connect to the bundled seerai MCP server so they can read and act on your Zotero library while you chat.
 - **Capability-Based Routing**: Assign separate models per capability — chat, embeddings, image, video, text-to-speech, and speech-to-text — and route each request to the right endpoint automatically.
 - **Smart Rate Limiting**: Per-model configuration for concurrency, RPM, and TPM to prevent provider errors.
 - **Per-Conversation Models**: Switch models dynamically based on the task complexity.
@@ -297,6 +316,8 @@ This mode requires sophisticated models with strong tool/function-calling capabi
 
 ## Future Implementations Ideas
 
+- **Online Group Sync & Shared Workspaces**: Keep chat, tables, search, review, and cloud state in sync across detached windows and sidebar instances in real time, with team-wide syncing for specific Zotero groups or invited collaborators to create shared workspaces built on top of Zotero items.
+- **PDF Text References & Highlights**: Reference specific passages from chat or extraction results and open the corresponding location directly in Zotero's built-in PDF viewer, with support for persistent highlights and annotations.
 - **Autocomplete**: Intelligent suggestions for tags, creators, and collections as you type.
 - **Complex Queries**: Support for boolean logic (AND/OR) and nested search conditions (e.g., "Title contains X AND Year > 2020").
 - **Field-Specific Search**: Dedicated filters for titles, authors, years, and tags.
