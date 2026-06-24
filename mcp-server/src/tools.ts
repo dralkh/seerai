@@ -68,6 +68,29 @@ const readItemContentParams = z.object({
     .describe("Max content length (0 = no limit)"),
 });
 
+const scholarlyProviderIds = [
+  "semantic-scholar",
+  "arxiv",
+  "pubmed",
+  "biorxiv",
+  "medrxiv",
+  "iacr",
+  "europe-pmc",
+  "core",
+  "base",
+  "zenodo",
+  "hal",
+] as const;
+
+const scholarlySearchModes = [
+  "broad",
+  "biomedical",
+  "preprints",
+  "cryptography",
+  "repositories",
+  "source",
+] as const;
+
 const searchExternalParams = z.object({
   query: z.string().describe("Search query"),
   year: z.string().optional().describe("Year range (e.g., '2020-2024')"),
@@ -83,6 +106,55 @@ const searchExternalParams = z.object({
     .default(false)
     .optional()
     .describe("Only open access PDFs"),
+  mode: z
+    .enum(scholarlySearchModes)
+    .optional()
+    .describe("Smart corpus mode; ignored when provider/providers are set"),
+  provider: z
+    .enum(scholarlyProviderIds)
+    .optional()
+    .describe("Single scholarly corpus to search"),
+  providers: z
+    .array(z.enum(scholarlyProviderIds))
+    .min(1)
+    .optional()
+    .describe("Explicit scholarly corpora to search and merge"),
+  sort: z
+    .enum(["relevance", "newest", "oldest", "citations"])
+    .default("relevance")
+    .optional()
+    .describe("Result sort order"),
+  filters: z
+    .object({
+      yearStart: z.string().optional(),
+      yearEnd: z.string().optional(),
+      year_from: z.union([z.number(), z.string()]).optional(),
+      year_to: z.union([z.number(), z.string()]).optional(),
+      openAccess: z.boolean().optional(),
+      hasPdf: z.boolean().optional(),
+      publicationTypes: z.array(z.string()).optional(),
+      fieldsOfStudy: z.array(z.string()).optional(),
+      minCitationCount: z.number().int().min(0).optional(),
+      venue: z.string().optional(),
+    })
+    .optional()
+    .describe("Common filters supported where each corpus allows them"),
+  providerFilters: z
+    .record(z.string(), z.record(z.string(), z.unknown()))
+    .optional()
+    .describe("Corpus-specific filters using Search tab provider filter keys"),
+  concepts: z
+    .array(
+      z.object({
+        terms: z.array(z.string().min(1)).min(1),
+        mesh: z.array(z.string().min(1)).optional(),
+        phrase: z.boolean().optional(),
+      }),
+    )
+    .optional()
+    .describe("Provider-agnostic concept groups compiled per corpus"),
+  exclude: z.array(z.string().min(1)).optional(),
+  field: z.enum(["all", "title", "abstract", "title-abstract"]).optional(),
 });
 
 const importPaperParams = z.object({
@@ -880,7 +952,8 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: "search_external",
-    description: "Search Semantic Scholar for external papers.",
+    description:
+      "Search external scholarly corpora. Defaults to Semantic Scholar; supports smart modes and specific corpora such as PubMed, arXiv, Europe PMC, CORE, BASE, Zenodo, HAL, bioRxiv, medRxiv, and IACR.",
     inputSchema: searchExternalParams,
   },
   {
@@ -1210,3 +1283,41 @@ export const TOOL_DEFINITIONS = [
 ];
 
 export type ToolName = (typeof TOOL_DEFINITIONS)[number]["name"];
+
+// seerai's domain tools — the set an external coding agent lacks. The "research"
+// profile exposes only these and suppresses file/bash/terminal/workspace/task/
+// skill tools the harness already controls (avoids duplicate tools + token waste).
+export const RESEARCH_TOOL_NAMES = [
+  "search_library",
+  "search_external",
+  "get_item_metadata",
+  "read_item_content",
+  "import_paper",
+  "generate_item_tags",
+  "context",
+  "collection",
+  "table",
+  "note",
+  "related_papers",
+  "web",
+  "systematic_review",
+  "semantic_search",
+  "keyword_search",
+  "read_chunks",
+  "search_similar",
+] as const;
+
+/**
+ * Filter the tool list by profile (from SEERAI_MCP_TOOL_PROFILE). `research`
+ * returns only RESEARCH_TOOL_NAMES; any other value returns all tools.
+ */
+export function filterToolsByProfile<T extends { name: string }>(
+  tools: readonly T[],
+  profile: string | undefined,
+): T[] {
+  if (profile === "research") {
+    const allow = new Set<string>(RESEARCH_TOOL_NAMES);
+    return tools.filter((t) => allow.has(t.name));
+  }
+  return [...tools];
+}

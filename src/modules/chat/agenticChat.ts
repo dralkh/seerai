@@ -34,7 +34,7 @@ import {
 import { ChatMessage } from "./types";
 import { parseMarkdown } from "./markdown";
 import { resolveModel } from "./modelResolver";
-import { createCliProvider } from "./cli/cliProvider";
+import { createCliProvider, resolveCliContext } from "./cli/cliProvider";
 import type { ModelRef } from "./providerTypes";
 import { agentTracer } from "./tracer";
 import { ChatStateManager } from "./stateManager";
@@ -640,6 +640,10 @@ function stringifyPreview(value: unknown, max = 160): string {
 }
 
 export function getFriendlyToolAction(toolName: string): string {
+  if (toolName.startsWith("cli_")) {
+    const raw = toolName.slice(4).replace(/_/g, " ");
+    return `CLI: ${raw}`;
+  }
   const names: Record<string, string> = {
     search_library: "Searched Zotero library",
     search_external: "Searched external papers",
@@ -727,7 +731,7 @@ export function summarizeToolTarget(toolCall: ToolCall): string {
     case "read_item_content":
       return pick("item_id", "item_ids");
     default:
-      return pick("action", "name", "title", "id", "path", "query");
+      return pick("detail", "action", "name", "title", "id", "path", "query");
   }
 }
 
@@ -1478,7 +1482,7 @@ export async function handleAgenticChat(
       const isCliProvider = activeModel?.provider.adapterId === "local-cli";
       const provider =
         isCliProvider && activeModel
-          ? createCliProvider(activeModel)
+          ? createCliProvider(activeModel, resolveCliContext(true))
           : createProvider();
       const query = provider.query({
         messages,
@@ -1506,6 +1510,39 @@ export async function handleAgenticChat(
               );
               toolCallsReceived = event.toolCalls;
               break;
+            case "tool_activity": {
+              // A CLI harness ran one of its own tools. Render a display-only
+              // tool card — seerai never executes it, so it is NOT added to
+              // toolCallsReceived and never enters the executor.
+              const toolId =
+                event.id ||
+                `${event.name}:${event.detail || ""}` ||
+                `cli-tool-${Date.now()}`;
+              const syntheticCall: ToolCall = {
+                id: `cli-tool-${toolId}`,
+                type: "function",
+                function: {
+                  name:
+                    event.owner === "cli" ? `cli_${event.name}` : event.name,
+                  arguments: JSON.stringify(
+                    event.detail
+                      ? { detail: event.detail, source: event.owner || "cli" }
+                      : { source: event.owner || "cli" },
+                  ),
+                },
+              };
+              if (event.phase === "update") break;
+              if (event.phase !== "complete") {
+                observer.onToolCallStarted(syntheticCall);
+              } else {
+                observer.onToolCallCompleted(syntheticCall, {
+                  success: event.success !== false,
+                  summary: event.detail || `Ran ${event.name}`,
+                  error: event.error,
+                });
+              }
+              break;
+            }
             case "done":
               Zotero.debug(
                 `[seerai] Iteration ${iteration} complete, content length: ${event.content.length}`,

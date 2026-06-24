@@ -33,6 +33,9 @@ import {
   hasModelConfigs,
 } from "./chat/modelConfig";
 import { resolveModel } from "./chat/modelResolver";
+import { isHarnessConnected } from "./chat/cli/mcpBridge";
+import { setActiveToolActivityEmitter } from "./chat/cli/toolActivityBridge";
+import { buildCliAgentInstructions } from "./chat/cli/harnessPrompt";
 import {
   applyModelRoutingPreset,
   getModelRoutingPresets,
@@ -375,7 +378,7 @@ function buildToolPromptSections(): string {
       );
     if (has("search_external"))
       lines.push(
-        "2. Use 'search_external' to find new papers on Semantic Scholar. If it fails or returns too little, use the 'web' tool for broader scholarly/web discovery.",
+        "2. Use 'search_external' to find new papers in external scholarly corpora. Choose provider/providers or a smart mode when a specific corpus matters. If it fails or returns too little, use the 'web' tool for broader scholarly/web discovery.",
       );
     if (has("import_paper"))
       lines.push(
@@ -398,7 +401,7 @@ function buildToolPromptSections(): string {
 
   if (has("web")) {
     sections.push(`Web Research (use the 'web' tool with the 'action' parameter):
-- web({ action: "search", query: "..." }) — search the web when library or Semantic Scholar results are insufficient
+- web({ action: "search", query: "..." }) — search the web when library or scholarly corpus results are insufficient
 - web({ action: "read", url: "..." }) — read a specific webpage from search results`);
   }
 
@@ -2018,6 +2021,7 @@ export class Assistant {
   private static lastRenderTime: number = 0;
   private static lastRenderValue: string = "";
   private static lastRenderedItemId: number = 0;
+  private static lastChatTabItemId: number = 0;
   private static lastRenderedTab: string = "";
   private static lastRenderedContainer: HTMLElement | null = null;
   private static readonly RENDER_THROTTLE_MS: number = 60;
@@ -2935,11 +2939,45 @@ export class Assistant {
       try {
         if (
           skipIfSame &&
-          this.lastRenderedItemId === item.id &&
           this.lastRenderedTab === activeTab &&
           this.lastRenderedContainer === container
         ) {
-          return;
+          if (activeTab !== "chat") {
+            if (this.lastRenderedItemId !== item.id) {
+              this.lastRenderedItemId = item.id;
+              if (activeTab === "table") {
+                const table = container.querySelector(".papers-table");
+                if (table) {
+                  const allRows = table.querySelectorAll("tr[data-paper-id]");
+                  allRows.forEach((r: HTMLElement) => {
+                    const rId = parseInt(
+                      r.getAttribute("data-paper-id") || "0",
+                      10,
+                    );
+                    if (rId === item.id) {
+                      r.classList.add("selected");
+                      r.scrollIntoView({ block: "nearest", behavior: "auto" });
+                    } else {
+                      r.classList.remove("selected");
+                    }
+                  });
+                  if (currentTableData) {
+                    currentTableData.selectedRowIds = new Set([item.id]);
+                    const doc = container.ownerDocument!;
+                    const bulkActions = doc.getElementById(
+                      "table-bulk-actions",
+                    ) as HTMLElement;
+                    if (bulkActions) {
+                      bulkActions.style.display = "flex";
+                    }
+                  }
+                }
+              }
+            }
+            return;
+          } else if (this.lastRenderedItemId === item.id) {
+            return;
+          }
         }
 
         if (isTableGenerating && activeTab === "table") {
@@ -2948,8 +2986,6 @@ export class Assistant {
           );
           return;
         }
-
-        const prevItemId = this.lastRenderedItemId;
 
         this.lastRenderedItemId = item.id;
         this.lastRenderedTab = activeTab;
@@ -3058,7 +3094,8 @@ export class Assistant {
 
         // Auto-add current item with its notes based on selection mode.
         // Only run when navigating to a different Zotero item — not on tab switch.
-        if (prevItemId !== item.id) {
+        if (activeTab === "chat" && this.lastChatTabItemId !== item.id) {
+          this.lastChatTabItemId = item.id;
           const options = stateManager.getOptions();
           const mode = options.selectionMode;
 
@@ -3160,6 +3197,21 @@ export class Assistant {
               const newMessagesArea = container.querySelector("#messages-area");
               if (newMessagesArea) {
                 (newMessagesArea as HTMLElement).scrollTop = savedScrollTop;
+              }
+            }, 0);
+          }
+
+          // Scroll to selected row in papers table
+          if (activeTab === "table") {
+            setTimeout(() => {
+              const selectedRow = container.querySelector(
+                `.papers-table tr[data-paper-id="${item.id}"]`,
+              );
+              if (selectedRow) {
+                selectedRow.scrollIntoView({
+                  block: "nearest",
+                  behavior: "auto",
+                });
               }
             }, 0);
           }
@@ -21672,6 +21724,7 @@ You MUST call the generate_tags function.`;
       if (currentContainer && currentContainer.isConnected) {
         this.lastRenderedTab = "";
         this.lastRenderedItemId = 0;
+        this.lastChatTabItemId = 0;
         this.lastRenderedContainer = null;
         await this.renderInterface(currentContainer, currentItem);
       }
@@ -32535,26 +32588,47 @@ Rules:
       const workspaceTree = await buildWorkspaceTreePrompt();
       const skillsCatalog = isAgentic ? await buildAgentSkillsCatalog() : "";
 
+      // A CLI harness is its own agent: seerai's tools reach it only via MCP, so
+      // we must NOT send it seerai's bare-name tool catalog / workspace prompt
+      // (which describe tools it doesn't have). Detect it and use generic
+      // MCP-aware guidance instead.
+      const activeChatModel = resolveModel(
+        "chat",
+        getChatStateManager().getOptions()?.modelRef,
+      );
+      const cliAgentId =
+        activeChatModel?.provider.adapterId === "local-cli"
+          ? activeChatModel.provider.cliAgentId
+          : undefined;
+      const isCliHarness = !!cliAgentId;
+
       let agentInstructions = "";
-      if (willUseTools) {
+      if (willUseTools && isCliHarness) {
+        agentInstructions = isAgentic
+          ? buildCliAgentInstructions(isHarnessConnected(cliAgentId as string))
+          : "";
+      } else if (willUseTools) {
         agentInstructions = `You are a research agent with direct access to ${isAgentic ? "the user's Zotero library, web search, and a file workspace" : "web search"}. To help the user, call the tools at your disposal. Do not describe what you could do; use the tools to actually do it. When the task is complete, simply provide a text-only response with your final answer — the conversation will end naturally. If you need to explicitly signal completion after tool work, you can call the 'task_complete' tool instead.
 
 ${isAgentic ? buildToolPromptSections() : 'Web Search (use the \'web\' tool with the \'action\' parameter):\n- web({ action: "search", query: "..." }) — search the web\n- web({ action: "read", url: "..." }) — read a specific webpage'}
 ${webContext ? " When using web search results, cite the source URL." : ""}`;
       }
 
+      // Workspace/skills sections describe seerai-native tools the harness lacks;
+      // omit them for CLI harnesses (they use their own file tools + seerai MCP).
+      const includeNativeToolPrompt = isAgentic && !isCliHarness;
       const systemPrompt =
         customPromptPrefix +
         `You are a helpful research assistant for Zotero. You help users understand and analyze their academic papers, notes, and research data tables.
 
-Current Library/Folder Scope: ${scopeLabel} ${isAgentic ? "(Tools will only find items within this scope)." : ""}
+Current Library/Folder Scope: ${scopeLabel} ${includeNativeToolPrompt ? "(Tools will only find items within this scope)." : ""}
 
 ${context}${webContext}
 
 ${agentInstructions}
-${isAgentic ? WORKSPACE_SYSTEM_PROMPT : ""}
-${skillsCatalog ? `\n## Agent Skills\n${skillsCatalog}\n` : ""}
-${isAgentic ? workspaceTree : ""}`;
+${includeNativeToolPrompt ? WORKSPACE_SYSTEM_PROMPT : ""}
+${skillsCatalog && !isCliHarness ? `\n## Agent Skills\n${skillsCatalog}\n` : ""}
+${includeNativeToolPrompt ? workspaceTree : ""}`;
 
       // Merge pasted images with Zotero item images
       const manuallyPastedParts: VisionMessageContentPart[] = pastedImages.map(
@@ -32752,39 +32826,52 @@ ${isAgentic ? workspaceTree : ""}`;
 
       if (willUseTools) {
         const continuation = await getMessageStore().getContinuation();
-        await handleAgenticChat(
-          text,
-          systemPrompt,
-          conversationMessages.slice(0, -1), // Exclude current user message (already in text)
-          {
-            enableTools: true,
-            allowedTools: isSearchOnly
-              ? [
-                  "web",
-                  "semantic_search",
-                  "keyword_search",
-                  "read_chunks",
-                  "search_similar",
-                  "search_library",
-                  "get_item_metadata",
-                  "read_item_content",
-                ]
-              : undefined,
-            includeImages:
-              options.includeImages || manuallyPastedParts.length > 0,
-            pastedImages: pastedImages,
-            permissionHandler: Assistant.handleInlinePermissionRequest,
-            temperature: chatOptions.temperature,
-            maxTokens: chatOptions.maxTokens,
-            modelRef: chatOptions.modelRef,
-            libraryScope:
-              scopePref === "selection"
-                ? this.resolveSelectionScope()
+        // For a CLI agentic turn, the harness runs seerai's tools via MCP, which
+        // hit the plugin's HTTP API. Bridge those executions to live tool cards
+        // so the user sees them even though the harness's stdout is opaque.
+        if (isCliHarness && isAgentic) {
+          setActiveToolActivityEmitter({
+            onStart: (tc) => observer.onToolCallStarted(tc),
+            onComplete: (tc, r) => observer.onToolCallCompleted(tc, r),
+          });
+        }
+        try {
+          await handleAgenticChat(
+            text,
+            systemPrompt,
+            conversationMessages.slice(0, -1), // Exclude current user message (already in text)
+            {
+              enableTools: true,
+              allowedTools: isSearchOnly
+                ? [
+                    "web",
+                    "semantic_search",
+                    "keyword_search",
+                    "read_chunks",
+                    "search_similar",
+                    "search_library",
+                    "get_item_metadata",
+                    "read_item_content",
+                  ]
                 : undefined,
-            continuation,
-          },
-          observer,
-        );
+              includeImages:
+                options.includeImages || manuallyPastedParts.length > 0,
+              pastedImages: pastedImages,
+              permissionHandler: Assistant.handleInlinePermissionRequest,
+              temperature: chatOptions.temperature,
+              maxTokens: chatOptions.maxTokens,
+              modelRef: chatOptions.modelRef,
+              libraryScope:
+                scopePref === "selection"
+                  ? this.resolveSelectionScope()
+                  : undefined,
+              continuation,
+            },
+            observer,
+          );
+        } finally {
+          setActiveToolActivityEmitter(null);
+        }
       } else {
         // Standard chat without tools
         await openAIService.chatCompletionStream(

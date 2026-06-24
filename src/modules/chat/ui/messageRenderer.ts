@@ -426,7 +426,10 @@ export function createMessageBubble(
   const isUser = sender === "You";
   const isAssistant = sender === "Assistant";
 
-  const msgDiv = doc.createElement("div");
+  const msgDiv = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "div",
+  ) as HTMLElement;
   if (msgId) msgDiv.setAttribute("data-msg-id", msgId);
   Object.assign(msgDiv.style, {
     backgroundColor: bgColor,
@@ -444,7 +447,10 @@ export function createMessageBubble(
   });
 
   // Header with sender and actions
-  const headerDiv = doc.createElement("div");
+  const headerDiv = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "div",
+  ) as HTMLElement;
   Object.assign(headerDiv.style, {
     display: "flex",
     justifyContent: "space-between",
@@ -452,7 +458,10 @@ export function createMessageBubble(
     marginBottom: "4px",
   });
 
-  const senderDiv = doc.createElement("span");
+  const senderDiv = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "span",
+  ) as HTMLElement;
   Object.assign(senderDiv.style, {
     fontWeight: "600",
     fontSize: "11px",
@@ -461,7 +470,10 @@ export function createMessageBubble(
   senderDiv.innerText = sender;
 
   // Action buttons container
-  const actionsDiv = doc.createElement("div");
+  const actionsDiv = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "div",
+  ) as HTMLElement;
   Object.assign(actionsDiv.style, {
     display: "flex",
     gap: "4px",
@@ -509,7 +521,10 @@ export function createMessageBubble(
   headerDiv.appendChild(senderDiv);
   headerDiv.appendChild(actionsDiv);
 
-  const contentDiv = doc.createElement("div");
+  const contentDiv = doc.createElementNS(
+    "http://www.w3.org/1999/xhtml",
+    "div",
+  ) as HTMLElement;
   contentDiv.setAttribute("data-content", "true");
   contentDiv.setAttribute("data-raw", text);
   Object.assign(contentDiv.style, {

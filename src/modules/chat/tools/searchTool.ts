@@ -21,6 +21,8 @@ import {
 import { semanticScholarService } from "../../semanticScholar";
 import { Assistant } from "../../assistant";
 import { getChatStateManager } from "../stateManager";
+import { searchScholarlyPapers, selectedProviders } from "../../search";
+import { buildExternalSearchQuery } from "./searchExternalAdapter";
 
 /**
  * Execute search_library tool
@@ -246,29 +248,24 @@ export async function executeSearchLibrary(
   }
 }
 
-/**
- * Execute search_external tool (Semantic Scholar)
- */
 export async function executeSearchExternal(
   params: SearchExternalParams,
   config: AgentConfig,
 ): Promise<ToolResult> {
   try {
-    const { query, year, limit = 10, openAccessPdf } = params;
-    const effectiveLimit = Math.min(limit, 50);
+    const query = buildExternalSearchQuery(params);
+    const effectiveLimit = Math.min(params.limit || 10, 100);
 
     Zotero.debug(
-      `[seerai] Tool: search_external query="${query}" limit=${effectiveLimit}`,
+      `[seerai] Tool: search_external query="${params.query}" mode=${query.mode} providers=${query.providers.join(",")} limit=${effectiveLimit}`,
     );
 
-    const results = await semanticScholarService.searchPapers({
-      query,
-      year,
-      limit: effectiveLimit,
-      openAccessPdf,
-    });
+    const results = await searchScholarlyPapers(
+      { ...query, limit: effectiveLimit },
+      undefined,
+    );
 
-    const papers = results.data.map((p) => ({
+    const papers = results.items.slice(0, effectiveLimit).map((p) => ({
       paperId: p.paperId,
       title: p.title,
       authors: p.authors.map((a) => a.name),
@@ -277,17 +274,42 @@ export async function executeSearchExternal(
       citationCount: p.citationCount,
       url: p.url,
       has_pdf: !!p.openAccessPdf,
+      source: p.source,
+      sources: p.sources,
+      providerIds: p.providerIds,
+      externalIds: p.externalIds,
+      venue: p.venue,
+      publicationTypes: p.publicationTypes,
+      openAccessPdfUrl: p.openAccessPdf?.url,
     }));
+    const providerErrors = Object.entries(results.providers)
+      .filter(([, state]) => state?.error || state?.skippedReason)
+      .map(
+        ([id, state]) =>
+          `${id}: ${state?.error || state?.skippedReason || "unavailable"}`,
+      );
+    const activeProviders = selectedProviders(query);
+    const total =
+      query.mode === "source" && activeProviders.length === 1
+        ? results.providers[activeProviders[0]]?.total || results.items.length
+        : results.items.length;
 
     const data: SearchExternalResult = {
-      total: results.total,
+      total,
       papers,
+      providers: results.providers as SearchExternalResult["providers"],
+      query: {
+        mode: query.mode,
+        providers: activeProviders,
+        sort: query.sort,
+      },
+      degraded: providerErrors.length > 0,
     };
 
     return {
       success: true,
       data,
-      summary: `Found ${results.total} papers on Semantic Scholar, returning top ${papers.length}`,
+      summary: `Found ${total} external paper${total === 1 ? "" : "s"}, returning top ${papers.length}${providerErrors.length ? `; provider issues: ${providerErrors.join("; ")}` : ""}`,
     };
   } catch (error) {
     Zotero.debug(`[seerai] Tool: search_external error: ${error}`);
@@ -302,13 +324,16 @@ export async function executeSearchExternal(
           total: 0,
           papers: [],
           degraded: true,
-          provider: "Semantic Scholar",
+          provider:
+            params.provider ||
+            params.providers?.join(", ") ||
+            "scholarly search",
           error: message,
           fallback:
-            "Semantic Scholar is unavailable. Use the web tool with action='search' for broader scholarly/web discovery.",
+            "The selected scholarly corpus is unavailable. Use another provider/mode or the web tool with action='search' for broader scholarly/web discovery.",
         },
         summary:
-          "Semantic Scholar search is unavailable (403 Forbidden); no papers returned. Use web search fallback.",
+          "External scholarly search is unavailable (403 Forbidden); no papers returned. Use another provider or web search fallback.",
       };
     }
     return {

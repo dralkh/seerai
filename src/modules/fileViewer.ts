@@ -30,6 +30,7 @@ const RENDERABLE_EXTENSIONS: Record<string, boolean> = {
   markdown: true,
   csv: true,
   tex: true,
+  latex: true,
   bib: true,
 };
 
@@ -48,12 +49,13 @@ export function isRenderableExtension(ext: string): boolean {
  */
 export function getRenderType(
   ext: string,
-): "image" | "html" | "text" | "svg" | "markdown" | "csv" {
+): "image" | "html" | "text" | "svg" | "markdown" | "csv" | "latex" {
   const e = ext.toLowerCase();
   if (e === "svg") return "svg";
   if (e === "html" || e === "htm") return "html";
   if (e === "md" || e === "markdown") return "markdown";
   if (e === "csv") return "csv";
+  if (e === "tex" || e === "latex") return "latex";
   if (
     e === "png" ||
     e === "jpg" ||
@@ -67,12 +69,59 @@ export function getRenderType(
 }
 
 /**
+ * Simple preprocessor to translate LaTeX commands into Markdown equivalents for rendering.
+ */
+export function preprocessLatex(tex: string): string {
+  let content = tex;
+
+  // 1. Remove preamble (from \documentclass to \begin{document})
+  const beginDocIdx = content.indexOf("\\begin{document}");
+  if (beginDocIdx !== -1) {
+    content = content.substring(beginDocIdx + "\\begin{document}".length);
+  }
+  // Remove \end{document}
+  content = content.replace(/\\end\{document\}/g, "");
+
+  // 2. Convert headers
+  content = content.replace(/\\section\*?\{([^}]+)\}/g, "\n### $1\n");
+  content = content.replace(/\\subsection\*?\{([^}]+)\}/g, "\n#### $1\n");
+  content = content.replace(/\\subsubsection\*?\{([^}]+)\}/g, "\n##### $1\n");
+
+  // 3. Convert basic text formatting
+  content = content.replace(/\\textbf\{([^}]+)\}/g, "**$1**");
+  content = content.replace(/\\textit\{([^}]+)\}/g, "*$1*");
+  content = content.replace(/\\texttt\{([^}]+)\}/g, "`$1`");
+
+  // 4. Convert block math environments to $$ ... $$
+  content = content.replace(
+    /\\begin\{equation\*?\}([\s\S]+?)\\end\{equation\*?\}/g,
+    "\n$$$$\n$1\n$$$$\n",
+  );
+  content = content.replace(
+    /\\begin\{align\*?\}([\s\S]+?)\\end\{align\*?\}/g,
+    "\n$$$$\n$1\n$$$$\n",
+  );
+  content = content.replace(
+    /\\begin\{gather\*?\}([\s\S]+?)\\end\{gather\*?\}/g,
+    "\n$$$$\n$1\n$$$$\n",
+  );
+
+  // 5. Ignore common preamble/metadata commands if they appear in document body
+  content = content.replace(/\\maketitle/g, "");
+  content = content.replace(/\\tableofcontents/g, "");
+  content = content.replace(/\\bibliography\{[^}]+\}/g, "");
+  content = content.replace(/\\bibliographystyle\{[^}]+\}/g, "");
+
+  return content.trim();
+}
+
+/**
  * Create a sandboxed preview element for the given content and type.
  */
 export function createPreviewElement(
   doc: Document,
   content: string,
-  renderType: "svg" | "html" | "text" | "image" | "markdown" | "csv",
+  renderType: "svg" | "html" | "text" | "image" | "markdown" | "csv" | "latex",
 ): HTMLElement {
   if (renderType === "svg") {
     return createSandboxedIframe(doc, content, SVG_MIME);
@@ -83,8 +132,10 @@ export function createPreviewElement(
   if (renderType === "csv") {
     return createCsvTable(doc, content);
   }
-  if (renderType === "markdown") {
-    const html = parseMarkdown(content);
+  if (renderType === "markdown" || renderType === "latex") {
+    const preprocessed =
+      renderType === "latex" ? preprocessLatex(content) : content;
+    const html = parseMarkdown(preprocessed);
     const container = doc.createElementNS(HTML_NS, "div") as HTMLElement;
     container.innerHTML = html;
     Object.assign(container.style, {

@@ -7,6 +7,10 @@
 
 import { z } from "zod";
 import { TOOL_NAMES, ToolName } from "./toolTypes";
+import {
+  SCHOLARLY_PROVIDER_IDS,
+  SCHOLARLY_SEARCH_MODES,
+} from "./searchExternalAdapter";
 
 // ==================== CORE SCHEMAS ====================
 
@@ -63,16 +67,64 @@ export const GetItemMetadataParamsSchema = z.object({
 });
 
 export const SearchExternalParamsSchema = z.object({
-  query: z.string().min(1).describe("Search query for Semantic Scholar"),
+  query: z.string().min(1).describe("Search query for scholarly corpora"),
   year: z
     .string()
     .optional()
     .describe("Year range, e.g., '2020-2024' or '2023-'"),
-  limit: z.number().int().min(1).max(50).default(10).optional(),
+  limit: z.number().int().min(1).max(100).default(10).optional(),
   openAccessPdf: z
     .boolean()
     .optional()
     .describe("Only return papers with open access PDFs"),
+  mode: z
+    .enum(SCHOLARLY_SEARCH_MODES as [string, ...string[]])
+    .optional()
+    .describe("Smart corpus mode; ignored when provider/providers are set"),
+  provider: z
+    .enum(SCHOLARLY_PROVIDER_IDS as [string, ...string[]])
+    .optional()
+    .describe("Single corpus to search"),
+  providers: z
+    .array(z.enum(SCHOLARLY_PROVIDER_IDS as [string, ...string[]]))
+    .min(1)
+    .optional()
+    .describe("Explicit corpora to search"),
+  sort: z
+    .enum(["relevance", "newest", "oldest", "citations"])
+    .default("relevance")
+    .optional(),
+  filters: z
+    .object({
+      yearStart: z.string().optional(),
+      yearEnd: z.string().optional(),
+      year_from: z.union([z.number(), z.string()]).optional(),
+      year_to: z.union([z.number(), z.string()]).optional(),
+      openAccess: z.boolean().optional(),
+      hasPdf: z.boolean().optional(),
+      publicationTypes: z.array(z.string()).optional(),
+      fieldsOfStudy: z.array(z.string()).optional(),
+      minCitationCount: z.number().int().min(0).optional(),
+      venue: z.string().optional(),
+    })
+    .optional()
+    .describe("Common filters supported where each corpus allows them"),
+  providerFilters: z
+    .record(z.string(), z.record(z.string(), z.unknown()))
+    .optional()
+    .describe("Corpus-specific filters using Search tab provider filter keys"),
+  concepts: z
+    .array(
+      z.object({
+        terms: z.array(z.string().min(1)).min(1),
+        mesh: z.array(z.string().min(1)).optional(),
+        phrase: z.boolean().optional(),
+      }),
+    )
+    .optional()
+    .describe("Provider-agnostic concept groups compiled per corpus"),
+  exclude: z.array(z.string().min(1)).optional(),
+  field: z.enum(["all", "title", "abstract", "title-abstract"]).optional(),
 });
 
 export const ReadItemContentParamsSchema = z.object({

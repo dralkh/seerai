@@ -4,12 +4,9 @@ import { config } from "../../../../package.json";
 // CLI (e.g. Codex). We never reimplement the CLI's OAuth: we spawn the binary
 // and inherit whatever login the user already completed (`codex login`).
 //
-// Streaming model: Zotero exposes a blocking `Zotero.Utilities.Internal.exec`.
-// We launch a shell pipeline that runs the CLI in the *background* (`&`),
-// captures its pid, then `wait`s on it — so the exec promise resolves only
-// when the CLI exits, while we concurrently tail the stdout temp file and
-// yield new bytes as they are written. This gives live token streaming on top
-// of a blocking primitive, and a real pid we can kill on abort.
+// Streaming model: prefer Gecko Subprocess pipe readers for real stdout
+// streaming. The older exec + temp-file tailer remains as a fallback for Zotero
+// builds where Subprocess.sys.mjs is unavailable.
 
 const POLL_INTERVAL_MS = 120;
 
@@ -35,6 +32,11 @@ export interface CliRunOptions {
   stdinText: string;
   /** Optional extra environment variables. */
   env?: Record<string, string>;
+  /**
+   * Working directory for the CLI process. Defaults to the shared `cli-cwd`.
+   * Pass the active chat's workspace dir so the harness reads/writes there.
+   */
+  cwd?: string;
 }
 
 export function isCliExecAvailable(): boolean {
@@ -117,6 +119,46 @@ async function readTextIfExists(path: string): Promise<string | null> {
   }
 }
 
+async function getGeckoSubprocess(): Promise<any | null> {
+  try {
+    if (typeof ChromeUtils === "undefined") return null;
+    const importer =
+      (ChromeUtils as any).importESModule || (ChromeUtils as any).import;
+    if (typeof importer !== "function") return null;
+    const mod = importer.call(
+      ChromeUtils,
+      "resource://gre/modules/Subprocess.sys.mjs",
+    );
+    return mod?.Subprocess || null;
+  } catch (e) {
+    Zotero.debug(`[seerai] runCli: Subprocess import unavailable: ${e}`);
+    return null;
+  }
+}
+
+async function readPipeChunk(pipe: any): Promise<string> {
+  if (!pipe || typeof pipe.readString !== "function") return "";
+  try {
+    return (await pipe.readString(4096)) || "";
+  } catch {
+    try {
+      return (await pipe.readString()) || "";
+    } catch {
+      return "";
+    }
+  }
+}
+
+function parseSubprocessExit(value: unknown): number | null {
+  if (typeof value === "number") return value;
+  if (value && typeof value === "object") {
+    const rec = value as Record<string, unknown>;
+    const code = rec.exitCode ?? rec.exit_code;
+    return typeof code === "number" ? code : null;
+  }
+  return null;
+}
+
 function envPrefix(env?: Record<string, string>): string {
   if (!env) return "";
   if (Zotero.isWin) {
@@ -148,6 +190,7 @@ export async function runCliCapture(
   bin: string,
   args: string[],
   timeoutMs = 8000,
+  stdinText?: string,
 ): Promise<CliCaptureResult> {
   const execFn = (Zotero.Utilities.Internal as any).exec;
   if (typeof execFn !== "function") {
@@ -161,14 +204,21 @@ export async function runCliCapture(
   const outPath = PathUtils.join(tmp, `seerai_probe_out_${id}.txt`);
   const errPath = PathUtils.join(tmp, `seerai_probe_err_${id}.txt`);
   const exitPath = PathUtils.join(tmp, `seerai_probe_exit_${id}.txt`);
+  const inPath = PathUtils.join(tmp, `seerai_probe_in_${id}.txt`);
+  // Optional stdin (e.g. to auto-answer an interactive prompt).
+  const redirectIn =
+    stdinText !== undefined
+      ? (await IOUtils.writeUTF8(inPath, stdinText),
+        ` < ${shellEscape(inPath)}`)
+      : "";
   const invocation = `${shellEscape(bin)} ${args.map(shellEscape).join(" ")}`;
   const { shell, flag } = resolveShell();
   const eo = shellEscape(outPath);
   const ee = shellEscape(errPath);
   const eexit = shellEscape(exitPath);
   const command = Zotero.isWin
-    ? `${invocation} > ${eo} 2> ${ee} & echo !errorlevel! > ${eexit}`
-    : `${pathPrefixStatement()}{ ${invocation} ; } > ${eo} 2> ${ee} ; echo $? > ${eexit}`;
+    ? `${invocation}${redirectIn} > ${eo} 2> ${ee} & echo !errorlevel! > ${eexit}`
+    : `${pathPrefixStatement()}{ ${invocation}${redirectIn} ; } > ${eo} 2> ${ee} ; echo $? > ${eexit}`;
 
   // Race the exec against the timeout so a slow/hanging interactive shell
   // (e.g. a heavy ~/.zshrc) can't block detection forever — we return whatever
@@ -187,7 +237,7 @@ export async function runCliCapture(
   const stdout = (await readTextIfExists(outPath)) || "";
   const stderr = (await readTextIfExists(errPath)) || "";
   const exitRaw = (await readTextIfExists(exitPath)) || "";
-  for (const p of [outPath, errPath, exitPath]) {
+  for (const p of [outPath, errPath, exitPath, inPath]) {
     void IOUtils.remove(p).catch(() => {});
   }
   const parsed = exitRaw.trim() ? parseInt(exitRaw.trim(), 10) : null;
@@ -215,22 +265,45 @@ export function runCli(options: CliRunOptions): {
 
   let aborted = false;
   let pid: number | null = null;
+  let subprocessHandle: any | null = null;
   let cleanedUp = false;
 
   const id = nextId();
   const tmp = cliDir("tmp");
-  const cwd = cliDir("cli-cwd");
+  // The harness runs in the active chat's workspace when provided, so its file
+  // tools read/write there; otherwise the shared cli-cwd. Temp files (prompt,
+  // out, err, pid, exit) always live under cli-cwd/tmp.
+  const cwd = options.cwd || cliDir("cli-cwd");
   const promptPath = PathUtils.join(tmp, `seerai_cli_prompt_${id}.txt`);
   const outPath = PathUtils.join(tmp, `seerai_cli_out_${id}.txt`);
   const errPath = PathUtils.join(tmp, `seerai_cli_err_${id}.txt`);
   const pidPath = PathUtils.join(tmp, `seerai_cli_pid_${id}.txt`);
   const exitPath = PathUtils.join(tmp, `seerai_cli_exit_${id}.txt`);
 
-  const cliInvocation = `${envPrefix(options.env)}${shellEscape(options.bin)} ${options.args
+  // On Unix, line-buffer the CLI's stdout via stdbuf/gstdbuf when available so
+  // its output streams to the tail file as produced instead of block-buffering
+  // until exit. `${SB}` (a shell var set in unbufferInit) expands to the wrapper,
+  // or to nothing when neither tool is present (graceful, buffered fallback).
+  // Safe to prepend even for CLIs that manage their own buffering.
+  const sbPrefix = Zotero.isWin ? "" : "${SB}";
+  const cliInvocation = `${envPrefix(options.env)}${sbPrefix}${shellEscape(options.bin)} ${options.args
     .map(shellEscape)
     .join(" ")}`;
 
+  const unbufferInit = Zotero.isWin
+    ? ""
+    : `SB=""; if command -v stdbuf >/dev/null 2>&1; then SB="stdbuf -oL -eL "; elif command -v gstdbuf >/dev/null 2>&1; then SB="gstdbuf -oL -eL "; fi; `;
+
   const { shell, flag } = resolveShell();
+
+  function buildStreamingCommand(): string {
+    const ep = shellEscape(promptPath);
+    const ecwd = shellEscape(cwd);
+    if (Zotero.isWin) {
+      return `cd /d ${ecwd} && ${cliInvocation} < ${ep}`;
+    }
+    return `${unbufferInit}${pathPrefixStatement()}cd ${ecwd} && ${cliInvocation} < ${ep}`;
+  }
 
   function buildCommand(): string {
     const ep = shellEscape(promptPath);
@@ -244,7 +317,7 @@ export function runCli(options: CliRunOptions): {
       // consumption of the stream.
       return `cd /d ${ecwd} && ${cliInvocation} < ${ep} > ${eo} 2> ${ee} & echo !errorlevel! > ${eexit}`;
     }
-    return `${pathPrefixStatement()}cd ${ecwd} && { ${cliInvocation} < ${ep} > ${eo} 2> ${ee} & } ; p=$! ; echo $p > ${epid} ; wait $p ; echo $? > ${eexit}`;
+    return `${unbufferInit}${pathPrefixStatement()}cd ${ecwd} && { ${cliInvocation} < ${ep} > ${eo} 2> ${ee} & } ; p=$! ; echo $p > ${epid} ; wait $p ; echo $? > ${eexit}`;
   }
 
   async function cleanup(): Promise<void> {
@@ -264,6 +337,16 @@ export function runCli(options: CliRunOptions): {
   }
 
   async function killProcess(): Promise<void> {
+    if (subprocessHandle) {
+      try {
+        if (typeof subprocessHandle.kill === "function") {
+          subprocessHandle.kill();
+          return;
+        }
+      } catch {
+        // fall through to pid kill
+      }
+    }
     await readPid();
     if (pid === null) return;
     try {
@@ -280,7 +363,66 @@ export function runCli(options: CliRunOptions): {
     }
   }
 
-  async function* generate(): AsyncGenerator<CliStreamEvent> {
+  async function* generateSubprocess(): AsyncGenerator<CliStreamEvent> {
+    const Subprocess = await getGeckoSubprocess();
+    if (!Subprocess || typeof Subprocess.call !== "function") {
+      throw new Error("Gecko Subprocess unavailable");
+    }
+    await ensureDir(tmp);
+    await ensureDir(cwd);
+    await IOUtils.writeUTF8(promptPath, options.stdinText);
+
+    const command = buildStreamingCommand();
+    Zotero.debug(
+      `[seerai] runCli: streaming via Subprocess: ${shell} ${flag} "${command.slice(0, 200)}"`,
+    );
+
+    let stderr = "";
+    let waitValue: unknown = null;
+    subprocessHandle = await Subprocess.call({
+      command: shell,
+      arguments: [flag, command],
+    });
+    if (typeof subprocessHandle?.pid === "number") {
+      pid = subprocessHandle.pid;
+    }
+
+    const stderrPump = (async () => {
+      while (!aborted) {
+        const chunk = await readPipeChunk(subprocessHandle?.stderr);
+        if (!chunk) break;
+        stderr += chunk;
+      }
+    })();
+
+    const waitPromise = Promise.resolve(subprocessHandle.wait()).then(
+      (value) => {
+        waitValue = value;
+      },
+    );
+
+    try {
+      while (!aborted) {
+        const chunk = await readPipeChunk(subprocessHandle?.stdout);
+        if (!chunk) break;
+        yield { type: "stdout", text: chunk };
+      }
+      if (aborted) {
+        await killProcess();
+      }
+      await waitPromise.catch(() => undefined);
+      await stderrPump.catch(() => undefined);
+      yield {
+        type: "exit",
+        exitCode: aborted ? null : parseSubprocessExit(waitValue),
+        stderr,
+      };
+    } finally {
+      await cleanup();
+    }
+  }
+
+  async function* generateExecTail(): AsyncGenerator<CliStreamEvent> {
     await ensureDir(tmp);
     await ensureDir(cwd);
     await IOUtils.writeUTF8(promptPath, options.stdinText);
@@ -344,6 +486,16 @@ export function runCli(options: CliRunOptions): {
       };
     } finally {
       await cleanup();
+    }
+  }
+
+  async function* generate(): AsyncGenerator<CliStreamEvent> {
+    try {
+      yield* generateSubprocess();
+    } catch (e) {
+      subprocessHandle = null;
+      Zotero.debug(`[seerai] runCli: Subprocess fallback to exec tail: ${e}`);
+      yield* generateExecTail();
     }
   }
 

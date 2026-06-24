@@ -1,5 +1,6 @@
 import { getPref, setPref } from "../../../utils/prefs";
 import { createSvgIcon, type IconName } from "./icons";
+import { ensureMcpServerOnDisk } from "../cli/mcpBridge";
 
 // Renders the Seer-AI preference sections (MCP, data management, OCR, web
 // search, RAG, etc.) as styled HTML that matches the AI providers / default
@@ -215,18 +216,23 @@ export function renderMcpSettings(doc: Document, container: HTMLElement): void {
   const textarea = el(doc, "textarea", "seerai-settings-code");
   textarea.readOnly = true;
   textarea.rows = 7;
-  textarea.value = JSON.stringify(
-    {
-      mcpServers: {
-        "seerai-zotero": {
-          command: "node",
-          args: ["/absolute/path/to/seerai-mcp.cjs"],
+  const mcpConfigJson = (serverPath: string): string =>
+    JSON.stringify(
+      {
+        mcpServers: {
+          "seerai-zotero": { command: "node", args: [serverPath] },
         },
       },
-    },
-    null,
-    2,
-  );
+      null,
+      2,
+    );
+  textarea.value = mcpConfigJson("/absolute/path/to/seerai-mcp.cjs");
+  // Replace the placeholder with the real on-disk path once resolved.
+  void ensureMcpServerOnDisk()
+    .then((serverPath) => {
+      if (serverPath) textarea.value = mcpConfigJson(serverPath);
+    })
+    .catch(() => {});
   fieldLabel.append(span, textarea);
   body.appendChild(fieldLabel);
 

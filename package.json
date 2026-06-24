@@ -22,7 +22,7 @@
   "license": "MIT",
   "scripts": {
     "start": "zotero-plugin serve",
-    "build": "zotero-plugin build && tsc --noEmit && cp .scaffold/build/*.xpi . && cd mcp-server && npm run bundle && cp dist/seerai-mcp.cjs .. && cp dist/seerai-mcp.cjs ../.scaffold/build/",
+    "build": "cd mcp-server && npm run bundle && cp dist/seerai-mcp.cjs .. && cd .. && zotero-plugin build && tsc --noEmit && cp .scaffold/build/*.xpi . && cp mcp-server/dist/seerai-mcp.cjs .scaffold/build/",
     "lint:check": "prettier --check . && eslint .",
     "lint:fix": "prettier --write . && eslint . --fix",
     "release": "zotero-plugin release",
@@ -35,6 +35,7 @@
     "@types/turndown": "^5.0.6",
     "docx-preview": "^0.3.7",
     "gpt-tokenizer": "^3.4.0",
+    "katex": "^0.17.0",
     "mammoth": "^1.12.0",
     "turndown": "^7.2.4",
     "zod": "^4.3.2",
@@ -42,6 +43,7 @@
   },
   "devDependencies": {
     "@types/chai": "^5.2.2",
+    "@types/katex": "^0.16.8",
     "@types/mocha": "^10.0.10",
     "@types/node": "^24.10.0",
     "@zotero-plugin/eslint-config": "^0.6.7",

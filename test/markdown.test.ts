@@ -62,5 +62,19 @@ describe("Markdown Parser Robustness", function () {
       const closeDivs = (output.match(/<\/div>/g) || []).length;
       assert.equal(openDivs, closeDivs, "Div tags should be balanced");
     });
+
+    it("should render block math to MathML", function () {
+      const input = "$$x_i + y_i$$";
+      const output = parseMarkdown(input);
+      assert.include(output, 'display="block"');
+      assert.include(output, "math");
+    });
+
+    it("should render inline math to MathML", function () {
+      const input = "Formula: $a^2 + b^2 = c^2$.";
+      const output = parseMarkdown(input);
+      assert.include(output, "Formula:");
+      assert.include(output, "math");
+    });
   });
 });

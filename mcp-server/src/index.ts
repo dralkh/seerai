@@ -34,7 +34,7 @@ import {
   ServerResponse,
 } from "node:http";
 
-import { TOOL_DEFINITIONS } from "./tools.js";
+import { TOOL_DEFINITIONS, filterToolsByProfile } from "./tools.js";
 import { getZoteroClient, ZoteroClient } from "./zoteroClient.js";
 
 const execAsync = promisify(exec);
@@ -44,6 +44,14 @@ const DEFAULT_MAX_OUTPUT = 64 * 1024;
 
 const SERVER_NAME = "seerai-zotero";
 const SERVER_VERSION = "1.0.0";
+
+// Tools actually exposed this run. SEERAI_MCP_TOOL_PROFILE=research narrows the
+// set to seerai's domain tools (used when a coding harness — which already has
+// its own file/bash/workspace tools — connects). Default: all tools.
+const ACTIVE_TOOLS = filterToolsByProfile(
+  TOOL_DEFINITIONS,
+  process.env.SEERAI_MCP_TOOL_PROFILE,
+);
 
 class SeerAIMcpServer {
   private server: Server;
@@ -75,7 +83,7 @@ class SeerAIMcpServer {
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
-        tools: TOOL_DEFINITIONS.map((tool) => ({
+        tools: ACTIVE_TOOLS.map((tool) => ({
           name: tool.name,
           description: tool.description,
           inputSchema: zodToJsonSchema(tool.inputSchema, {
@@ -99,8 +107,8 @@ class SeerAIMcpServer {
         );
       }
 
-      // Find tool definition
-      const toolDef = TOOL_DEFINITIONS.find((t) => t.name === name);
+      // Find tool definition (only tools active for this profile are callable)
+      const toolDef = ACTIVE_TOOLS.find((t) => t.name === name);
       if (!toolDef) {
         throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
       }

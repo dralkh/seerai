@@ -10,6 +10,10 @@ import {
   ToolResult,
   defaultAgentConfig,
 } from "../chat/tools/toolTypes";
+import {
+  emitToolActivityStart,
+  emitToolActivityComplete,
+} from "../chat/cli/toolActivityBridge";
 
 export interface ApiRequest {
   tool: string;
@@ -44,10 +48,14 @@ export async function handleApiRequest(
   };
 
   try {
+    // Surface a live tool card if a CLI agentic turn is active (the harness
+    // called this tool via the seerai MCP server). No-op otherwise.
+    emitToolActivityStart(toolCall);
     const result: ToolResult = await executeToolCall(
       toolCall,
       defaultAgentConfig,
     );
+    emitToolActivityComplete(toolCall, result);
 
     return {
       success: result.success,
@@ -57,9 +65,14 @@ export async function handleApiRequest(
     };
   } catch (error) {
     Zotero.debug(`[seerai] API handler error: ${error}`);
-    return {
+    const result: ToolResult = {
       success: false,
       error: error instanceof Error ? error.message : String(error),
+    };
+    emitToolActivityComplete(toolCall, result);
+    return {
+      success: false,
+      error: result.error,
     };
   }
 }

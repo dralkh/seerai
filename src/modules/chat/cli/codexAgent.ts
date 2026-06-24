@@ -3,6 +3,7 @@
 // turn.completed). Auth is inherited from `codex login`.
 
 import type { CliAgentDef, CliInvokeOptions, CliParseResult } from "./cliTypes";
+import { buildCodexMcpArgs } from "./mcpBridge";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object"
@@ -10,10 +11,59 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/**
- * Parse a single JSONL line from `codex exec --json`. Returns "ignore" for
- * lines we don't surface (tool calls, item.started, session id) or noise.
- */
+function stringField(rec: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = rec[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function codexToolInfo(item: Record<string, unknown>): {
+  id?: string;
+  name: string;
+  detail?: string;
+  owner?: "cli" | "seerai-mcp";
+} | null {
+  const itemType = typeof item.type === "string" ? item.type : "";
+  const id = stringField(item, "id", "call_id", "item_id") || undefined;
+
+  if (itemType === "command_execution") {
+    return {
+      id,
+      name: "shell",
+      detail: stringField(item, "command") || undefined,
+      owner: "cli",
+    };
+  }
+  if (itemType === "mcp_tool_call") {
+    const server = stringField(item, "server");
+    return {
+      id,
+      name: stringField(item, "tool", "name") || "mcp_tool",
+      detail: server || undefined,
+      owner: /seerai-zotero/i.test(server) ? "seerai-mcp" : "cli",
+    };
+  }
+  if (itemType === "web_search") {
+    return {
+      id,
+      name: "web_search",
+      detail: stringField(item, "query") || undefined,
+      owner: "cli",
+    };
+  }
+  if (itemType === "file_change" || itemType === "patch_apply") {
+    return {
+      id,
+      name: "file_change",
+      detail: stringField(item, "path", "file_path") || undefined,
+      owner: "cli",
+    };
+  }
+  return null;
+}
+
 export function parseCodexEventLine(line: string): CliParseResult {
   const trimmed = line.trim();
   if (!trimmed) return { kind: "ignore" };
@@ -27,6 +77,12 @@ export function parseCodexEventLine(line: string): CliParseResult {
 
   const type = typeof obj.type === "string" ? obj.type : "";
 
+  if (type === "item.started") {
+    const item = asRecord(obj.item);
+    const info = item ? codexToolInfo(item) : null;
+    return info ? { kind: "tool-start", ...info } : { kind: "ignore" };
+  }
+
   if (type === "item.completed") {
     const item = asRecord(obj.item);
     if (!item) return { kind: "ignore" };
@@ -34,6 +90,8 @@ export function parseCodexEventLine(line: string): CliParseResult {
     const text = typeof item.text === "string" ? item.text : "";
     if (itemType === "agent_message" && text) return { kind: "text", text };
     if (itemType === "reasoning" && text) return { kind: "reasoning", text };
+    const info = codexToolInfo(item);
+    if (info) return { kind: "tool-complete", success: true, ...info };
     return { kind: "ignore" };
   }
 
@@ -108,14 +166,16 @@ export function parseCodexDebugModels(output: string): Array<{
 }
 
 function buildCodexArgs(options: CliInvokeOptions): string[] {
-  // read-only sandbox: a Q&A turn must not edit the filesystem (model network
-  // access is unaffected). Prompt is delivered via stdin, not argv.
+  // Sandbox gates agentic mode: `workspace-write` lets the harness create/edit
+  // files in the chat workspace (its cwd) when agentic mode is ON; `read-only`
+  // forces a plain-chat turn that cannot modify the filesystem when it is OFF.
+  // Prompt is delivered via stdin, not argv.
   const args = [
     "exec",
     "--json",
     "--skip-git-repo-check",
     "--sandbox",
-    "read-only",
+    options.agentic ? "workspace-write" : "read-only",
   ];
   if (options.model && options.model !== "default") {
     args.push("-m", options.model);
@@ -135,6 +195,10 @@ export const codexAgentDef: CliAgentDef = {
   authProbe: { args: ["login", "status"] },
   streamFormat: "json-lines",
   parseLine: parseCodexEventLine,
+  // Register seerai's stdio MCP server via `-c mcp_servers…` overrides, and
+  // open localhost network under the workspace-write sandbox so it can reach the
+  // plugin's HTTP API.
+  registerMcp: ({ serverPath, env }) => buildCodexMcpArgs(serverPath, env),
   listModels: { args: ["debug", "models"], parse: parseCodexDebugModels },
   authFailurePatterns: [
     /not logged in/i,

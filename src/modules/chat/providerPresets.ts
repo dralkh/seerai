@@ -23,6 +23,7 @@ const ICON_ZAI: IconName = "brain";
 const ICON_MOONSHOT: IconName = "idea";
 const ICON_CODEX: IconName = "terminal";
 const ICON_ANTIGRAVITY: IconName = "rocket";
+const ICON_OPENCLAW: IconName = "terminal";
 
 export const providerPresets: ProviderPreset[] = [
   {
@@ -117,25 +118,38 @@ export const providerPresets: ProviderPreset[] = [
     ],
   },
   {
-    id: "copilot-cli",
-    name: "GitHub Copilot CLI",
+    id: "hermes-cli",
+    name: "Hermes (Nous)",
     requiresApiKey: false,
     isLocal: true,
     icon: ICON_HERMES,
-    apiURL: "cli://copilot",
+    apiURL: "cli://hermes",
     authMethod: "none",
     supportsModelDiscovery: false,
     adapterId: "local-cli",
-    cliAgentId: "copilot",
+    cliAgentId: "hermes",
     defaultModel: "default",
     verifiedCapabilities: ["chat", "reasoning"],
     notes:
-      "Uses your locally installed GitHub Copilot CLI and its GitHub login. Sign in with `copilot` in a terminal once, then click Detect. `default` uses Copilot's current model; add any other model id your subscription exposes. No API key is stored by seerai.",
-    catalogModels: [
-      { id: "default", capabilities: ["chat", "reasoning"] },
-      { id: "gpt-5.2", capabilities: ["chat", "reasoning"] },
-      { id: "claude-sonnet-4.6", capabilities: ["chat", "reasoning"] },
-    ],
+      "Uses your locally installed Hermes CLI (Nous Research) as its own agent — its tools, skills, memory and MCP run inside Hermes. Run `hermes` once in a terminal to set up and sign in, then click Detect. Hermes picks its model from its own config (`default`). No API key is stored by seerai.",
+    catalogModels: [{ id: "default", capabilities: ["chat", "reasoning"] }],
+  },
+  {
+    id: "openclaw-cli",
+    name: "OpenClaw",
+    requiresApiKey: false,
+    isLocal: true,
+    icon: ICON_OPENCLAW,
+    apiURL: "cli://openclaw",
+    authMethod: "none",
+    supportsModelDiscovery: false,
+    adapterId: "local-cli",
+    cliAgentId: "openclaw",
+    defaultModel: "default",
+    verifiedCapabilities: ["chat", "reasoning"],
+    notes:
+      'Uses your locally installed OpenClaw gateway and its configured agents. Run `openclaw onboard` once to set up the gateway and an agent, keep the gateway running, then click Detect. The model field selects which OpenClaw *agent* to route to (`default` = an agent named "default"). No API key is stored by seerai.',
+    catalogModels: [{ id: "default", capabilities: ["chat", "reasoning"] }],
   },
   {
     id: "anthropic",

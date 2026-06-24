@@ -3,6 +3,13 @@
  * OpenAI-compatible function calling types and interfaces
  */
 
+import type {
+  ScholarlyProviderId,
+  ScholarlySearchMode,
+  ScholarlySearchQuery,
+} from "../../search/types";
+import type { SearchQueryIR } from "../../search/queryIR";
+
 // ==================== OpenAI Function Calling Types ====================
 
 /**
@@ -303,14 +310,23 @@ export interface ReadTableParams {
   include_data?: boolean; // If true, includes all generated cell data (default: true)
 }
 
-/**
- * Parameters for search_external tool (Semantic Scholar)
- */
 export interface SearchExternalParams {
   query: string;
   year?: string; // "2020-2024" or "2023-"
   limit?: number; // Default 10
   openAccessPdf?: boolean; // Only papers with PDFs
+  mode?: ScholarlySearchMode;
+  provider?: ScholarlyProviderId;
+  providers?: ScholarlyProviderId[];
+  sort?: ScholarlySearchQuery["sort"];
+  filters?: ScholarlySearchQuery["filters"] & {
+    year_from?: number | string;
+    year_to?: number | string;
+  };
+  providerFilters?: ScholarlySearchQuery["providerFilters"];
+  concepts?: SearchQueryIR["groups"];
+  exclude?: string[];
+  field?: SearchQueryIR["field"];
 }
 
 /**
@@ -471,7 +487,33 @@ export interface SearchExternalResult {
     citationCount: number;
     url: string;
     has_pdf: boolean;
+    source?: string;
+    sources?: string[];
+    providerIds?: Record<string, string | undefined>;
+    externalIds?: Record<string, string | number | undefined>;
+    venue?: string;
+    publicationTypes?: string[];
+    openAccessPdfUrl?: string;
   }>;
+  providers?: Record<
+    string,
+    {
+      total?: number;
+      exhausted: boolean;
+      error?: string;
+      warnings?: string[];
+      skippedReason?: string;
+    }
+  >;
+  query?: {
+    mode: string;
+    providers: string[];
+    sort: string;
+  };
+  degraded?: boolean;
+  provider?: string;
+  error?: string;
+  fallback?: string;
 }
 
 /**

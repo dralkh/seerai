@@ -5,6 +5,7 @@
 
 import { highlightCode } from "./syntaxHighlight";
 import { iconMarkup } from "./ui/icons";
+import katex from "katex";
 
 /**
  * Strip <think> tags and their content from text.
@@ -186,7 +187,56 @@ export function parseMarkdown(markdown: string): string {
   const cleanedMarkdown = stripThinkTags(markdown);
   if (!cleanedMarkdown) return "";
 
-  const lines = cleanedMarkdown.split("\n");
+  // Extract LaTeX Math equations to placeholders to prevent markdown parser from interfering
+  const blockMathPlaceholders: string[] = [];
+  const inlineMathPlaceholders: string[] = [];
+
+  let textWithPlaceholders = cleanedMarkdown;
+
+  // Extract $$ ... $$ block math
+  textWithPlaceholders = textWithPlaceholders.replace(
+    /\$\$([\s\S]+?)\$\$/g,
+    (match, formula) => {
+      const placeholder = `MATHBLOCKPLACEHOLDER${blockMathPlaceholders.length}`;
+      blockMathPlaceholders.push(formula.trim());
+      return `\n\n${placeholder}\n\n`;
+    },
+  );
+
+  // Extract \[ ... \] block math
+  textWithPlaceholders = textWithPlaceholders.replace(
+    /\\\[([\s\S]+?)\\\]/g,
+    (match, formula) => {
+      const placeholder = `MATHBLOCKPLACEHOLDER${blockMathPlaceholders.length}`;
+      blockMathPlaceholders.push(formula.trim());
+      return `\n\n${placeholder}\n\n`;
+    },
+  );
+
+  // Extract \( ... \) inline math
+  textWithPlaceholders = textWithPlaceholders.replace(
+    /\\\(([\s\S]+?)\\\)/g,
+    (match, formula) => {
+      const placeholder = `MATHINLINEPLACEHOLDER${inlineMathPlaceholders.length}`;
+      inlineMathPlaceholders.push(formula.trim());
+      return placeholder;
+    },
+  );
+
+  // Extract $ ... $ inline math (avoiding escaped dollars \$)
+  textWithPlaceholders = textWithPlaceholders.replace(
+    /(?<!\\)\$(?!\s)([^\n$]+?)(?<!\s)(?<!\\)\$/g,
+    (match, formula) => {
+      const placeholder = `MATHINLINEPLACEHOLDER${inlineMathPlaceholders.length}`;
+      inlineMathPlaceholders.push(formula.trim());
+      return placeholder;
+    },
+  );
+
+  // Unescape any escaped dollar signs in the remaining markdown text
+  textWithPlaceholders = textWithPlaceholders.replace(/\\(\$)/g, "$1");
+
+  const lines = textWithPlaceholders.split("\n");
   const htmlParts: string[] = [];
   let inCodeBlock = false;
   let codeBlockContent: string[] = [];
@@ -421,5 +471,42 @@ export function parseMarkdown(markdown: string): string {
     );
   }
 
-  return balanceTags(htmlParts.join(""));
+  let finalHtml = htmlParts.join("");
+
+  // Restore block math placeholders
+  blockMathPlaceholders.forEach((formula, index) => {
+    const placeholder = `MATHBLOCKPLACEHOLDER${index}`;
+    try {
+      const rendered = katex.renderToString(formula, {
+        displayMode: true,
+        output: "mathml",
+        throwOnError: false,
+      });
+      finalHtml = finalHtml.replace(
+        placeholder,
+        `<div class="latex-block-container" style="display: flex; justify-content: center; margin: 12px 0; overflow-x: auto; width: 100%; max-width: 100%; box-sizing: border-box;">${rendered}</div>`,
+      );
+    } catch (e) {
+      Zotero.debug(`[seerai] KaTeX error rendering block formula: ${e}`);
+      finalHtml = finalHtml.replace(placeholder, `$$${formula}$$`);
+    }
+  });
+
+  // Restore inline math placeholders
+  inlineMathPlaceholders.forEach((formula, index) => {
+    const placeholder = `MATHINLINEPLACEHOLDER${index}`;
+    try {
+      const rendered = katex.renderToString(formula, {
+        displayMode: false,
+        output: "mathml",
+        throwOnError: false,
+      });
+      finalHtml = finalHtml.replace(placeholder, rendered);
+    } catch (e) {
+      Zotero.debug(`[seerai] KaTeX error rendering inline formula: ${e}`);
+      finalHtml = finalHtml.replace(placeholder, `$${formula}$`);
+    }
+  });
+
+  return balanceTags(finalHtml);
 }

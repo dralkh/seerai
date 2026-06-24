@@ -94,6 +94,20 @@ export type ProviderEvent =
   | { type: "init"; continuation: string }
   | { type: "token"; text: string }
   | { type: "tool_calls"; toolCalls: ToolCall[]; reasoningContent?: string }
+  // Display-only: a tool the CLI harness ran on its own (it is its own agent).
+  // seerai never executes these — consumers surface them for visibility (a tool
+  // card in the agentic UI, or a text notice elsewhere). Never routed to the
+  // tool executor.
+  | {
+      type: "tool_activity";
+      phase?: "start" | "update" | "complete";
+      id?: string;
+      name: string;
+      detail?: string;
+      owner?: "cli" | "seerai-mcp";
+      success?: boolean;
+      error?: string;
+    }
   | { type: "done"; content: string; reasoningContent?: string }
   | { type: "error"; message: string; retryable: boolean };
 
@@ -158,7 +172,8 @@ export interface ChatCompletionOptions {
 import { RateLimiter } from "../utils/rateLimiter";
 import { requireResolvedModel, resolveModel } from "./chat/modelResolver";
 import type { ModelRef, ResolvedModel } from "./chat/providerTypes";
-import { createCliProvider } from "./chat/cli/cliProvider";
+import { createCliProvider, resolveCliContext } from "./chat/cli/cliProvider";
+import { formatToolNotice } from "./chat/cli/toolNotice";
 
 export class OpenAIService {
   // Active AbortController for current request (may not be available in Zotero)
@@ -411,7 +426,9 @@ export class OpenAIService {
     callbacks: StreamCallbacks,
   ): Promise<void> {
     this.isAborted = false;
-    const provider = createCliProvider(resolved);
+    // Plain-chat path: agentic mode is OFF here, so the harness must not run
+    // tools or modify files (enforced in createCliProvider + per-CLI flags).
+    const provider = createCliProvider(resolved, resolveCliContext(false));
     const query = provider.query({ messages });
     this.currentController = { abort: () => query.abort() };
     let fullContent = "";
@@ -426,6 +443,19 @@ export class OpenAIService {
             fullContent += event.text;
             callbacks.onToken?.(event.text);
             break;
+          case "tool_activity": {
+            // Plain-chat path has no tool-card UI; surface as a text notice.
+            if (event.phase === "update") break;
+            if (event.phase && event.phase !== "complete") break;
+            const notice = formatToolNotice(
+              "the agent",
+              event.name,
+              event.detail,
+            );
+            fullContent += notice;
+            callbacks.onToken?.(notice);
+            break;
+          }
           case "error":
             throw new Error(event.message);
           case "done":

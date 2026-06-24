@@ -29,7 +29,9 @@ export default defineConfig({
   },
 
   build: {
-    assets: ["addon/**/*.*", "skills/**/*.*"],
+    // seerai-mcp.cjs ships inside the XPI so harnesses can spawn it for the MCP
+    // research-tool bridge; it is bundled (mcp-server) before this build runs.
+    assets: ["addon/**/*.*", "skills/**/*.*", "seerai-mcp.cjs"],
     define: {
       ...pkg.config,
       author: pkg.author,

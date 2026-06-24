@@ -567,7 +567,7 @@ export const agentTools: ToolDefinition[] = [
     function: {
       name: TOOL_NAMES.SEARCH_EXTERNAL,
       description:
-        "Search Semantic Scholar for new academic papers. Use this to find papers that are not yet in the user's Zotero library.",
+        "Search external scholarly corpora for papers that are not yet in the user's Zotero library. Defaults to Semantic Scholar, or choose smart modes and specific corpora such as PubMed, arXiv, Europe PMC, CORE, BASE, Zenodo, HAL, bioRxiv, medRxiv, and IACR.",
       parameters: {
         type: "object",
         properties: {
@@ -582,12 +582,113 @@ export const agentTools: ToolDefinition[] = [
           },
           limit: {
             type: "integer",
-            description: "Max results (1-50, default 10)",
+            description: "Max merged results (1-100, default 10)",
           },
           openAccessPdf: {
             type: "boolean",
             description:
               "If true, only returns papers with available Open Access PDFs",
+          },
+          mode: {
+            type: "string",
+            enum: [
+              "broad",
+              "biomedical",
+              "preprints",
+              "cryptography",
+              "repositories",
+              "source",
+            ],
+            description:
+              "Smart corpus mode. Omit for legacy Semantic Scholar-only search. Ignored when provider/providers are set.",
+          },
+          provider: {
+            type: "string",
+            enum: [
+              "semantic-scholar",
+              "arxiv",
+              "pubmed",
+              "biorxiv",
+              "medrxiv",
+              "iacr",
+              "europe-pmc",
+              "core",
+              "base",
+              "zenodo",
+              "hal",
+            ],
+            description: "Single scholarly corpus to search",
+          },
+          providers: {
+            type: "array",
+            description:
+              "Explicit list of scholarly corpora to search and merge",
+            items: {
+              type: "string",
+              enum: [
+                "semantic-scholar",
+                "arxiv",
+                "pubmed",
+                "biorxiv",
+                "medrxiv",
+                "iacr",
+                "europe-pmc",
+                "core",
+                "base",
+                "zenodo",
+                "hal",
+              ],
+            },
+          },
+          sort: {
+            type: "string",
+            enum: ["relevance", "newest", "oldest", "citations"],
+            description: "Result sort order",
+          },
+          filters: {
+            type: "object",
+            description:
+              "Common filters: yearStart, yearEnd, openAccess, hasPdf, publicationTypes, fieldsOfStudy, minCitationCount, venue",
+          },
+          providerFilters: {
+            type: "object",
+            description:
+              "Corpus-specific filters using Search tab keys, e.g. pubmed.articleType, arxiv.category, zenodo.type/subtype, hal.documentType/domain/language, core.hasFullText",
+          },
+          concepts: {
+            type: "array",
+            description:
+              "Structured concept groups compiled into each corpus query dialect. Each group has terms, optional mesh, and optional phrase.",
+            items: {
+              type: "object",
+              properties: {
+                terms: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Synonyms OR-ed together for this concept",
+                },
+                mesh: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "MeSH terms used by PubMed where applicable",
+                },
+                phrase: {
+                  type: "boolean",
+                  description: "Quote multi-word terms where supported",
+                },
+              },
+              required: ["terms"],
+            },
+          },
+          exclude: {
+            type: "array",
+            items: { type: "string" },
+            description: "Terms to exclude where the corpus supports NOT",
+          },
+          field: {
+            type: "string",
+            enum: ["all", "title", "abstract", "title-abstract"],
+            description: "Field scope applied where the corpus supports it",
           },
         },
         required: ["query"],

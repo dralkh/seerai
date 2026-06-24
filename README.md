@@ -43,7 +43,6 @@
 
 **seerai** is an intelligent research assistant plugin for Zotero 9 that integrates AI-powered chat, advanced search, and data extraction capabilities directly into your research workflow. Chat with your papers, extract structured data, and accelerate your literature review with a local-first, privacy-focused design.
 
-
 ---
 
 ## Installation

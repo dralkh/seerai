@@ -31,6 +31,7 @@ import { MODEL_TYPE_ENDPOINTS, type ModelType } from "../types";
 import type { ChatStateManager } from "../stateManager";
 import { createSvgIcon } from "./icons";
 import type { IconName } from "./icons";
+import { offerHarnessBridge } from "./harnessBridgeModal";
 
 const CAPABILITIES: ModelType[] = [
   "chat",
@@ -823,6 +824,11 @@ export function showProviderManagerDialog(
       overlay.remove();
       if (externalFooter) footer.remove();
       options.onChange?.();
+      // Contextually offer to connect seerai's tool bridge for a CLI harness
+      // that needs persistent MCP config (Hermes/Antigravity/OpenClaw).
+      if (preset?.adapterId === "local-cli") {
+        offerHarnessBridge(doc, preset.cliAgentId, preset.name);
+      }
     } catch (reason) {
       error.textContent =
         reason instanceof Error ? reason.message : String(reason);
