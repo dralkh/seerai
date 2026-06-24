@@ -110,7 +110,10 @@ npm run build
   - **AI Insights Config**: Configure insight generation directly from the search panel.
   - **Export**: Export results to BibTeX or CSV.
 - **Smart Import**:
-  - **PDF Discovery**: Automatically finds and attaches PDFs during import.
+  - **Federated Imports**: Import papers from Semantic Scholar, arXiv, PubMed, Europe PMC, repositories, and preprint sources using provider IDs, DOI, PMID/PMCID, URLs, or search results.
+  - **Fast Agent Imports**: Agent imports return as soon as a Zotero item is created or reused, then queue PDF discovery in the background.
+  - **PDF Discovery**: Automatically finds and attaches PDFs during import with bounded background concurrency.
+  - **Configurable Import OCR**: Auto-OCR is enabled by default for imports and can be disabled in Chat Settings to skip OCR completely.
   - **Source Link**: Fallback to source links if PDFs are unavailable.
   - **Status Indicators**: Clear feedback on import status (⬇️ Importing, ✅ Imported, ⚠️ Failed).
 - **Global Search Scope**: Searching now extends across all libraries, including personal and group collections.
@@ -163,6 +166,7 @@ End-to-end systematic review workflow built directly into Zotero:
 - **Evidence Synthesis**: Random-effects and common-effect meta-analysis, forest plots, I² heterogeneity, and pooled effect sizes.
 - **Gap Analysis**: AI-generated research gap identification with severity scoring.
 - **Extraction Health Checks**: Automatic warnings for missing effect sizes, missing CIs, missing timepoints, negative variances, extreme effect sizes, low sample sizes, and potential duplicate extractions.
+- **Review Export**: Export systematic review data and synthesis outputs for reporting and downstream analysis.
 - **Async Jobs**: Run extraction and analysis jobs in the background with progress tracking and cancellation.
 
 ### Workspace & File Management
