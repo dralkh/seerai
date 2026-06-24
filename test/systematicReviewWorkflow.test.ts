@@ -1,5 +1,8 @@
 import { assert } from "chai";
 import {
+  getActivePipelineJobs,
+  getLatestPipelineJob,
+  getLatestPipelineTask,
   getPapersWithFailedExtractions,
   hasFailedExtractionMetrics,
 } from "../src/modules/systematicReview/extractionHealth";
@@ -110,6 +113,27 @@ describe("Systematic review extraction workflow", function () {
     readiness = service.getSynthesisReadiness(state);
     assert.equal(readiness.verified, 1);
     assert.equal(readiness.complete, 1);
+  });
+
+  it("counts evidence and gap analysis extraction tasks as processed", function () {
+    const state = workflowState();
+    state.reviewJobs = [
+      {
+        id: "job-1",
+        kind: "gap_analysis",
+        projectId: "review-1",
+        protocolRevisionId: state.protocol.activeRevisionId,
+        templateRevisionId: "template-1_r1",
+        status: "completed_with_issues",
+        paperIds: [1],
+        papers: [{ paperId: 1, stage: "completed", attempts: 1 }],
+        concurrency: 2,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    ];
+    const readiness = service.getSynthesisReadiness(state);
+    assert.equal(readiness.processed, 1);
   });
 
   it("requires source-grounded valid rows before verification", function () {
@@ -317,6 +341,56 @@ describe("Systematic review extraction workflow", function () {
     ];
     assert.isTrue(hasFailedExtractionMetrics(state, 1));
     assert.deepEqual(getPapersWithFailedExtractions(state), [1]);
+  });
+
+  it("treats extraction, evidence, and gap jobs as one pipeline", function () {
+    const state = workflowState();
+    state.reviewJobs = [
+      {
+        id: "job-ext",
+        kind: "extraction",
+        projectId: "review-1",
+        protocolRevisionId: state.protocol.activeRevisionId,
+        templateRevisionId: "template-1_r1",
+        status: "completed",
+        paperIds: [1],
+        papers: [
+          {
+            paperId: 1,
+            stage: "failed",
+            attempts: 1,
+            startedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+        concurrency: 2,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "job-gap",
+        kind: "gap_analysis",
+        projectId: "review-1",
+        protocolRevisionId: state.protocol.activeRevisionId,
+        templateRevisionId: "template-1_r1",
+        status: "running",
+        paperIds: [1],
+        papers: [{ paperId: 1, stage: "synthesizing", attempts: 1 }],
+        concurrency: 2,
+        createdAt: "2026-01-01T00:01:00.000Z",
+        updatedAt: "2026-01-01T00:02:00.000Z",
+      },
+    ];
+    // The later, running gap job is the active/latest one across kinds.
+    assert.deepEqual(
+      getActivePipelineJobs(state).map((job) => job.id),
+      ["job-gap"],
+    );
+    assert.equal(getLatestPipelineJob(state)?.id, "job-gap");
+    assert.equal(getLatestPipelineTask(state, 1)?.stage, "synthesizing");
+    // Because the latest task is not "failed", the paper is not eligible for
+    // the failed-extraction retry even though an earlier extraction failed.
+    assert.isFalse(hasFailedExtractionMetrics(state, 1));
+    assert.deepEqual(getPapersWithFailedExtractions(state), []);
   });
 
   it("runs all four protocol-generation steps and aggregates errors", async function () {

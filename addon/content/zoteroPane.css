@@ -1955,6 +1955,9 @@ html.dark .prompt-picker-overlay {
   gap: 8px;
   color: var(--text-primary);
   user-select: none;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .tool-process-summary:hover,
@@ -2055,6 +2058,9 @@ html.dark .prompt-picker-overlay {
   color: var(--text-tertiary, #777);
   border-top: 1px solid var(--border-secondary, #e5e5e5);
   line-height: 1.4;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .tool-list-container {
@@ -2064,6 +2070,10 @@ html.dark .prompt-picker-overlay {
   padding: 6px 8px 8px 35px;
   border-top: 1px solid var(--border-secondary, #e5e5e5);
   background: var(--fill-quinary, rgba(0, 0, 0, 0.018));
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .tool-execution-card {
@@ -2088,6 +2098,9 @@ html.dark .prompt-picker-overlay {
   align-items: center;
   gap: 8px;
   user-select: none;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .tool-status-success .tool-row-status {
@@ -2111,6 +2124,7 @@ html.dark .prompt-picker-overlay {
   display: flex;
   align-items: center;
   gap: 8px;
+  max-width: 100%;
 }
 
 .tool-row-title {
@@ -2120,6 +2134,7 @@ html.dark .prompt-picker-overlay {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .tool-row-result {
@@ -2145,10 +2160,17 @@ html.dark .prompt-picker-overlay {
   background: var(--background-primary, #fff);
   color: var(--text-primary);
   user-select: text;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: auto;
 }
 
 .tool-detail-section {
   padding-top: 7px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .tool-detail-label {
@@ -2175,7 +2197,16 @@ html.dark .prompt-picker-overlay {
   overflow-wrap: break-word;
   word-break: break-word;
   max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
   box-sizing: border-box;
+}
+
+.permission-request-ui {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: break-word;
 }
 
 .tool-detail-error .tool-detail-pre {

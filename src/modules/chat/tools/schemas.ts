@@ -129,10 +129,10 @@ export const SearchExternalParamsSchema = z.object({
 
 export const ReadItemContentParamsSchema = z.object({
   item_id: z
-    .number()
-    .int()
-    .positive()
-    .describe("The Zotero item ID to read content from"),
+    .union([z.number().int().positive(), z.string().min(1)])
+    .describe(
+      "The Zotero item ID to read content from, or an external alias for an existing Zotero item such as DOI, arXiv ID, PMID, PMCID, URL, or provider-prefixed ID",
+    ),
   include_notes: z
     .boolean()
     .default(true)
@@ -405,19 +405,46 @@ export const SystematicReviewParamsSchema = z.discriminatedUnion("action", [
   }),
 ]);
 
-export const ImportPaperParamsSchema = z.object({
-  paper_id: z.string().min(1).describe("Semantic Scholar paper ID"),
-  target_collection_id: z
-    .number()
-    .int()
-    .positive()
-    .optional()
-    .describe("Collection ID to add the imported paper to"),
-  trigger_ocr: z
-    .boolean()
-    .optional()
-    .describe("Automatically trigger OCR after import"),
-});
+export const ImportPaperParamsSchema = z
+  .object({
+    paper_id: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Federated scholarly paper identifier from search_external, e.g. arxiv:2412.08905v1, pubmed:123456, DOI, PMID, PMCID, URL, or Semantic Scholar ID",
+      ),
+    paper_ids: z
+      .array(z.string().min(1))
+      .min(1)
+      .max(50)
+      .optional()
+      .describe("Batch of federated scholarly paper identifiers to import"),
+    provider: z
+      .enum(SCHOLARLY_PROVIDER_IDS as [string, ...string[]])
+      .optional()
+      .describe("Optional corpus hint for ambiguous identifiers"),
+    target_collection_id: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Collection ID to add the imported paper to"),
+    trigger_ocr: z
+      .boolean()
+      .optional()
+      .describe(
+        "Request OCR after import. Ignored when Auto-OCR is disabled in configuration.",
+      ),
+    wait_for_pdf: z
+      .boolean()
+      .optional()
+      .describe("Wait for PDF discovery and allowed OCR before returning"),
+  })
+  .refine((data) => !!data.paper_id || !!data.paper_ids?.length, {
+    message: "Either paper_id or paper_ids is required",
+    path: ["paper_id"],
+  });
 
 export const GenerateItemTagsParamsSchema = z.object({
   item_id: z

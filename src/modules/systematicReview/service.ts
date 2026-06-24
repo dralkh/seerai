@@ -584,12 +584,7 @@ export class SystematicReviewService {
               task.proposalCount = proposals.length;
               task.issueCount = extraction.issues.length;
               task.sourceSummary = extraction.sourceSummary;
-              task.error = extraction.issues.length
-                ? extraction.issues
-                    .slice(0, 3)
-                    .map((issue) => issue.message)
-                    .join("; ")
-                : undefined;
+              task.error = undefined;
             }
             task.stage = "completed";
             task.completedAt = new Date().toISOString();
@@ -638,20 +633,17 @@ export class SystematicReviewService {
       job.status === "running" &&
       (job.kind === "evidence_analysis" || job.kind === "gap_analysis")
     ) {
-      if (this.hasAnyIncompletePaper(job)) {
-        job.status = "completed_with_issues";
-        job.error =
-          "Some papers failed extraction; downstream stages were skipped";
-        job.updatedAt = new Date().toISOString();
-        job.completedAt = job.updatedAt;
-        await this.save(state);
-        Zotero.debug(
-          `[seerai] Review job ${job.id}: ${job.status} (extraction incomplete)`,
-        );
-        return job;
-      }
       try {
-        const pipelinePapers = job.papers;
+        const pipelinePapers = job.papers.filter(
+          (task) => task.stage === "completed",
+        );
+        const failedPapers = job.papers.filter(
+          (task) => task.stage === "failed" || task.stage === "cancelled",
+        );
+        const partialWarnings = failedPapers.map(
+          (task) =>
+            `Paper ${task.paperId} was not included in automatic extraction because ${task.error || task.stage}.`,
+        );
         for (const task of pipelinePapers) {
           task.stage = "synthesizing";
           job.updatedAt = new Date().toISOString();
@@ -676,19 +668,10 @@ export class SystematicReviewService {
           (issue) => issue.severity === "blocker",
         );
         job.compatibilityIssueCount = blockers.length;
-        if (blockers.length) {
-          job.status = "completed_with_issues";
-          job.error =
-            "Extraction compatibility issues must be reviewed before synthesis";
-          job.updatedAt = new Date().toISOString();
-          job.completedAt = job.updatedAt;
-          await this.save(state);
-          Zotero.debug(
-            `[seerai] Review job ${job.id}: paused before synthesis with ${blockers.length} compatibility issue(s)`,
-          );
-          return job;
-        }
         const synthesis = this.runSynthesis(state, true);
+        if (partialWarnings.length) {
+          synthesis.warnings.push(...partialWarnings);
+        }
         job.synthesisRunId = synthesis.id;
         Zotero.debug(
           `[seerai] Review job ${job.id}: synthesis ${synthesis.id} produced ${synthesis.domains.length} domain(s)`,
@@ -726,8 +709,11 @@ export class SystematicReviewService {
         (sum, paper) => sum + (paper.issueCount || 0),
         0,
       );
+      const producedDownstreamRun = !!(
+        job.synthesisRunId || job.gapAnalysisRunId
+      );
       job.status =
-        failedCount === job.papers.length
+        failedCount === job.papers.length && !producedDownstreamRun
           ? "failed"
           : failedCount > 0 || issueCount > 0
             ? "completed_with_issues"
@@ -844,7 +830,11 @@ export class SystematicReviewService {
     for (const paper of included) {
       const rows = state.extractions[paper.id] || [];
       const latestTask = state.reviewJobs
-        .filter((job) => job.kind === "extraction")
+        .filter((job) =>
+          ["extraction", "evidence_analysis", "gap_analysis"].includes(
+            job.kind,
+          ),
+        )
         .slice()
         .reverse()
         .flatMap((job) => job.papers)

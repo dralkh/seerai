@@ -859,6 +859,11 @@ export function createToolProcessUI(doc: Document): {
   details.className = "tool-process-container";
 
   details.open = false;
+  // Keep the process group bounded to the message width (see createToolExecutionUI).
+  details.style.width = "100%";
+  details.style.maxWidth = "100%";
+  details.style.boxSizing = "border-box";
+  details.style.overflow = "hidden";
 
   const summary = doc.createElementNS(HTML_NS, "summary") as HTMLElement;
   summary.className = "tool-process-summary";
@@ -1118,6 +1123,13 @@ export function createToolExecutionUI(
   const display = createToolDisplay(toolCall, result);
   details.classList.add(`tool-status-${display.status}`);
   details.open = false;
+  // Bound the card to its container so a long tool name/target can never widen
+  // the message bubble (and the whole sidebar) — the inner rows already
+  // truncate/wrap, they just need a definite-width ancestor.
+  details.style.width = "100%";
+  details.style.maxWidth = "100%";
+  details.style.boxSizing = "border-box";
+  details.style.overflow = "hidden";
 
   const summary = doc.createElementNS(HTML_NS, "summary") as HTMLElement;
   summary.className = "tool-row-summary";

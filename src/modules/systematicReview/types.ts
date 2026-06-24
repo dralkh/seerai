@@ -706,9 +706,11 @@ export interface SynthesisStudyEstimate {
   paperId: number;
   outcome: string;
   measure: string;
-  estimate: number;
-  ciLow: number;
-  ciHigh: number;
+  estimate?: number;
+  ciLow?: number;
+  ciHigh?: number;
+  n?: number;
+  events?: number;
   weight?: number;
   timepoint?: string;
   unit?: string;

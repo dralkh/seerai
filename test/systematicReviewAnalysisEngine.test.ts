@@ -5,7 +5,10 @@ import {
   computeSynthesisFingerprint,
 } from "../src/modules/systematicReview/analysisEngine";
 import { createProtocolFromLegacy } from "../src/modules/systematicReview/protocol";
-import { SystematicReviewState } from "../src/modules/systematicReview/types";
+import {
+  ExtractionTemplate,
+  SystematicReviewState,
+} from "../src/modules/systematicReview/types";
 
 function reviewState(): SystematicReviewState {
   const protocol = createProtocolFromLegacy(
@@ -21,6 +24,37 @@ function reviewState(): SystematicReviewState {
     {},
     "Does treatment reduce mortality?",
   );
+  const template: ExtractionTemplate = {
+    id: "template-1",
+    revisionId: "template-1_r1",
+    protocolRevisionId: protocol.activeRevisionId,
+    name: "Outcomes",
+    instructions: "",
+    outcomes: [
+      {
+        id: "mortality",
+        name: "Mortality",
+        aliases: [],
+        description: "",
+        measures: ["RR"],
+        timepoints: [],
+        required: true,
+      },
+      {
+        id: "icu",
+        name: "ICU Admission",
+        aliases: [],
+        description: "",
+        measures: ["PERCENTAGE"],
+        timepoints: [],
+        required: true,
+      },
+    ],
+    status: "active",
+    source: "user",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
   return {
     activeSpaceId: "review-1",
     protocol,
@@ -96,6 +130,8 @@ function reviewState(): SystematicReviewState {
         },
       ],
     },
+    extractionTemplates: [template],
+    activeExtractionTemplateId: template.id,
     robData: {
       1: {
         randomization: "low",
@@ -155,7 +191,7 @@ describe("Systematic review synthesis and gap engine", function () {
     state.analysisSettings.sparseStudyThreshold = 3;
     const synthesis = buildSynthesisRun(state);
     const first = buildGapAnalysisRun(state, synthesis);
-    assert.lengthOf(first.gaps, 4);
+    assert.isAtLeast(first.gaps.length, 4);
     first.gaps[0].status = "accepted";
     first.gaps[0].reviewerNote = "Confirmed priority";
     state.gapAnalysisRuns.push(first);
@@ -174,5 +210,44 @@ describe("Systematic review synthesis and gap engine", function () {
       ["C", "I", "O", "P"],
     );
     assert.equal(gaps.columnDimensionKey, "outcome");
+  });
+
+  it("creates no-evidence gap cells for required outcomes with no verified rows", function () {
+    const state = reviewState();
+    const synthesis = buildSynthesisRun(state);
+    const gaps = buildGapAnalysisRun(state, synthesis);
+    const icuCells = gaps.cells.filter(
+      (cell) => cell.columnValue === "ICU Admission",
+    );
+    assert.lengthOf(icuCells, 4);
+    assert.isTrue(icuCells.every((cell) => cell.status === "no_evidence"));
+    assert.isTrue(
+      gaps.gaps.some((gap) =>
+        gap.dimensionTags.some((tag) => tag === "ICU Admission"),
+      ),
+    );
+  });
+
+  it("keeps non-poolable narrative estimates without confidence intervals", function () {
+    const state = reviewState();
+    state.extractionTemplates[0].outcomes[0].measures = ["Specificity"];
+    state.extractions = {
+      1: [
+        {
+          id: "spec-1",
+          outcomeId: "mortality",
+          outcome: "Mortality",
+          effectType: "Specificity",
+          effectSize: 0.8,
+          sourceQuote: "Specificity was 0.80.",
+          verificationStatus: "verified",
+        },
+      ],
+    };
+    const synthesis = buildSynthesisRun(state);
+    assert.equal(synthesis.domains[0].method, "narrative");
+    assert.equal(synthesis.domains[0].studies[0].estimate, 0.8);
+    assert.isUndefined(synthesis.domains[0].studies[0].ciLow);
+    assert.isUndefined(synthesis.domains[0].studies[0].ciHigh);
   });
 });

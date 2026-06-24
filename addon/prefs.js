@@ -50,7 +50,7 @@ pref("libraryScope", "all"); // "user", "all", "group:ID", or "collection:libID:
 pref("agentMaxResults", 20);
 pref("agentMaxContentLength", 50000);
 pref("agentMaxIterations", 50);
-pref("agentAutoOcr", false);
+pref("agentAutoOcr", true);
 pref("enableExperimentalAgentTools", false);
 pref("selectionMode", "default"); // "lock", "default", or "explore"
 pref("searchAutoAiInsights", true); // Automatically generate AI insights after search

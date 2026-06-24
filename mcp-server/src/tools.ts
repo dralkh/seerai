@@ -49,7 +49,11 @@ const getItemMetadataParams = z.object({
 });
 
 const readItemContentParams = z.object({
-  item_id: z.number().describe("Zotero item ID"),
+  item_id: z
+    .union([z.number(), z.string().min(1)])
+    .describe(
+      "Zotero item ID, or an external alias for an existing Zotero item such as DOI, arXiv ID, PMID, PMCID, URL, or provider-prefixed ID",
+    ),
   include_notes: z.boolean().default(true).optional().describe("Include notes"),
   include_pdf: z
     .boolean()
@@ -157,15 +161,41 @@ const searchExternalParams = z.object({
   field: z.enum(["all", "title", "abstract", "title-abstract"]).optional(),
 });
 
-const importPaperParams = z.object({
-  paper_id: z.string().describe("Semantic Scholar paper ID"),
-  target_collection_id: z.number().optional().describe("Target collection ID"),
-  trigger_ocr: z
-    .boolean()
-    .default(false)
-    .optional()
-    .describe("Trigger OCR after import"),
-});
+const importPaperParams = z
+  .object({
+    paper_id: z
+      .string()
+      .optional()
+      .describe(
+        "Federated scholarly paper identifier from search_external, e.g. arxiv:2412.08905v1, pubmed:123456, DOI, PMID, PMCID, URL, or Semantic Scholar ID",
+      ),
+    paper_ids: z
+      .array(z.string().min(1))
+      .min(1)
+      .max(50)
+      .optional()
+      .describe("Batch of federated scholarly paper identifiers to import"),
+    provider: z.enum(scholarlyProviderIds).optional().describe("Corpus hint"),
+    target_collection_id: z
+      .number()
+      .optional()
+      .describe("Target collection ID"),
+    trigger_ocr: z
+      .boolean()
+      .optional()
+      .describe(
+        "Request OCR after import. Ignored when Auto-OCR is disabled in configuration.",
+      ),
+    wait_for_pdf: z
+      .boolean()
+      .default(false)
+      .optional()
+      .describe("Wait for PDF discovery and allowed OCR before returning"),
+  })
+  .refine((data) => !!data.paper_id || !!data.paper_ids?.length, {
+    message: "Either paper_id or paper_ids is required",
+    path: ["paper_id"],
+  });
 
 // ==================== Consolidated Tool Parameter Schemas ====================
 
@@ -947,7 +977,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "read_item_content",
     description:
-      "Read the full content of a paper including notes and PDF text. Returns pre-indexed chunks from the semantic index when available.",
+      "Read the full content of an existing Zotero paper including notes and PDF text. Numeric item_id values are Zotero item IDs; string values are read-only aliases for existing Zotero items.",
     inputSchema: readItemContentParams,
   },
   {
@@ -958,7 +988,8 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: "import_paper",
-    description: "Import a paper from Semantic Scholar into Zotero.",
+    description:
+      "Import a paper from a federated scholarly corpus into Zotero. Accepts search_external paper IDs and common arXiv, DOI, PubMed, repository, preprint, and Semantic Scholar identifiers.",
     inputSchema: importPaperParams,
   },
   {

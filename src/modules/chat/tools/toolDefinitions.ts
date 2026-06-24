@@ -528,13 +528,14 @@ export const agentTools: ToolDefinition[] = [
     function: {
       name: TOOL_NAMES.READ_ITEM_CONTENT,
       description:
-        "Read the full content of a paper/item. When pre-indexed chunks are available in the semantic index, returns those directly for faster retrieval. Otherwise, extracts text from notes, PDF content, or OCR depending on availability. Use this when you need to analyze the actual content of a paper, not just its metadata.",
+        "Read the full content of an existing Zotero paper/item. Numeric item_id values are Zotero item IDs. String item_id values are read-only aliases for existing Zotero items, such as DOI, arXiv ID, PMID, PMCID, URL, or provider-prefixed IDs; if no matching Zotero item exists, import the paper first. When pre-indexed chunks are available in the semantic index, returns those directly for faster retrieval. Otherwise, extracts text from notes, PDF content, or OCR depending on availability.",
       parameters: {
         type: "object",
         properties: {
           item_id: {
-            type: "integer",
-            description: "The Zotero item ID to read content from",
+            oneOf: [{ type: "integer" }, { type: "string" }],
+            description:
+              "Zotero item ID, or an external alias for an existing Zotero item such as DOI, arXiv ID, PMID, PMCID, URL, or provider-prefixed ID",
           },
           include_notes: {
             type: "boolean",
@@ -701,14 +702,37 @@ export const agentTools: ToolDefinition[] = [
     function: {
       name: TOOL_NAMES.IMPORT_PAPER,
       description:
-        "Import a paper from Semantic Scholar into the Zotero library. This will create a new item, attempt to download/attach the PDF, and can place it in a specific collection.",
+        "Import a paper from a federated scholarly corpus into the Zotero library. Accepts paper IDs returned by search_external and common identifiers such as arXiv, DOI, PubMed, Europe PMC, repository, preprint, and Semantic Scholar IDs. This will create or reuse a Zotero item, attempt to download/attach the PDF, and can place it in a specific collection.",
       parameters: {
         type: "object",
         properties: {
           paper_id: {
             type: "string",
             description:
-              "The Semantic Scholar paper ID (obtained from search_external)",
+              "Federated scholarly paper identifier, e.g. arxiv:2412.08905v1, pubmed:123456, DOI, PMID, PMCID, URL, or a paperId obtained from search_external",
+          },
+          paper_ids: {
+            type: "array",
+            description:
+              "Batch of federated scholarly paper identifiers to import",
+            items: { type: "string" },
+          },
+          provider: {
+            type: "string",
+            enum: [
+              "semantic-scholar",
+              "arxiv",
+              "pubmed",
+              "biorxiv",
+              "medrxiv",
+              "iacr",
+              "europe-pmc",
+              "core",
+              "base",
+              "zenodo",
+              "hal",
+            ],
+            description: "Optional corpus hint for ambiguous identifiers",
           },
           target_collection_id: {
             type: "integer",
@@ -717,10 +741,14 @@ export const agentTools: ToolDefinition[] = [
           trigger_ocr: {
             type: "boolean",
             description:
-              "Automatically trigger OCR after import if PDF is found",
+              "Request OCR after import if PDF is found. Ignored when Auto-OCR is disabled in configuration.",
+          },
+          wait_for_pdf: {
+            type: "boolean",
+            description:
+              "If true, wait for PDF discovery and allowed OCR before returning. Defaults to false for faster item-first import.",
           },
         },
-        required: ["paper_id"],
       },
     },
   },

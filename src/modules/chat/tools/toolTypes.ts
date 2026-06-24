@@ -32,11 +32,12 @@ export interface ToolDefinition {
  * JSON Schema for tool parameters
  */
 export interface ToolParameterSchema {
-  type: "string" | "number" | "integer" | "boolean" | "array" | "object";
+  type?: "string" | "number" | "integer" | "boolean" | "array" | "object";
   description?: string;
   enum?: string[];
   items?: ToolParameterSchema;
   properties?: Record<string, ToolParameterSchema>;
+  oneOf?: ToolParameterSchema[];
   required?: string[];
   default?: unknown;
 }
@@ -181,7 +182,7 @@ export const defaultAgentConfig: AgentConfig = {
   maxContentLength: 50000,
   maxAgentIterations: 50,
   maxToolRetries: 2,
-  autoOcr: false,
+  autoOcr: true,
   requireApprovalForDestructive: true,
 };
 
@@ -215,7 +216,7 @@ export interface GetItemMetadataParams {
  * Parameters for read_item_content tool
  */
 export interface ReadItemContentParams {
-  item_id: number;
+  item_id: number | string;
   include_notes?: boolean;
   include_pdf?: boolean;
   trigger_ocr?: boolean; // If true, triggers OCR if no text content found
@@ -333,10 +334,12 @@ export interface SearchExternalParams {
  * Parameters for import_paper tool
  */
 export interface ImportPaperParams {
-  paper_id: string; // Semantic Scholar paper ID
+  paper_id?: string;
+  paper_ids?: string[];
+  provider?: ScholarlyProviderId;
   target_collection_id?: number;
   trigger_ocr?: boolean; // Automatically trigger OCR after import
-  wait_for_pdf?: boolean; // Whether to wait for PDF discovery/OCR before returning (default: true)
+  wait_for_pdf?: boolean; // Whether to wait for PDF discovery/OCR before returning (default: false)
 }
 
 /**
@@ -524,6 +527,11 @@ export interface ImportPaperResult {
   title: string;
   pdf_attached: boolean;
   success: boolean;
+  source?: string;
+  provider_id?: string;
+  already_exists?: boolean;
+  pdf_status?: "attached" | "queued" | "failed" | "skipped";
+  ocr_status?: "queued" | "skipped" | "disabled";
 }
 
 /**

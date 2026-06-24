@@ -258,6 +258,7 @@ const ReviewJobSchema = z.object({
   error: z.string().optional(),
   synthesisRunId: z.string().optional(),
   gapAnalysisRunId: z.string().optional(),
+  compatibilityIssueCount: z.number().int().nonnegative().optional(),
 });
 
 const RoBSchema = z.object({
@@ -319,14 +320,36 @@ const StudyEstimateSchema = z.object({
   paperId: z.number().int().positive(),
   outcome: z.string(),
   measure: z.string(),
-  estimate: z.number(),
-  ciLow: z.number(),
-  ciHigh: z.number(),
+  estimate: z.number().optional(),
+  ciLow: z.number().optional(),
+  ciHigh: z.number().optional(),
+  n: z.number().optional(),
+  events: z.number().optional(),
   weight: z.number().optional(),
   timepoint: z.string().optional(),
   unit: z.string().optional(),
   sourceQuote: z.string().optional(),
   sourcePage: z.string().optional(),
+});
+
+const ExtractionCompatibilityIssueSchema = z.object({
+  paperId: z.number().int().positive(),
+  rowId: z.string().optional(),
+  outcome: z.string(),
+  measure: z.string(),
+  severity: z.enum(["warning", "blocker"]),
+  reason: z.string(),
+});
+
+const ExtractionCompatibilityReportSchema = z.object({
+  includedRows: z.number().int().nonnegative(),
+  excludedRows: z.number().int().nonnegative(),
+  compatibleDomains: z.number().int().nonnegative(),
+  blockedDomains: z.number().int().nonnegative(),
+  incompletePoolableRows: z.number().int().nonnegative(),
+  duplicateRows: z.number().int().nonnegative(),
+  narrativeReadyDomains: z.number().int().nonnegative(),
+  issues: z.array(ExtractionCompatibilityIssueSchema),
 });
 
 const GradeJudgmentSchema = z.object({
@@ -365,6 +388,7 @@ const SynthesisDomainSchema = z.object({
   methodConfirmed: z.boolean(),
   grade: GradeJudgmentSchema,
   narrativeConfirmed: z.boolean(),
+  excludedRows: z.array(ExtractionCompatibilityIssueSchema).optional(),
 });
 
 const SynthesisRunSchema = z.object({
@@ -380,6 +404,7 @@ const SynthesisRunSchema = z.object({
   warnings: z.array(z.string()),
   model: z.string().optional(),
   domains: z.array(SynthesisDomainSchema),
+  compatibilityReport: ExtractionCompatibilityReportSchema.optional(),
 });
 
 const GapCellSchema = z.object({
@@ -583,12 +608,15 @@ export class SystematicReviewStore {
   private writeLock: Promise<void> = Promise.resolve();
 
   constructor() {
-    this.dataDir = PathUtils.join(Zotero.DataDirectory.dir, config.addonRef);
-    this.configFile = PathUtils.join(this.dataDir, "sr_data.json");
-    this.backupFile = PathUtils.join(
-      this.dataDir,
-      "sr_data.pre_v6.backup.json",
-    );
+    const join =
+      typeof PathUtils !== "undefined"
+        ? PathUtils.join
+        : (...parts: string[]) => parts.join("/").replace(/\/+/g, "/");
+    const baseDir =
+      typeof Zotero !== "undefined" ? Zotero.DataDirectory.dir : "/tmp";
+    this.dataDir = join(baseDir, config.addonRef);
+    this.configFile = join(this.dataDir, "sr_data.json");
+    this.backupFile = join(this.dataDir, "sr_data.pre_v6.backup.json");
   }
 
   private async withWriteLock<T>(operation: () => Promise<T>): Promise<T> {

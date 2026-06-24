@@ -261,7 +261,7 @@ export function buildSynthesisRun(state: SystematicReviewState): SynthesisRun {
       paper.status === "included" &&
       (paper.screeningStage === "final" || !paper.screeningStage),
   );
-  const template = state.extractionTemplates.find(
+  const template = (state.extractionTemplates || []).find(
     (candidate) => candidate.id === state.activeExtractionTemplateId,
   );
   const compatibility = buildExtractionCompatibility(
@@ -327,9 +327,11 @@ export function buildSynthesisRun(state: SystematicReviewState): SynthesisRun {
         paperId: group.paperIds[index],
         outcome: row.outcome,
         measure: row.effectType,
-        estimate: row.effectSize!,
-        ciLow: row.ciLow!,
-        ciHigh: row.ciHigh!,
+        estimate: row.effectSize,
+        ciLow: row.ciLow,
+        ciHigh: row.ciHigh,
+        n: row.n,
+        events: row.events,
         weight: randomEffects?.weights[index],
         timepoint: row.timepoint,
         unit: row.unit,
@@ -435,17 +437,28 @@ export function buildSynthesisRun(state: SystematicReviewState): SynthesisRun {
   };
 }
 
+function uniquePaperIds(domains: SynthesisDomainResult[]): number[] {
+  return Array.from(new Set(domains.flatMap((domain) => domain.paperIds)));
+}
+
 function gapStatus(
-  domain?: SynthesisDomainResult,
+  domains: SynthesisDomainResult[],
   sparseThreshold = 2,
 ): GapCellStatus {
-  if (!domain) return "no_evidence";
-  if (domain.paperIds.length < sparseThreshold) return "sparse";
-  if (domain.direction === "mixed") return "conflicting";
-  if (["low", "verylow"].includes(domain.grade.certainty)) {
+  if (!domains.length) return "no_evidence";
+  if (domains.some((domain) => domain.direction === "mixed")) {
+    return "conflicting";
+  }
+  if (uniquePaperIds(domains).length < sparseThreshold) return "sparse";
+  if (
+    domains.some((domain) =>
+      ["low", "verylow"].includes(domain.grade.certainty),
+    )
+  ) {
     return "low_certainty";
   }
-  if (domain.grade.indirectness < 0) return "indirect";
+  if (domains.some((domain) => domain.grade.indirectness < 0))
+    return "indirect";
   return "adequate";
 }
 
@@ -462,7 +475,10 @@ export function buildGapAnalysisRun(
 ): GapAnalysisRun {
   const revision = getActiveProtocolRevision(state.protocol);
   const now = new Date().toISOString();
-  const previous = state.gapAnalysisRuns
+  const template = (state.extractionTemplates || []).find(
+    (candidate) => candidate.id === state.activeExtractionTemplateId,
+  );
+  const previous = (state.gapAnalysisRuns || [])
     .flatMap((run) => run.gaps)
     .reduce<Record<string, GapCandidate>>((map, gap) => {
       map[gap.canonicalKey] = gap;
@@ -477,47 +493,57 @@ export function buildGapAnalysisRun(
           value: revision.researchQuestion || "Review question",
         },
       ];
+  const domainsByOutcome = synthesis.domains.reduce<
+    Record<string, SynthesisDomainResult[]>
+  >((map, domain) => {
+    const key = normalizeKey(domain.outcome);
+    if (!key) return map;
+    map[key] ||= [];
+    map[key].push(domain);
+    return map;
+  }, {});
+  const outcomeColumns: Array<{ key: string; value: string }> = [];
+  const addOutcomeColumn = (value: string) => {
+    const key = normalizeKey(value);
+    if (!key || outcomeColumns.some((column) => column.key === key)) return;
+    outcomeColumns.push({ key, value });
+  };
+  (template?.outcomes || [])
+    .filter((outcome) => outcome.required)
+    .forEach((outcome) => addOutcomeColumn(outcome.name));
+  synthesis.domains.forEach((domain) => addOutcomeColumn(domain.outcome));
+  if (!outcomeColumns.length) {
+    addOutcomeColumn("No verified outcome evidence");
+  }
   const cells = dimensions.flatMap((dimension) =>
-    synthesis.domains.map((domain) => {
+    outcomeColumns.map((column) => {
+      const domains = domainsByOutcome[column.key] || [];
       const status = gapStatus(
-        domain,
-        state.analysisSettings.sparseStudyThreshold,
+        domains,
+        state.analysisSettings?.sparseStudyThreshold || 2,
       );
+      const paperIds = uniquePaperIds(domains);
+      const firstReason = domains
+        .flatMap((domain) => domain.nonPoolableReasons)
+        .find(Boolean);
       return {
-        id: stableId("cell", [dimension.key, dimension.value, domain.id]),
+        id: stableId("cell", [dimension.key, dimension.value, column.key]),
         rowKey: dimension.key,
         rowValue: `${dimension.label}: ${dimension.value || "Not specified"}`,
         columnKey: "outcome",
-        columnValue: domain.outcome,
+        columnValue: column.value,
         status,
-        domainIds: [domain.id],
-        paperIds: domain.paperIds,
-        studyCount: domain.paperIds.length,
+        domainIds: domains.map((domain) => domain.id),
+        paperIds,
+        studyCount: paperIds.length,
         rationale:
           status === "adequate"
             ? "Verified evidence is available without an automatic gap signal."
-            : domain.nonPoolableReasons[0] ||
+            : firstReason ||
               `Evidence classified as ${status.replace("_", " ")}.`,
       };
     }),
   );
-  if (!cells.length) {
-    dimensions.forEach((dimension) => {
-      cells.push({
-        id: stableId("cell", [dimension.key, dimension.value, "no_evidence"]),
-        rowKey: dimension.key,
-        rowValue: `${dimension.label}: ${dimension.value || "Not specified"}`,
-        columnKey: "outcome",
-        columnValue: "No verified outcome evidence",
-        status: "no_evidence",
-        domainIds: [],
-        paperIds: [],
-        studyCount: 0,
-        rationale:
-          "No verified synthesis domain covers this configured review area.",
-      });
-    });
-  }
   const gaps = cells
     .filter((cell) => !["adequate", "not_applicable"].includes(cell.status))
     .map<GapCandidate>((cell) => {
@@ -574,6 +600,6 @@ export function buildGapAnalysisRun(
     columnDimensionKey: "outcome",
     cells,
     gaps,
-    warnings: [],
+    warnings: [...synthesis.warnings],
   };
 }

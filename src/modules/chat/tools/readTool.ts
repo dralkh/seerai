@@ -18,6 +18,61 @@ import {
   getAttachmentLabel,
 } from "../../fileViewer";
 import { getVectorStore } from "../rag/vectorStore";
+import {
+  identifierKeyString,
+  identifiersOverlap,
+  keysForZoteroItemLike,
+  parsePaperIdentifier,
+} from "./paperIdentity";
+
+async function resolveReadableItem(
+  itemId: number | string,
+): Promise<{ item?: Zotero.Item; error?: string }> {
+  if (typeof itemId === "number") {
+    const item = Zotero.Items.get(itemId);
+    return item ? { item } : { error: `Item with ID ${itemId} not found` };
+  }
+
+  const parsed = parsePaperIdentifier(itemId);
+  const targetKeys = parsed.keys;
+  const directZoteroKey = targetKeys.find((key) => key.kind === "zotero");
+  if (directZoteroKey) {
+    const directItem = Zotero.Items.get(Number(directZoteroKey.value));
+    if (directItem) return { item: directItem };
+  }
+
+  const matches: Zotero.Item[] = [];
+  for (const lib of Zotero.Libraries.getAll()) {
+    try {
+      const items = await Zotero.Items.getAll(lib.libraryID);
+      const Items = Zotero.Items as any;
+      if (items.length && typeof Items.loadDataTypes === "function") {
+        await Items.loadDataTypes(items);
+      }
+      for (const item of items) {
+        if (!item.isRegularItem() && item.itemType !== "note") continue;
+        if (identifiersOverlap(targetKeys, keysForZoteroItemLike(item))) {
+          matches.push(item);
+        }
+      }
+    } catch (e) {
+      Zotero.debug(`[seerai] read_item_content alias scan failed: ${e}`);
+    }
+  }
+
+  const unique = Array.from(new Map(matches.map((item) => [item.id, item])));
+  if (unique.length === 1) return { item: unique[0][1] };
+  if (unique.length > 1) {
+    return {
+      error: `External item alias "${itemId}" matched multiple Zotero items: ${unique.map(([, item]) => item.id).join(", ")}. Retry with the numeric Zotero item_id.`,
+    };
+  }
+
+  const aliases = targetKeys.map(identifierKeyString).join(", ");
+  return {
+    error: `No existing Zotero item matched "${itemId}" (${aliases}). Use import_paper first, then retry read_item_content with the returned numeric item_id.`,
+  };
+}
 
 /**
  * Execute get_item_metadata tool
@@ -30,19 +85,21 @@ export async function executeGetItemMetadata(
     const { item_id } = params;
     Zotero.debug(`[seerai] Tool: get_item_metadata id=${item_id}`);
 
-    const item = Zotero.Items.get(item_id);
-    if (!item) {
+    const resolved = await resolveReadableItem(item_id);
+    if (!resolved.item) {
       return {
         success: false,
-        error: `Item with ID ${item_id} not found`,
+        error: resolved.error || `Item with ID ${item_id} not found`,
       };
     }
+    const item = resolved.item;
+    const resolvedItemId = item.id;
 
     // Verify scope permission
     if (!Assistant.checkItemInScope(item, config)) {
       return {
         success: false,
-        error: `Permission Denied: Item ${item_id} is outside the current restricted scope.`,
+        error: `Permission Denied: Item ${resolvedItemId} is outside the current restricted scope.`,
       };
     }
 
@@ -139,26 +196,28 @@ export async function executeReadItemContent(
 
     Zotero.debug(`[seerai] Tool: read_item_content id=${item_id}`);
 
-    const item = Zotero.Items.get(item_id);
-    if (!item) {
+    const resolved = await resolveReadableItem(item_id);
+    if (!resolved.item) {
       return {
         success: false,
-        error: `Item with ID ${item_id} not found`,
+        error: resolved.error || `Item with ID ${item_id} not found`,
       };
     }
+    const item = resolved.item;
+    const resolvedItemId = item.id;
 
     // Verify scope permission
     if (!Assistant.checkItemInScope(item, config)) {
       return {
         success: false,
-        error: `Permission Denied: Item ${item_id} is outside the current restricted scope.`,
+        error: `Permission Denied: Item ${resolvedItemId} is outside the current restricted scope.`,
       };
     }
 
     // Attempt to read from pre-indexed vector store chunks first (faster, chunked)
     if (include_pdf) {
       const vectorStore = getVectorStore();
-      const entry = await vectorStore.loadEntryForBm25(item_id);
+      const entry = await vectorStore.loadEntryForBm25(resolvedItemId);
       if (entry && entry.chunks.length > 0) {
         const title =
           entry.chunks[0]?.metadata?.title ||
@@ -256,7 +315,7 @@ export async function executeReadItemContent(
 
       return {
         success: false,
-        error: `Item ${item_id} is not a regular item or note (it's a ${item.itemType})`,
+        error: `Item ${resolvedItemId} is not a regular item or note (it's a ${item.itemType})`,
       };
     }
 

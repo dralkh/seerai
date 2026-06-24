@@ -145,7 +145,9 @@ async function callLLMForJSON(
     }
     return JSON.parse(candidate.slice(start, end + 1));
   } catch (e) {
-    Zotero.debug(`[seerai] DocumentAnalyzer: LLM call error: ${e}`);
+    if (typeof Zotero !== "undefined") {
+      Zotero.debug(`[seerai] DocumentAnalyzer: LLM call error: ${e}`);
+    }
     throw new Error(`AI analysis failed: ${(e as Error).message || String(e)}`);
   }
 }
@@ -184,9 +186,11 @@ export async function generateValidatedJSON<T>(
       response = await callLLMForJSON(systemPrompt, prompt, options?.llm);
     } catch (e) {
       lastError = (e as Error)?.message || String(e);
-      Zotero.debug(
-        `[seerai] DocumentAnalyzer: generation error (attempt ${attempt + 1}/${maxRetries + 1}): ${lastError}`,
-      );
+      if (typeof Zotero !== "undefined") {
+        Zotero.debug(
+          `[seerai] DocumentAnalyzer: generation error (attempt ${attempt + 1}/${maxRetries + 1}): ${lastError}`,
+        );
+      }
       if (attempt === maxRetries) {
         throw new Error(
           `AI generation failed after ${maxRetries + 1} attempts — ${lastError}`,
@@ -202,9 +206,11 @@ export async function generateValidatedJSON<T>(
     const parsed = schema.safeParse(response);
     if (parsed.success) return parsed.data;
     lastError = formatZodIssues(parsed.error);
-    Zotero.debug(
-      `[seerai] DocumentAnalyzer: validation failed (attempt ${attempt + 1}/${maxRetries + 1}): ${lastError}`,
-    );
+    if (typeof Zotero !== "undefined") {
+      Zotero.debug(
+        `[seerai] DocumentAnalyzer: validation failed (attempt ${attempt + 1}/${maxRetries + 1}): ${lastError}`,
+      );
+    }
   }
   throw new Error(
     `AI response failed validation after ${maxRetries + 1} attempts — ${lastError}`,

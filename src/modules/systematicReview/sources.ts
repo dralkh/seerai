@@ -132,6 +132,7 @@ async function directRegularItemIds(collectionId: number): Promise<number[]> {
 export async function discoverZoteroCollectionTree(
   onWarning?: (message: string) => void,
 ): Promise<ZoteroLibraryTree[]> {
+  if (typeof Zotero === "undefined") return [];
   const libraries = Zotero.Libraries.getAll()
     .filter(
       (library) =>
@@ -152,7 +153,9 @@ export async function discoverZoteroCollectionTree(
       const message = `Could not load ${library.name}: ${
         error instanceof Error ? error.message : String(error)
       }`;
-      Zotero.debug(`[seerai] ${message}`);
+      if (typeof Zotero !== "undefined") {
+        Zotero.debug(`[seerai] ${message}`);
+      }
       onWarning?.(message);
     }
   }

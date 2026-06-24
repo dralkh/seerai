@@ -432,12 +432,12 @@ export function showChatSettings(
   });
 
   const ocrLabel = doc.createElement("span");
-  ocrLabel.innerText = "Auto-OCR Papers:";
+  ocrLabel.innerText = "Auto-OCR on Import:";
 
   // Toggle Switch for OCR
   const ocrToggleWrapper = doc.createElement("div");
-  const isOcrEnabled =
-    Zotero.Prefs.get("extensions.seerai.agentAutoOcr") || false;
+  const rawAutoOcr = Zotero.Prefs.get("extensions.seerai.agentAutoOcr");
+  const isOcrEnabled = typeof rawAutoOcr === "boolean" ? rawAutoOcr : true;
 
   Object.assign(ocrToggleWrapper.style, {
     position: "relative",
@@ -466,7 +466,8 @@ export function showChatSettings(
 
   ocrToggleWrapper.addEventListener("click", (e) => {
     e.stopPropagation();
-    const current = Zotero.Prefs.get("extensions.seerai.agentAutoOcr") || false;
+    const rawCurrent = Zotero.Prefs.get("extensions.seerai.agentAutoOcr");
+    const current = typeof rawCurrent === "boolean" ? rawCurrent : true;
     const newState = !current;
     Zotero.Prefs.set("extensions.seerai.agentAutoOcr", newState);
 

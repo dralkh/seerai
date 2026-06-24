@@ -14,7 +14,10 @@ import {
   EXCL_REASONS,
   LabelDefinition,
   EvidenceDomain,
+  GapAnalysisRun,
   GapDetail,
+  GapMapCell,
+  ReviewJob,
   ScreeningDecision,
   ExtractionRow,
   ExtractionTemplate,
@@ -28,6 +31,11 @@ import {
 } from "./types";
 import { getSRStore } from "./store";
 import { getSRService } from "./service";
+import {
+  buildGapCsv,
+  buildGapMarkdown,
+  saveReviewExport,
+} from "./reviewExport";
 import {
   fixedEffectMetaAnalysis,
   getPrismaSnapshot,
@@ -94,10 +102,14 @@ import {
 } from "./sources";
 import {
   collectPaperExtractionLog,
+  getActiveExtractionTemplateOutcomes,
+  getActivePipelineJobs,
   getIncludedPapers,
+  getLatestPipelineTask,
   getPapersNeedingExtraction,
   getPapersWithFailedExtractions,
   hasFailedExtractionMetrics,
+  isExtractionPipelineJob,
 } from "./extractionHealth";
 import {
   findSameTitleNoteAbstract,
@@ -1751,19 +1763,7 @@ function buildNavButton(
 
   btn.addEventListener("click", () => {
     if (!currentState || !doc) return;
-    currentState.activeSubTab = panel;
-    saveSRState();
-    renderPanel(doc, panel);
-    if (sideNav) {
-      const sidebarWidth = mainWrapper?.getBoundingClientRect().width || 900;
-      const sidebarSizes = computeResponsiveSizes(sidebarWidth);
-      if (sidebarSizes.autoCollapseSidebar !== sidebarAutoCollapsed) {
-        sidebarAutoCollapsed = sidebarSizes.autoCollapseSidebar;
-      }
-      const newNav = buildSidebar(doc, sidebarSizes);
-      sideNav.replaceWith(newNav);
-      sideNav = newNav;
-    }
+    switchPanel(doc, panel);
   });
 
   // Icon
@@ -1854,6 +1854,34 @@ function renderPanel(doc: Document, panel: SRSubTab): void {
     contentArea.removeChild(contentArea.firstChild);
   }
   contentArea.appendChild(panelEl);
+
+  // Keep the live job strip on the pipeline panels moving while jobs run.
+  if (panel === "evidence" || panel === "gaps") ensureJobPolling(doc);
+}
+
+/**
+ * Single entry point for an intentional sub-tab change. Keeps the persisted
+ * `activeSubTab`, the rendered panel, and the sidebar highlight in sync — the
+ * lack of which let the gap Refresh handler bounce users to Evidence without
+ * the nav reflecting it. Use this anywhere code wants to navigate the user to a
+ * different sub-tab; never assign `currentPanel`/`reRenderPanel` directly for a
+ * deliberate navigation.
+ */
+function switchPanel(doc: Document, panel: SRSubTab): void {
+  if (!currentState) return;
+  currentState.activeSubTab = panel;
+  saveSRState();
+  renderPanel(doc, panel);
+  if (sideNav) {
+    const sidebarWidth = mainWrapper?.getBoundingClientRect().width || 900;
+    const sidebarSizes = computeResponsiveSizes(sidebarWidth);
+    if (sidebarSizes.autoCollapseSidebar !== sidebarAutoCollapsed) {
+      sidebarAutoCollapsed = sidebarSizes.autoCollapseSidebar;
+    }
+    const newNav = buildSidebar(doc, sidebarSizes);
+    sideNav.replaceWith(newNav);
+    sideNav = newNav;
+  }
 }
 
 // ============================================================
@@ -3272,7 +3300,7 @@ function buildDecisionFooter(
     .reverse()
     .find(
       (job) =>
-        job.kind === "extraction" &&
+        isExtractionPipelineJob(job) &&
         ["queued", "running", "paused"].includes(job.status) &&
         job.paperIds.includes(paper.id),
     );
@@ -4455,6 +4483,33 @@ function buildEvidencePanel(doc: Document): HTMLElement {
     reRenderPanel(doc, "evidence");
   });
   tabRow.appendChild(verifyAllBtn);
+  const addSynCtxBtn = doc.createElement("button");
+  addSynCtxBtn.textContent = "Add to Chat";
+  addSynCtxBtn.title = "Pin this evidence synthesis run to the chat context";
+  addSynCtxBtn.style.cssText =
+    "padding:2px 8px;font-size:10px;border:1px solid var(--border-primary);border-radius:4px;background:transparent;color:var(--text-secondary);cursor:pointer;font-family:inherit;margin-left:4px;";
+  addSynCtxBtn.addEventListener("click", () => {
+    if (!currentState) return;
+    const run = getSRService().getSynthesis(currentState);
+    if (!run) {
+      toast(doc, "Generate a draft synthesis before adding it to chat");
+      return;
+    }
+    const name = getActiveSpace()?.name || "Review";
+    ChatContextManager.getInstance().addItem(
+      run.id,
+      "review",
+      `${name} — Evidence synthesis`,
+      "command",
+      {
+        reviewKey: currentState.activeSpaceId,
+        reviewContextKind: "evidence_synthesis",
+        synthesisRunId: run.id,
+      },
+    );
+    toast(doc, "Added evidence synthesis to chat context");
+  });
+  tabRow.appendChild(addSynCtxBtn);
   const setupBtn = doc.createElement("button");
   setupBtn.textContent = "Extraction Template";
   setupBtn.style.cssText =
@@ -4741,8 +4796,7 @@ function buildEvidencePanel(doc: Document): HTMLElement {
         );
         if (unextracted) {
           scrActive = unextracted.id;
-          currentPanel = "screening";
-          reRenderPanel(doc, "screening");
+          switchPanel(doc, "screening");
           setTimeout(() => {
             openExtractionModal(doc, unextracted.id);
           }, 100);
@@ -4828,12 +4882,7 @@ function renderExtractionReviewQueue(
         row.verificationStatus === "verified" &&
         validateExtractionRow(row).valid,
     );
-    const task = currentState!.reviewJobs
-      .filter((job) => job.kind === "extraction")
-      .slice()
-      .reverse()
-      .flatMap((job) => job.papers)
-      .find((candidate) => candidate.paperId === paper.id);
+    const task = getLatestPipelineTask(currentState!, paper.id);
     const row = doc.createElement("tr");
     const title = doc.createElement("td");
     title.textContent = trunc(
@@ -4897,19 +4946,54 @@ function renderExtractionReviewQueue(
   body.appendChild(section);
 }
 
-function renderReviewJobs(doc: Document, body: HTMLElement): void {
-  if (!currentState || !currentState.reviewJobs.length) return;
+function reviewJobKindLabel(kind: ReviewJob["kind"]): string {
+  switch (kind) {
+    case "analysis":
+      return "Study analysis";
+    case "evidence_analysis":
+      return "Evidence synthesis";
+    case "gap_analysis":
+      return "Gap analysis";
+    default:
+      return "Data extraction";
+  }
+}
+
+// Per-paper stages that mean a worker is actively processing that paper. Covers
+// the synthesis/gap stages too so the strip shows live progress for the whole
+// extract → synthesis → gaps pipeline, not just raw extraction.
+const REVIEW_JOB_IN_FLIGHT_STAGES = [
+  "reading_source",
+  "extracting",
+  "validating",
+  "saving",
+  "synthesizing",
+  "analyzing_gaps",
+];
+
+/**
+ * Persistent job-status strip shown on both the Evidence and Gap panels. Reads
+ * live from currentState (the background job mutates it in place), so the poll
+ * loop can rebuild this in place to reflect progress without a full re-render.
+ * `panel` is the re-render target for the pause/cancel/resume/retry actions so
+ * the user stays on the tab they triggered the action from.
+ */
+function buildReviewJobStrip(
+  doc: Document,
+  panel: SRSubTab,
+): HTMLElement | null {
+  if (!currentState || !currentState.reviewJobs.length) return null;
   const jobs = [...currentState.reviewJobs].reverse().slice(0, 5);
   const section = doc.createElement("div");
+  section.className = "sr-job-strip";
   section.style.cssText =
     "margin-bottom:10px;border:1px solid var(--border-secondary);border-radius:6px;overflow:hidden;";
   jobs.forEach((job) => {
     const row = doc.createElement("div");
     row.style.cssText =
-      "display:flex;align-items:center;gap:7px;padding:6px 8px;border-bottom:1px solid var(--border-secondary);font-size:9px;";
+      "display:flex;align-items:center;gap:7px;padding:6px 8px;border-bottom:1px solid var(--border-secondary);font-size:9px;flex-wrap:wrap;";
     const label = doc.createElement("strong");
-    label.textContent =
-      job.kind === "analysis" ? "Study analysis" : "Data extraction";
+    label.textContent = reviewJobKindLabel(job.kind);
     row.appendChild(label);
     const completed = job.papers.filter(
       (paper) => paper.stage === "completed",
@@ -4933,13 +5017,14 @@ function renderReviewJobs(doc: Document, body: HTMLElement): void {
       progress.style.color = "#dc2626";
     }
     const currentTask = job.papers.find((paper) =>
-      ["reading_source", "extracting", "validating", "saving"].includes(
-        paper.stage,
-      ),
+      REVIEW_JOB_IN_FLIGHT_STAGES.includes(paper.stage),
     );
     if (currentTask) {
       const stage = doc.createElement("span");
-      stage.textContent = formatJobStage(currentTask.stage);
+      const title = getItemMeta(currentTask.paperId).title;
+      stage.textContent = title
+        ? `${formatJobStage(currentTask.stage)}: ${trunc(title, 40)}`
+        : formatJobStage(currentTask.stage);
       stage.style.cssText = "color:#7c3aed;";
       row.appendChild(stage);
     }
@@ -4953,7 +5038,7 @@ function renderReviewJobs(doc: Document, body: HTMLElement): void {
         if (!currentState) return;
         getSRService().pauseReviewJob(currentState, job.id);
         await getSRService().save(currentState);
-        reRenderPanel(doc, "evidence");
+        reRenderPanel(doc, panel);
       });
       row.appendChild(pause);
       const cancel = doc.createElement("button");
@@ -4962,7 +5047,7 @@ function renderReviewJobs(doc: Document, body: HTMLElement): void {
         if (!currentState) return;
         getSRService().cancelReviewJob(currentState, job.id);
         await getSRService().save(currentState);
-        reRenderPanel(doc, "evidence");
+        reRenderPanel(doc, panel);
       });
       row.appendChild(cancel);
     } else if (
@@ -4973,7 +5058,7 @@ function renderReviewJobs(doc: Document, body: HTMLElement): void {
       retry.addEventListener("click", async () => {
         if (!currentState) return;
         await getSRService().retryReviewJob(currentState, job.id);
-        reRenderPanel(doc, "evidence");
+        reRenderPanel(doc, panel);
       });
       row.appendChild(retry);
     }
@@ -4983,7 +5068,59 @@ function renderReviewJobs(doc: Document, body: HTMLElement): void {
     });
     section.appendChild(row);
   });
-  body.appendChild(section);
+  return section;
+}
+
+function renderReviewJobs(doc: Document, body: HTMLElement): void {
+  const strip = buildReviewJobStrip(doc, "evidence");
+  if (strip) body.appendChild(strip);
+}
+
+// ----------------------------------------------------------------------------
+// Live job polling
+//
+// Background pipeline jobs mutate `currentState` in place while they run, but
+// the Evidence/Gap panels are otherwise static after render — so progress would
+// appear frozen (the "0/15 not moving" report) and switching tabs would hide
+// the only progress UI. This single shared timer rebuilds the job strip in
+// place (cheap, preserves the rest of the panel's scroll/focus) while any
+// pipeline job is active, then does one final full re-render on completion so
+// readiness counts, queue rows, and gap availability reflect the result.
+// ----------------------------------------------------------------------------
+let jobPollTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopJobPolling(): void {
+  if (jobPollTimer !== null) {
+    clearInterval(jobPollTimer);
+    jobPollTimer = null;
+  }
+}
+
+function ensureJobPolling(doc: Document): void {
+  if (jobPollTimer !== null) return;
+  if (!currentState || !getActivePipelineJobs(currentState).length) return;
+  jobPollTimer = setInterval(() => {
+    if (!currentState || !contentArea || !contentArea.isConnected) {
+      stopJobPolling();
+      return;
+    }
+    const stillActive = getActivePipelineJobs(currentState).length > 0;
+    const onPipelinePanel =
+      currentPanel === "evidence" || currentPanel === "gaps";
+    if (!stillActive) {
+      stopJobPolling();
+      if (onPipelinePanel) reRenderPanel(doc, currentPanel);
+      return;
+    }
+    if (!onPipelinePanel) return;
+    const existing = contentArea.querySelector(
+      ".sr-job-strip",
+    ) as HTMLElement | null;
+    if (!existing) return;
+    const fresh = buildReviewJobStrip(doc, currentPanel);
+    if (fresh) existing.replaceWith(fresh);
+    else existing.remove();
+  }, 750);
 }
 
 function buildEvOverview(
@@ -5309,8 +5446,7 @@ function renderEvPaperChip(
     // Navigate to screening and select this paper
     evSelectedLabel = null;
     scrActive = p.id;
-    currentPanel = "screening";
-    reRenderPanel(doc, "screening");
+    switchPanel(doc, "screening");
   });
 
   const titleEl = doc.createElement("div");
@@ -5320,8 +5456,7 @@ function renderEvPaperChip(
   wirePaperTitleOpenBehavior(titleEl, p.id, () => {
     evSelectedLabel = null;
     scrActive = p.id;
-    currentPanel = "screening";
-    reRenderPanel(doc, "screening");
+    switchPanel(doc, "screening");
   });
   item.appendChild(titleEl);
 
@@ -5490,8 +5625,7 @@ function buildEvAISynthesis(
         studItem.textContent = author + " (" + year + ") " + trunc(title, 50);
         wirePaperTitleOpenBehavior(studItem, p.id, () => {
           scrActive = p.id;
-          currentPanel = "screening";
-          reRenderPanel(doc, "screening");
+          switchPanel(doc, "screening");
         });
         detailDiv.appendChild(studItem);
       });
@@ -6050,11 +6184,132 @@ function renderForestPlot(domainOutcomes: ForestPlotEntry[]): string {
 // ============================================================
 // GAP PANEL (PICO x Label matrix + AHRQ gaps)
 // ============================================================
+
+// Below this content width the gap matrix cannot show all outcome columns
+// without truncation, so we fall back to a stacked card/list view instead.
+const GAP_MAP_NARROW_WIDTH = 560;
+
+function gapMapAvailableWidth(): number {
+  // Prefer whichever attached element actually reports a non-zero laid-out
+  // width. During the initial render contentArea can still measure 0, which
+  // previously made every gap map think it was "wide".
+  const widths = [
+    contentArea?.getBoundingClientRect().width || 0,
+    mainWrapper?.getBoundingClientRect().width || 0,
+  ].filter((width) => width > 0);
+  return widths.length ? Math.min(...widths) : 900;
+}
+
+function gapMapIsNarrow(): boolean {
+  return gapMapAvailableWidth() < GAP_MAP_NARROW_WIDTH;
+}
+
+// Render a matrix table that is hard-bounded to its container width.
+//
+// IMPORTANT: never use intrinsic widths (max-content / min-content) here. In the
+// plugin's narrow portrait frame an intrinsic-width table propagates its full
+// width up the flex chain and blows the whole pane out to many times its size
+// (which also stretched the shared chat pane). table-layout:fixed + width:100%
+// makes the table exactly the panel width regardless of content, so long cell
+// text wraps inside its column instead of forcing the pane wider.
+function wrapGapMatrixScroll(
+  doc: Document,
+  table: HTMLTableElement,
+): HTMLElement {
+  table.style.tableLayout = "fixed";
+  table.style.width = "100%";
+  table.style.minWidth = "0";
+  table.style.marginBottom = "0";
+  Array.from(table.rows).forEach((tr) => {
+    Array.from((tr as HTMLTableRowElement).cells).forEach((cell) => {
+      const el = cell as HTMLElement;
+      el.style.overflowWrap = "anywhere";
+      el.style.wordBreak = "break-word";
+    });
+  });
+  const wrap = doc.createElement("div");
+  wrap.style.cssText =
+    "display:block;width:100%;max-width:100%;min-width:0;overflow:hidden;margin-bottom:16px;border:1px solid var(--border-secondary);border-radius:6px;";
+  wrap.appendChild(table);
+  return wrap;
+}
+
+// Narrow-width fallback for the synthesis-derived gap map: render the cells as a
+// stacked list grouped by row dimension so long outcome/dimension labels wrap
+// instead of being clipped at sidebar width.
+function buildGapCellCards(
+  doc: Document,
+  run: GapAnalysisRun,
+  statusColors: Record<string, string>,
+): HTMLElement {
+  const list = doc.createElement("div");
+  list.style.cssText =
+    "display:flex;flex-direction:column;min-width:0;gap:8px;margin-bottom:16px;";
+  const byRow = new Map<string, GapMapCell[]>();
+  run.cells.forEach((cell) => {
+    const key = `${cell.rowKey}:${cell.rowValue}`;
+    const arr = byRow.get(key) || [];
+    arr.push(cell);
+    byRow.set(key, arr);
+  });
+  byRow.forEach((cells) => {
+    const group = doc.createElement("div");
+    group.style.cssText =
+      "border:1px solid var(--border-secondary);border-radius:6px;padding:8px;";
+    const rowLabel = doc.createElement("div");
+    rowLabel.textContent = cells[0].rowValue;
+    rowLabel.style.cssText =
+      "font-weight:600;font-size:10px;margin-bottom:6px;overflow-wrap:anywhere;";
+    group.appendChild(rowLabel);
+    cells.forEach((cell) => {
+      const row = doc.createElement("button");
+      row.style.cssText =
+        "display:flex;width:100%;justify-content:space-between;gap:8px;align-items:center;padding:5px 6px;margin-bottom:4px;border:1px solid " +
+        (statusColors[cell.status] || "var(--border-secondary)") +
+        ";border-radius:5px;background:transparent;cursor:pointer;text-align:left;font-family:inherit;";
+      const name = doc.createElement("span");
+      name.textContent = cell.columnValue;
+      name.style.cssText =
+        "font-size:9px;color:var(--text-secondary);overflow-wrap:anywhere;flex:1;";
+      const status = doc.createElement("span");
+      status.textContent = `${cell.studyCount} · ${formatJobStage(cell.status)}`;
+      status.style.cssText =
+        "font-size:8px;font-weight:600;white-space:nowrap;color:" +
+        (statusColors[cell.status] || "var(--text-secondary)") +
+        ";";
+      row.appendChild(name);
+      row.appendChild(status);
+      row.title = cell.rationale;
+      row.addEventListener("click", () => {
+        const papers = cell.paperIds
+          .map((paperId) =>
+            currentState!.papers.find((paper) => paper.id === paperId),
+          )
+          .filter(Boolean) as SystematicReviewPaper[];
+        showGapCellPapers(
+          doc,
+          cell.rowValue,
+          {
+            k: cell.columnKey,
+            name: cell.columnValue,
+            color: statusColors[cell.status] || "#64748b",
+            bg: "var(--background-secondary)",
+          },
+          papers,
+        );
+      });
+      group.appendChild(row);
+    });
+    list.appendChild(group);
+  });
+  return list;
+}
+
 function buildGapPanel(doc: Document): HTMLElement {
   if (!currentState) return doc.createElement("div");
   const panel = doc.createElement("div");
   panel.style.cssText =
-    "display:flex;flex-direction:column;flex:1;min-height:0;overflow:auto;padding:12px;";
+    "display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;overflow-y:auto;overflow-x:hidden;padding:12px;";
   const included = currentState.papers.filter(
     (p: SystematicReviewPaper) =>
       p.status === "included" || p.status === "maybe",
@@ -6070,7 +6325,7 @@ function buildGapPanel(doc: Document): HTMLElement {
 
   const gapHdr = doc.createElement("div");
   gapHdr.style.cssText =
-    "display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-shrink:0;";
+    "display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:12px;flex-shrink:0;min-width:0;";
   const gapTitle = doc.createElement("div");
   gapTitle.textContent = "Evidence Gap Map";
   gapTitle.style.cssText =
@@ -6127,16 +6382,24 @@ function buildGapPanel(doc: Document): HTMLElement {
     }
     const nextReadiness = getSRService().getSynthesisReadiness(currentState);
     if (nextReadiness.incompletePoolableRows || nextReadiness.quarantined) {
+      // Stay on the Gap tab — do NOT bounce to Evidence. Open the extraction
+      // workspace (an overlay, not a tab switch) so the reviewer can resolve
+      // the compatibility issues in place.
       toast(
         doc,
-        "Review extraction compatibility issues before regenerating gaps",
+        "Review extraction compatibility issues, then refresh the gap analysis again",
       );
-      currentPanel = "evidence";
-      reRenderPanel(doc, "evidence");
+      openExtractionWorkspace(doc);
       return;
     }
     const synthesis = getSRService().runSynthesis(currentState, true);
-    if (!synthesis.domains.length) {
+    const requiredOutcomes = getActiveExtractionTemplateOutcomes(
+      currentState,
+    ).filter((outcome) => outcome.required);
+    // buildGapAnalysisRun derives no-evidence gaps from required outcomes even
+    // when synthesis produced no domains, so only block when there is genuinely
+    // nothing to map: no domains AND no required outcomes to report against.
+    if (!synthesis.domains.length && !requiredOutcomes.length) {
       toast(
         doc,
         "No synthesis domains could be created from verified evidence",
@@ -6188,50 +6451,135 @@ function buildGapPanel(doc: Document): HTMLElement {
     }
   });
   gapHdr.appendChild(analyzeAllBtn);
+
+  const addGapCtxBtn = doc.createElement("button");
+  addGapCtxBtn.textContent = "Add to Chat";
+  addGapCtxBtn.title = "Pin this gap analysis run to the chat context";
+  addGapCtxBtn.style.cssText =
+    "padding:2px 8px;font-size:10px;border:1px solid var(--border-primary);border-radius:4px;background:transparent;color:var(--text-secondary);cursor:pointer;font-family:inherit;";
+  addGapCtxBtn.addEventListener("click", () => {
+    if (!currentState) return;
+    const run = getSRService().getGapAnalysis(currentState);
+    if (!run) {
+      toast(doc, "Run gap analysis before adding it to chat");
+      return;
+    }
+    const name = getActiveSpace()?.name || "Review";
+    ChatContextManager.getInstance().addItem(
+      run.id,
+      "review",
+      `${name} — Gap analysis`,
+      "command",
+      {
+        reviewKey: currentState.activeSpaceId,
+        reviewContextKind: "gap_analysis",
+        gapAnalysisRunId: run.id,
+        synthesisRunId: run.synthesisRunId,
+      },
+    );
+    toast(doc, "Added gap analysis to chat context");
+  });
+  gapHdr.appendChild(addGapCtxBtn);
+
+  // Resolve the gap run to export, with the same stale/empty guards the old
+  // single Export button enforced.
+  const exportableGapRun = (): GapAnalysisRun | null => {
+    if (!currentState) return null;
+    const run = getSRService().getGapAnalysis(currentState);
+    if (!run) {
+      toast(doc, "No gap analysis to export");
+      return null;
+    }
+    if (run.status === "stale") {
+      toast(doc, "Refresh the stale gap analysis before exporting");
+      return null;
+    }
+    if (!run.gaps.length && !run.cells.length) {
+      toast(doc, "No gaps to export");
+      return null;
+    }
+    return run;
+  };
+  const exportContent = (run: GapAnalysisRun, kind: "md" | "csv"): string =>
+    kind === "md"
+      ? buildGapMarkdown(run, getActiveSpace()?.name || "Review")
+      : buildGapCsv(run);
+  const copyGapExport = (kind: "md" | "csv"): void => {
+    const run = exportableGapRun();
+    if (!run) return;
+    try {
+      new ztoolkit.Clipboard()
+        .addText(exportContent(run, kind), "text/unicode")
+        .copy();
+      toast(doc, `Gap report copied as ${kind.toUpperCase()}`);
+    } catch {
+      toast(doc, "Failed to copy to clipboard");
+    }
+  };
+  const saveGapExport = async (kind: "md" | "csv"): Promise<void> => {
+    const run = exportableGapRun();
+    if (!run) return;
+    try {
+      const path = await saveReviewExport(
+        `${getActiveSpace()?.name || "review"}_gaps`,
+        kind,
+        exportContent(run, kind),
+      );
+      toast(doc, `Saved to ${path}`);
+    } catch (error) {
+      toast(
+        doc,
+        "Save failed: " +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+  };
+
+  const exportWrap = doc.createElement("div");
+  exportWrap.style.cssText = "position:relative;display:inline-block;";
   const exportBtn = doc.createElement("button");
-  exportBtn.textContent = "Export";
+  exportBtn.textContent = "Export ▾";
   exportBtn.style.cssText =
     "padding:2px 8px;font-size:10px;border:1px solid var(--border-primary);border-radius:4px;background:transparent;color:var(--text-secondary);cursor:pointer;font-family:inherit;";
-  exportBtn.addEventListener("click", () => {
-    if (getSRService().getGapAnalysis(currentState!)?.status === "stale") {
-      toast(doc, "Refresh the stale gap analysis before exporting");
-      return;
-    }
-    const gaps2 = getPersistedGaps();
-    if (gaps2.length === 0) {
-      toast(doc, "No gaps to export");
-      return;
-    }
-    const header =
-      "id,title,severity,reasonCode,ahrqLabel,description,implication,tags";
-    const rows = gaps2.map(
-      (g: any) =>
-        `"${g.id}","${g.title}","${g.severity}","${g.reasonCode}","${g.ahrqLabel || ""}","${(g.description || "").replace(/"/g, '""')}","${(g.implication || "").replace(/"/g, '""')}","${(g.picos || []).join(";")}"`,
+  const exportMenu = doc.createElement("div");
+  exportMenu.style.cssText =
+    "position:absolute;right:0;top:100%;margin-top:2px;min-width:148px;background:var(--background-primary);border:1px solid var(--border-primary);border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,0.18);z-index:50;display:none;overflow:hidden;";
+  const exportActions: Array<[string, () => void | Promise<void>]> = [
+    ["Copy Markdown", () => copyGapExport("md")],
+    ["Copy CSV", () => copyGapExport("csv")],
+    ["Save Markdown", () => saveGapExport("md")],
+    ["Save CSV", () => saveGapExport("csv")],
+  ];
+  exportActions.forEach(([label, action]) => {
+    const item = doc.createElement("button");
+    item.textContent = label;
+    item.style.cssText =
+      "display:block;width:100%;text-align:left;padding:6px 10px;border:none;background:transparent;color:var(--text-primary);cursor:pointer;font-size:10px;font-family:inherit;";
+    item.addEventListener(
+      "mouseenter",
+      () => (item.style.background = "var(--background-secondary)"),
     );
-    const csv = [header, ...rows].join("\n");
-    try {
-      const fp = Cc["@mozilla.org/filepicker;1"].createInstance(
-        Ci.nsIFilePicker,
-      );
-      fp.init(
-        (doc.defaultView || (doc as any).ownerGlobal) as any,
-        "Export Gap Report",
-        Ci.nsIFilePicker.modeSave,
-      );
-      fp.appendFilter("CSV Files", "*.csv");
-      fp.defaultString = "gap_report.csv";
-      fp.open((rv: number) => {
-        if (rv !== Ci.nsIFilePicker.returnCancel && fp.file) {
-          IOUtils.writeUTF8(fp.file.path, csv);
-          toast(doc, "Gap report exported to " + fp.file.leafName);
-        }
-      });
-    } catch (e) {
-      toast(doc, "Export failed: " + String(e));
-    }
+    item.addEventListener(
+      "mouseleave",
+      () => (item.style.background = "transparent"),
+    );
+    item.addEventListener("click", async () => {
+      exportMenu.style.display = "none";
+      await action();
+    });
+    exportMenu.appendChild(item);
   });
-  gapHdr.appendChild(exportBtn);
+  exportBtn.addEventListener("click", () => {
+    exportMenu.style.display =
+      exportMenu.style.display === "none" ? "block" : "none";
+  });
+  exportWrap.appendChild(exportBtn);
+  exportWrap.appendChild(exportMenu);
+  gapHdr.appendChild(exportWrap);
   panel.appendChild(gapHdr);
+
+  const jobStrip = buildReviewJobStrip(doc, "gaps");
+  if (jobStrip) panel.appendChild(jobStrip);
 
   const protocolRevision = getActiveProtocolRevision(currentState.protocol);
   const protocolDimensions = protocolRevision.dimensions;
@@ -6265,8 +6613,7 @@ function buildGapPanel(doc: Document): HTMLElement {
       "display:block;margin:10px auto 0;padding:4px 10px;border:1px solid #7c3aed;border-radius:4px;background:#7c3aed;color:#fff;cursor:pointer;";
     action.addEventListener("click", () => {
       if (readiness.verified === 0) {
-        currentPanel = "evidence";
-        reRenderPanel(doc, "evidence");
+        switchPanel(doc, "evidence");
       } else {
         refreshBtn.click();
       }
@@ -6277,10 +6624,19 @@ function buildGapPanel(doc: Document): HTMLElement {
   }
   if (activeGapRun.status === "stale") {
     const stale = doc.createElement("div");
-    stale.textContent =
-      "This gap map is stale because review evidence changed. Refresh before accepting or exporting gaps.";
     stale.style.cssText =
-      "padding:7px 9px;margin-bottom:9px;border-radius:5px;background:#fef3c7;color:#92400e;font-size:9px;";
+      "display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:7px 9px;margin-bottom:9px;border-radius:5px;background:#fef3c7;color:#92400e;font-size:9px;";
+    const staleText = doc.createElement("span");
+    staleText.textContent =
+      "This gap map is stale because review evidence changed. Refresh before accepting or exporting gaps.";
+    staleText.style.cssText = "flex:1;min-width:140px;";
+    stale.appendChild(staleText);
+    const staleRefresh = doc.createElement("button");
+    staleRefresh.textContent = "Refresh now";
+    staleRefresh.style.cssText =
+      "flex-shrink:0;padding:2px 10px;font-size:10px;font-weight:600;border:1px solid #92400e;border-radius:4px;background:#92400e;color:#fff;cursor:pointer;font-family:inherit;";
+    staleRefresh.addEventListener("click", () => refreshBtn.click());
+    stale.appendChild(staleRefresh);
     panel.appendChild(stale);
   }
   if (activeGapRun?.cells.length) {
@@ -6381,7 +6737,11 @@ function buildGapPanel(doc: Document): HTMLElement {
       });
       runTable.appendChild(tr);
     });
-    panel.appendChild(runTable);
+    if (gapMapIsNarrow()) {
+      panel.appendChild(buildGapCellCards(doc, activeGapRun, statusColors));
+    } else {
+      panel.appendChild(wrapGapMatrixScroll(doc, runTable));
+    }
   } else {
     const colLabels = currentState.labelDefs;
     const matrix: Record<
@@ -6548,7 +6908,7 @@ function buildGapPanel(doc: Document): HTMLElement {
       mtbody.appendChild(tr);
     });
     mtbl.appendChild(mtbody);
-    panel.appendChild(mtbl);
+    panel.appendChild(wrapGapMatrixScroll(doc, mtbl));
   }
   const gaps = getPersistedGaps();
 
@@ -6575,10 +6935,10 @@ function buildGapPanel(doc: Document): HTMLElement {
       card.style.cssText =
         "padding:10px;margin-bottom:8px;border-radius:8px;background:var(--background-primary);border-left:3px solid " +
         (g.severity === "High" ? "#dc2626" : "#d97706") +
-        ";";
+        ";overflow-wrap:anywhere;";
       const cardHdr = doc.createElement("div");
       cardHdr.style.cssText =
-        "display:flex;align-items:center;gap:6px;margin-bottom:4px;";
+        "display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:4px;";
       const sev = doc.createElement("span");
       sev.textContent = g.severity;
       sev.style.cssText =
@@ -6844,10 +7204,9 @@ function showGapCellPapers(
       "padding:6px 8px;margin:3px 0;background:var(--background-secondary);border-radius:6px;cursor:pointer;";
     item.addEventListener("click", () => {
       scrActive = p.id;
-      currentPanel = "screening";
       const p2 = overlay.parentElement;
       if (p2) p2.removeChild(overlay);
-      reRenderPanel(doc, "screening");
+      switchPanel(doc, "screening");
     });
     const t = doc.createElement("div");
     t.textContent = title;
@@ -6855,10 +7214,9 @@ function showGapCellPapers(
       "font-size:10px;font-weight:500;color:var(--text-primary);";
     wirePaperTitleOpenBehavior(t, p.id, () => {
       scrActive = p.id;
-      currentPanel = "screening";
       const p2 = overlay.parentElement;
       if (p2) p2.removeChild(overlay);
-      reRenderPanel(doc, "screening");
+      switchPanel(doc, "screening");
     });
     item.appendChild(t);
     const s = doc.createElement("div");

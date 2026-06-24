@@ -49,6 +49,14 @@ export interface ContextItem {
     key?: string;
     collectionId?: number;
     tableId?: string;
+    /** Shared review key (the review project / activeSpaceId) for scoped review
+     * context items. Both synthesis- and gap-scoped items use the same key. */
+    reviewKey?: string;
+    /** Distinguishes a scoped review item's pinned run. */
+    reviewContextKind?: "evidence_synthesis" | "gap_analysis";
+    /** Exact run ids a scoped review item resolves to. */
+    synthesisRunId?: string;
+    gapAnalysisRunId?: string;
     [key: string]: any;
   };
 }

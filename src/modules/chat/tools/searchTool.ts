@@ -21,8 +21,202 @@ import {
 import { semanticScholarService } from "../../semanticScholar";
 import { Assistant } from "../../assistant";
 import { getChatStateManager } from "../stateManager";
-import { searchScholarlyPapers, selectedProviders } from "../../search";
+import {
+  ScholarlyPaper,
+  ScholarlyProviderId,
+  searchScholarlyPapers,
+  selectedProviders,
+} from "../../search";
 import { buildExternalSearchQuery } from "./searchExternalAdapter";
+import {
+  identifierKeyString,
+  identifiersOverlap,
+  keysForScholarlyPaper,
+  keysForZoteroItemLike,
+  parsePaperIdentifier,
+} from "./paperIdentity";
+
+const recentExternalPaperCache = new Map<string, ScholarlyPaper>();
+const IMPORT_PAPER_CONCURRENCY = 2;
+
+function rememberExternalPaper(paper: ScholarlyPaper): void {
+  recentExternalPaperCache.set(paper.paperId, paper);
+  for (const key of keysForScholarlyPaper(paper)) {
+    recentExternalPaperCache.set(identifierKeyString(key), paper);
+  }
+}
+
+function cachedExternalPaper(
+  paperId: string,
+  provider?: ScholarlyProviderId,
+): ScholarlyPaper | undefined {
+  const parsed = parsePaperIdentifier(paperId, provider);
+  return (
+    recentExternalPaperCache.get(paperId) ||
+    parsed.keys
+      .map((key) => recentExternalPaperCache.get(identifierKeyString(key)))
+      .find(Boolean)
+  );
+}
+
+function providersForIdentifier(
+  paperId: string,
+  provider?: ScholarlyProviderId,
+): ScholarlyProviderId[] {
+  const parsed = parsePaperIdentifier(paperId, provider);
+  if (parsed.provider) return [parsed.provider];
+  const kinds = new Set(parsed.keys.map((key) => key.kind));
+  if (kinds.has("arxiv")) return ["arxiv"];
+  if (kinds.has("pmid") || kinds.has("pmcid")) {
+    return ["pubmed", "europe-pmc"];
+  }
+  if (kinds.has("doi")) {
+    return [
+      "europe-pmc",
+      "arxiv",
+      "pubmed",
+      "biorxiv",
+      "medrxiv",
+      "core",
+      "base",
+      "zenodo",
+      "hal",
+      "semantic-scholar",
+    ];
+  }
+  return [
+    "arxiv",
+    "pubmed",
+    "europe-pmc",
+    "biorxiv",
+    "medrxiv",
+    "iacr",
+    "core",
+    "base",
+    "zenodo",
+    "hal",
+    "semantic-scholar",
+  ];
+}
+
+async function findExistingImportedItem(
+  paper: ScholarlyPaper,
+): Promise<Zotero.Item | null> {
+  const paperKeys = keysForScholarlyPaper(paper);
+  for (const lib of Zotero.Libraries.getAll()) {
+    try {
+      const items = await Zotero.Items.getAll(lib.libraryID);
+      const Items = Zotero.Items as any;
+      if (items.length && typeof Items.loadDataTypes === "function") {
+        await Items.loadDataTypes(items);
+      }
+      for (const item of items) {
+        if (!item.isRegularItem()) continue;
+        if (identifiersOverlap(paperKeys, keysForZoteroItemLike(item))) {
+          return item;
+        }
+      }
+    } catch (e) {
+      Zotero.debug(`[seerai] import_paper duplicate scan failed: ${e}`);
+    }
+  }
+  return null;
+}
+
+async function addExistingItemToCollection(
+  item: Zotero.Item,
+  collectionId: number | undefined,
+): Promise<void> {
+  if (!collectionId || item.getCollections().includes(collectionId)) return;
+  item.addToCollection(collectionId);
+  await item.saveTx();
+}
+
+function shouldRunImportOcr(
+  params: Pick<ImportPaperParams, "trigger_ocr">,
+  config: AgentConfig,
+): boolean {
+  if (!config.autoOcr) return false;
+  return params.trigger_ocr !== false;
+}
+
+function importStatuses(
+  pdfAttached: boolean,
+  waitForPdf: boolean,
+  config: AgentConfig,
+  params: Pick<ImportPaperParams, "trigger_ocr">,
+): {
+  pdf_status: ImportPaperResult["pdf_status"];
+  ocr_status: ImportPaperResult["ocr_status"];
+} {
+  const ocrAllowed = shouldRunImportOcr(params, config);
+  return {
+    pdf_status: pdfAttached ? "attached" : waitForPdf ? "failed" : "queued",
+    ocr_status: !config.autoOcr
+      ? "disabled"
+      : ocrAllowed
+        ? "queued"
+        : "skipped",
+  };
+}
+
+async function resolvePaperForImport(
+  params: ImportPaperParams,
+): Promise<{ paper?: ScholarlyPaper; error?: string }> {
+  const paperId = params.paper_id;
+  if (!paperId) {
+    return { error: "paper_id is required to resolve a single paper import" };
+  }
+  const cached = cachedExternalPaper(paperId, params.provider);
+  if (cached) return { paper: cached };
+
+  const parsed = parsePaperIdentifier(paperId, params.provider);
+  const providers = providersForIdentifier(paperId, params.provider);
+  const result = await searchScholarlyPapers(
+    {
+      text: parsed.searchText,
+      mode: "source",
+      providers,
+      limit: 10,
+      sort: "relevance",
+      filters: {},
+      providerFilters: {},
+    },
+    undefined,
+  );
+  for (const paper of result.items) rememberExternalPaper(paper);
+
+  const exact = result.items.find((paper) =>
+    identifiersOverlap(parsed.keys, keysForScholarlyPaper(paper)),
+  );
+  if (exact) return { paper: exact };
+
+  if (parsed.provider === "semantic-scholar") {
+    const paper = await semanticScholarService.getPaper(
+      parsed.nativeId || paperId,
+    );
+    if (paper) {
+      const scholarlyPaper = {
+        ...paper,
+        source: "semantic-scholar" as const,
+        sources: ["semantic-scholar" as const],
+        providerIds: { "semantic-scholar": paper.paperId },
+      };
+      rememberExternalPaper(scholarlyPaper);
+      return { paper: scholarlyPaper };
+    }
+  }
+
+  const providerIssues = Object.entries(result.providers)
+    .filter(([, state]) => state?.error || state?.skippedReason)
+    .map(
+      ([id, state]) =>
+        `${id}: ${state?.error || state?.skippedReason || "unavailable"}`,
+    );
+  return {
+    error: `Could not resolve "${params.paper_id}" to an exact scholarly record from ${providers.join(", ")}.${providerIssues.length ? ` Provider issues: ${providerIssues.join("; ")}` : ""} Run search_external first and pass the returned paperId/providerIds, or provide a provider hint.`,
+  };
+}
 
 /**
  * Execute search_library tool
@@ -265,23 +459,26 @@ export async function executeSearchExternal(
       undefined,
     );
 
-    const papers = results.items.slice(0, effectiveLimit).map((p) => ({
-      paperId: p.paperId,
-      title: p.title,
-      authors: p.authors.map((a) => a.name),
-      year: p.year,
-      abstract: p.abstract,
-      citationCount: p.citationCount,
-      url: p.url,
-      has_pdf: !!p.openAccessPdf,
-      source: p.source,
-      sources: p.sources,
-      providerIds: p.providerIds,
-      externalIds: p.externalIds,
-      venue: p.venue,
-      publicationTypes: p.publicationTypes,
-      openAccessPdfUrl: p.openAccessPdf?.url,
-    }));
+    const papers = results.items.slice(0, effectiveLimit).map((p) => {
+      rememberExternalPaper(p);
+      return {
+        paperId: p.paperId,
+        title: p.title,
+        authors: p.authors.map((a) => a.name),
+        year: p.year,
+        abstract: p.abstract,
+        citationCount: p.citationCount,
+        url: p.url,
+        has_pdf: !!p.openAccessPdf,
+        source: p.source,
+        sources: p.sources,
+        providerIds: p.providerIds,
+        externalIds: p.externalIds,
+        venue: p.venue,
+        publicationTypes: p.publicationTypes,
+        openAccessPdfUrl: p.openAccessPdf?.url,
+      };
+    });
     const providerErrors = Object.entries(results.providers)
       .filter(([, state]) => state?.error || state?.skippedReason)
       .map(
@@ -351,11 +548,24 @@ export async function executeImportPaper(
   config: AgentConfig,
 ): Promise<ToolResult> {
   try {
-    const { paper_id, trigger_ocr, wait_for_pdf } = params;
+    const requestedIds = params.paper_ids?.length
+      ? params.paper_ids
+      : params.paper_id
+        ? [params.paper_id]
+        : [];
+    if (!requestedIds.length) {
+      return {
+        success: false,
+        error: "Either paper_id or paper_ids is required",
+      };
+    }
+    const { trigger_ocr, wait_for_pdf } = params;
+    const waitForPdf = wait_for_pdf === true;
+    const ocrAllowed = shouldRunImportOcr(params, config);
     let { target_collection_id } = params;
 
     Zotero.debug(
-      `[seerai] Tool: import_paper id=${paper_id} target_col=${target_collection_id} trigger_ocr=${trigger_ocr}`,
+      `[seerai] Tool: import_paper ids=${requestedIds.length} target_col=${target_collection_id} trigger_ocr=${trigger_ocr} auto_ocr=${config.autoOcr} wait_for_pdf=${waitForPdf}`,
     );
 
     // If we have a collection scope and no target provided, use the scoped collection
@@ -376,42 +586,141 @@ export async function executeImportPaper(
       }
     }
 
-    // 1. Get paper details
-    const paper = await semanticScholarService.getPaper(paper_id);
-    if (!paper) {
-      return {
-        success: false,
-        error: `Paper with ID ${paper_id} not found on Semantic Scholar`,
+    const importOne = async (
+      paperId: string,
+    ): Promise<ImportPaperResult & { error?: string }> => {
+      const singleParams: ImportPaperParams = {
+        ...params,
+        paper_id: paperId,
+        paper_ids: undefined,
       };
-    }
+      const resolved = await resolvePaperForImport(singleParams);
+      if (!resolved.paper) {
+        return {
+          item_id: -1,
+          title: paperId,
+          pdf_attached: false,
+          success: false,
+          error:
+            resolved.error || `Paper with ID ${paperId} could not be resolved`,
+        };
+      }
+      const paper = resolved.paper;
 
-    // 2. Import using Assistant's logic (passing target_collection_id and wait_for_pdf)
-    const result = await Assistant.addPaperToZoteroWithPdfDiscovery(
-      paper,
-      undefined, // No status button
-      target_collection_id,
-      wait_for_pdf,
-      trigger_ocr || config.autoOcr,
-    );
+      const existing = await findExistingImportedItem(paper);
+      if (existing) {
+        await addExistingItemToCollection(existing, target_collection_id);
+        const hasPdf = existing
+          .getAttachments()
+          .some(
+            (id) =>
+              Zotero.Items.get(id)?.attachmentContentType === "application/pdf",
+          );
+        const importResult: ImportPaperResult = {
+          item_id: existing.id,
+          title: (existing.getField("title") as string) || paper.title,
+          pdf_attached: hasPdf,
+          success: true,
+          source: paper.source,
+          provider_id: paper.providerIds?.[paper.source] || paper.paperId,
+          already_exists: true,
+          pdf_status: hasPdf ? "attached" : "skipped",
+          ocr_status: !config.autoOcr
+            ? "disabled"
+            : ocrAllowed
+              ? "skipped"
+              : "skipped",
+        };
+        return importResult;
+      }
 
-    if (!result.item) {
-      return {
-        success: false,
-        error: "Failed to create item in Zotero",
+      // 2. Import using Assistant's logic (passing target_collection_id and wait_for_pdf)
+      const result = await Assistant.addPaperToZoteroWithPdfDiscovery(
+        paper,
+        undefined, // No status button
+        target_collection_id,
+        waitForPdf,
+        ocrAllowed,
+      );
+
+      if (!result.item) {
+        return {
+          item_id: -1,
+          title: paper.title,
+          pdf_attached: false,
+          success: false,
+          error: "Failed to create item in Zotero",
+        };
+      }
+
+      const statuses = importStatuses(
+        result.pdfAttached,
+        waitForPdf,
+        config,
+        params,
+      );
+      const importResult: ImportPaperResult = {
+        item_id: result.item.id,
+        title: paper.title,
+        pdf_attached: result.pdfAttached,
+        success: true,
+        source: paper.source,
+        provider_id: paper.providerIds?.[paper.source] || paper.paperId,
+        already_exists: false,
+        ...statuses,
       };
-    }
 
-    const importResult: ImportPaperResult = {
-      item_id: result.item.id,
-      title: paper.title,
-      pdf_attached: result.pdfAttached,
-      success: true,
+      return importResult;
     };
+
+    const results: Array<ImportPaperResult & { error?: string }> = [];
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < requestedIds.length) {
+        const paperId = requestedIds[cursor++];
+        results.push(await importOne(paperId));
+      }
+    };
+    const poolSize = Math.min(IMPORT_PAPER_CONCURRENCY, requestedIds.length);
+    await Promise.all(Array.from({ length: poolSize }, () => worker()));
+
+    if (requestedIds.length > 1) {
+      const imported = results.filter(
+        (item) => item.success && !item.already_exists,
+      ).length;
+      const reused = results.filter(
+        (item) => item.success && item.already_exists,
+      ).length;
+      const failed = results.filter((item) => !item.success).length;
+      const queued = results.filter(
+        (item) => item.pdf_status === "queued",
+      ).length;
+      return {
+        success: failed < results.length,
+        data: {
+          results,
+          imported,
+          reused,
+          failed,
+          queued,
+          ocr_enabled: ocrAllowed,
+        },
+        summary: `Imported ${imported}, reused ${reused}, queued ${queued} PDF task${queued === 1 ? "" : "s"}${failed ? `, failed ${failed}` : ""}. OCR ${ocrAllowed ? "enabled" : "disabled"}.`,
+      };
+    }
+
+    const importResult = results[0];
+    if (!importResult.success) {
+      return {
+        success: false,
+        error: importResult.error || "Failed to import paper",
+      };
+    }
 
     return {
       success: true,
       data: importResult,
-      summary: `Successfully started import for "${paper.title}" to Zotero (ID: ${result.item.id})${target_collection_id ? ` in collection ${target_collection_id}` : ""}.${wait_for_pdf ? ` PDF discovery: ${result.pdfAttached}` : " PDF discovery running in background."}`,
+      summary: `Successfully imported "${importResult.title}" to Zotero (ID: ${importResult.item_id})${target_collection_id ? ` in collection ${target_collection_id}` : ""}.${waitForPdf ? ` PDF discovery: ${importResult.pdf_attached}` : " PDF discovery running in background."} OCR ${ocrAllowed ? "enabled" : "disabled"}.`,
     };
   } catch (error) {
     Zotero.debug(`[seerai] Tool: import_paper error: ${error}`);

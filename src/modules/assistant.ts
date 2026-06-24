@@ -203,6 +203,10 @@ import { createSystematicReviewTabContent } from "./systematicReview/systematicR
 import { getSRService } from "./systematicReview/service";
 import { getActiveProtocolRevision } from "./systematicReview/protocol";
 import { getSRStore } from "./systematicReview/store";
+import {
+  buildScopedReviewContext,
+  ReviewContextKind,
+} from "./systematicReview/reviewExport";
 import type { SystematicReviewSpace } from "./systematicReview/types";
 
 // Debounce timer for autocomplete
@@ -261,6 +265,33 @@ let bulkImportController: AbortController | null = null;
 // import. Bounded so large imports stay fast without flooding the network or
 // Zotero's transaction queue.
 const BULK_IMPORT_CONCURRENCY = 4;
+const IMPORT_PDF_DISCOVERY_CONCURRENCY = 3;
+let importPdfDiscoveryActive = 0;
+const importPdfDiscoveryQueue: Array<() => Promise<void>> = [];
+
+function enqueueImportPdfDiscovery(task: () => Promise<void>): void {
+  importPdfDiscoveryQueue.push(task);
+  void drainImportPdfDiscoveryQueue();
+}
+
+async function drainImportPdfDiscoveryQueue(): Promise<void> {
+  while (
+    importPdfDiscoveryActive < IMPORT_PDF_DISCOVERY_CONCURRENCY &&
+    importPdfDiscoveryQueue.length > 0
+  ) {
+    const task = importPdfDiscoveryQueue.shift();
+    if (!task) return;
+    importPdfDiscoveryActive++;
+    task()
+      .catch((e) =>
+        Zotero.debug(`[seerai] Background PDF discovery failed: ${e}`),
+      )
+      .finally(() => {
+        importPdfDiscoveryActive--;
+        void drainImportPdfDiscoveryQueue();
+      });
+  }
+}
 
 function toScholarlyPaper(paper: SemanticScholarPaper): ScholarlyPaper {
   return {
@@ -1741,7 +1772,10 @@ export class Assistant {
         try {
           const service = getSRService();
           const state = await service.load();
-          service.switchProject(state, String(item.id));
+          service.switchProject(
+            state,
+            String(item.metadata?.reviewKey || item.id),
+          );
           const included = state.papers.filter(
             (paper) =>
               paper.status === "included" &&
@@ -1782,6 +1816,25 @@ export class Assistant {
               .filter(Boolean)
               .join("\n"),
           );
+          const reviewContextKind = item.metadata?.reviewContextKind as
+            | ReviewContextKind
+            | undefined;
+          if (reviewContextKind) {
+            const scoped = buildScopedReviewContext(
+              state,
+              reviewContextKind,
+              {
+                synthesisRunId: item.metadata?.synthesisRunId as
+                  | string
+                  | undefined,
+                gapAnalysisRunId: item.metadata?.gapAnalysisRunId as
+                  | string
+                  | undefined,
+              },
+              item.displayName,
+            );
+            if (scoped) passthroughParts.push(`\n${scoped}`);
+          }
         } catch (e) {
           Zotero.debug(
             `[seerai] RAG expand: error expanding review "${item.displayName}": ${e}`,
@@ -13020,10 +13073,9 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         const attached = await performDiscovery();
         return { item: newItem, pdfAttached: attached };
       } else {
-        // Run in background
-        performDiscovery().catch((e) =>
-          Zotero.debug(`[seerai] Background PDF discovery failed: ${e}`),
-        );
+        enqueueImportPdfDiscovery(async () => {
+          await performDiscovery();
+        });
         return { item: newItem, pdfAttached: false };
       }
     } catch (error) {
@@ -32172,7 +32224,12 @@ Rules:
           try {
             const service = getSRService();
             const reviewState = await service.load();
-            service.switchProject(reviewState, String(item.id));
+            // Scoped review items key the project via metadata.reviewKey; broad
+            // &review items key it via item.id (the project id).
+            service.switchProject(
+              reviewState,
+              String(item.metadata?.reviewKey || item.id),
+            );
             const revision = getActiveProtocolRevision(reviewState.protocol);
             const synthesis = service.getSynthesis(reviewState);
             const gapRun = service.getGapAnalysis(reviewState);
@@ -32193,6 +32250,27 @@ Rules:
                 .map((gap) => gap.title)
                 .join("; ") || "none"
             }`;
+            // Scoped items additionally inject the exact pinned synthesis/gap
+            // run in full (size-capped).
+            const reviewContextKind = item.metadata?.reviewContextKind as
+              | ReviewContextKind
+              | undefined;
+            if (reviewContextKind) {
+              const scoped = buildScopedReviewContext(
+                reviewState,
+                reviewContextKind,
+                {
+                  synthesisRunId: item.metadata?.synthesisRunId as
+                    | string
+                    | undefined,
+                  gapAnalysisRunId: item.metadata?.gapAnalysisRunId as
+                    | string
+                    | undefined,
+                },
+                item.displayName,
+              );
+              if (scoped) context += `\n\n${scoped}`;
+            }
           } catch (e) {
             context += `\n\n--- Systematic Review: ${item.displayName} ---\n(Review context unavailable: ${e})`;
           }
@@ -33909,9 +33987,14 @@ Note: Context was automatically reduced using stricter semantic search due to si
         borderRadius: isUser ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
         fontSize: "13px",
         maxWidth: isUser ? "90%" : "100%",
+        // Assistant messages take a definite full width so wide content (tool
+        // cards, code blocks, tables) has a bounded box to wrap/truncate into,
+        // instead of content-sizing the bubble and forcing a horizontal blowout
+        // in a narrow sidebar. User bubbles stay content-sized and right-aligned.
+        width: isUser ? "auto" : "100%",
         minWidth: "0",
         flexShrink: "0",
-        alignSelf: isUser ? "flex-end" : "flex-start",
+        alignSelf: isUser ? "flex-end" : "stretch",
         boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
         position: "relative",
         boxSizing: "border-box",

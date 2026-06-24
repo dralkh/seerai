@@ -1,8 +1,68 @@
 import {
   ExtractionRow,
   PaperExtractionLog,
+  ReviewJob,
+  ReviewJobKind,
+  ReviewJobPaper,
   SystematicReviewState,
 } from "./types";
+
+// Extraction, evidence synthesis, and gap analysis are stages of one pipeline:
+// they all extract/refine the same per-paper evidence. Treat them as a single
+// family wherever the UI tracks "is this paper being processed" or "what is the
+// latest task" — filtering on "extraction" alone hides synthesis/gap progress.
+export const EXTRACTION_PIPELINE_KINDS: ReviewJobKind[] = [
+  "extraction",
+  "evidence_analysis",
+  "gap_analysis",
+];
+
+const ACTIVE_JOB_STATUSES = ["queued", "running", "paused"] as const;
+
+export function isExtractionPipelineJob(job: ReviewJob): boolean {
+  return EXTRACTION_PIPELINE_KINDS.includes(job.kind);
+}
+
+function sortByRecency(a: ReviewJob, b: ReviewJob): number {
+  return (
+    Date.parse(b.updatedAt || b.createdAt) -
+    Date.parse(a.updatedAt || a.createdAt)
+  );
+}
+
+/** Pipeline jobs that are still queued, running, or paused. */
+export function getActivePipelineJobs(
+  state: SystematicReviewState,
+): ReviewJob[] {
+  return state.reviewJobs.filter(
+    (job) =>
+      isExtractionPipelineJob(job) &&
+      (ACTIVE_JOB_STATUSES as readonly string[]).includes(job.status),
+  );
+}
+
+/**
+ * The job a job-status strip should track: the most recently updated active
+ * pipeline job, or — when none are active — the most recent pipeline job so the
+ * strip can show the last completed/failed result.
+ */
+export function getLatestPipelineJob(
+  state: SystematicReviewState,
+): ReviewJob | undefined {
+  const active = getActivePipelineJobs(state);
+  if (active.length) return active.slice().sort(sortByRecency)[0];
+  const all = state.reviewJobs.filter(isExtractionPipelineJob);
+  if (!all.length) return undefined;
+  return all.slice().sort(sortByRecency)[0];
+}
+
+/** The most recent per-paper task across every pipeline kind. */
+export function getLatestPipelineTask(
+  state: SystematicReviewState,
+  paperId: number,
+): ReviewJobPaper | undefined {
+  return getLastExtractionJobForPaper(state, paperId);
+}
 
 export function getIncludedPapers(state: SystematicReviewState) {
   return state.papers.filter(
@@ -94,16 +154,10 @@ export function getLastExtractionJobForPaper(
   const candidates = state.reviewJobs
     .filter(
       (job) =>
-        (job.kind === "extraction" ||
-          job.kind === "evidence_analysis" ||
-          job.kind === "gap_analysis") &&
+        isExtractionPipelineJob(job) &&
         job.papers.some((p) => p.paperId === paperId),
     )
-    .sort(
-      (a, b) =>
-        Date.parse(b.updatedAt || b.createdAt) -
-        Date.parse(a.updatedAt || a.createdAt),
-    );
+    .sort(sortByRecency);
   if (!candidates.length) return undefined;
   const job = candidates[0];
   return job.papers.find((p) => p.paperId === paperId);
