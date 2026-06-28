@@ -11,8 +11,8 @@
  * - Uses existing NanoGPT API key (same as chat/embeddings)
  */
 
-import { config } from "../../package.json";
 import { getActiveModelConfig } from "./chat/modelConfig";
+import { getPref } from "../utils/prefs";
 
 // ==================== Types ====================
 
@@ -96,11 +96,8 @@ class NanogptWebService {
    * then falls back to the active model config's API key if it's a NanoGPT provider.
    */
   private getApiKey(): string {
-    const prefPrefix = config.prefsPrefix;
-
     // 1. Check dedicated NanoGPT web search API key
-    const dedicatedKey =
-      (Zotero.Prefs.get(`${prefPrefix}.nanogptWebApiKey`) as string) || "";
+    const dedicatedKey = (getPref("nanogptWebApiKey") as string) || "";
     if (dedicatedKey) return dedicatedKey;
 
     // 2. Fall back to active model config if it's a NanoGPT provider
@@ -123,15 +120,10 @@ class NanogptWebService {
    * Get configuration from preferences
    */
   private getConfig() {
-    const prefPrefix = config.prefsPrefix;
     return {
       apiKey: this.getApiKey(),
-      searchLimit:
-        (Zotero.Prefs.get(`${prefPrefix}.nanogptWebSearchLimit`) as number) ||
-        5,
-      searchDepth:
-        (Zotero.Prefs.get(`${prefPrefix}.nanogptWebSearchDepth`) as string) ||
-        "standard",
+      searchLimit: (getPref("nanogptWebSearchLimit") as number) || 5,
+      searchDepth: (getPref("nanogptWebSearchDepth") as string) || "standard",
     };
   }
 

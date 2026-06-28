@@ -9,7 +9,7 @@
  * - Research Search: Find academic papers with PDF discovery
  */
 
-import { config } from "../../package.json";
+import { getPref } from "../utils/prefs";
 
 // ==================== Types ====================
 
@@ -70,15 +70,12 @@ class FirecrawlService {
    * Get API configuration from preferences
    */
   private getConfig() {
-    const prefPrefix = config.prefsPrefix;
     return {
-      apiKey:
-        (Zotero.Prefs.get(`${prefPrefix}.firecrawlApiKey`) as string) || "",
+      apiKey: (getPref("firecrawlApiKey") as string) || "",
       apiUrl:
-        (Zotero.Prefs.get(`${prefPrefix}.firecrawlApiUrl`) as string) ||
+        (getPref("firecrawlApiUrl") as string) ||
         "https://api.firecrawl.dev/v2 or http://localhost:3002/v2",
-      searchLimit:
-        (Zotero.Prefs.get(`${prefPrefix}.firecrawlSearchLimit`) as number) || 3,
+      searchLimit: (getPref("firecrawlSearchLimit") as number) || 3,
     };
   }
 

@@ -9,7 +9,7 @@
  * - Content Extraction: Extract content from URLs
  */
 
-import { config } from "../../package.json";
+import { getPref } from "../utils/prefs";
 
 // ==================== Types ====================
 
@@ -76,14 +76,10 @@ class TavilyService {
    * Get API configuration from preferences
    */
   private getConfig() {
-    const prefPrefix = config.prefsPrefix;
     return {
-      apiKey: (Zotero.Prefs.get(`${prefPrefix}.tavilyApiKey`) as string) || "",
-      searchDepth:
-        (Zotero.Prefs.get(`${prefPrefix}.tavilySearchDepth`) as string) ||
-        "basic",
-      searchLimit:
-        (Zotero.Prefs.get(`${prefPrefix}.tavilySearchLimit`) as number) || 5,
+      apiKey: (getPref("tavilyApiKey") as string) || "",
+      searchDepth: (getPref("tavilySearchDepth") as string) || "basic",
+      searchLimit: (getPref("tavilySearchLimit") as number) || 5,
     };
   }
 

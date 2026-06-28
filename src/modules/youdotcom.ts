@@ -3,7 +3,7 @@
  * Provides web search and research context
  */
 
-import { config } from "../../package.json";
+import { getPref } from "../utils/prefs";
 import { WebSearchResult, PdfDiscoveryResult } from "./webSearchProvider";
 
 // Response Types
@@ -44,15 +44,10 @@ class YoudotcomService {
   private pdfDiscoveryCache = new Map<string, PdfDiscoveryResult | null>();
 
   private getConfig() {
-    const prefPrefix = config.prefsPrefix;
     return {
-      apiKey:
-        (Zotero.Prefs.get(`${prefPrefix}.youdotcomApiKey`) as string) || "",
-      searchMode:
-        (Zotero.Prefs.get(`${prefPrefix}.youdotcomSearchMode`) as string) ||
-        "normal",
-      searchLimit:
-        (Zotero.Prefs.get(`${prefPrefix}.youdotcomSearchLimit`) as number) || 5,
+      apiKey: (getPref("youdotcomApiKey") as string) || "",
+      searchMode: (getPref("youdotcomSearchMode") as string) || "normal",
+      searchLimit: (getPref("youdotcomSearchLimit") as number) || 5,
     };
   }
 

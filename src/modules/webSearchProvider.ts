@@ -6,7 +6,7 @@
  * changing tool/consumer code.
  */
 
-import { config } from "../../package.json";
+import { getPref } from "../utils/prefs";
 import {
   firecrawlService,
   FirecrawlSearchResult as FirecrawlResult,
@@ -340,10 +340,7 @@ const youdotcomProvider = new YoudotcomProviderWrapper();
  * Get the currently selected web search provider from preferences
  */
 export function getActiveProviderType(): WebSearchProviderType {
-  const prefPrefix = config.prefsPrefix;
-  const provider = Zotero.Prefs.get(
-    `${prefPrefix}.webSearchProvider`,
-  ) as string;
+  const provider = getPref("webSearchProvider") as string;
   if (provider === "nanogpt") return "nanogpt";
   if (provider === "youdotcom") return "youdotcom";
   if (provider === "tavily") return "tavily";
