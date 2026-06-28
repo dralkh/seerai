@@ -299,6 +299,14 @@ const tableParams = z.discriminatedUnion("action", [
     item_ids: z.array(z.number()).optional(),
   }),
   z.object({
+    action: z.literal("complete_generation"),
+    table_id: z.string().min(1).describe("Table ID"),
+    column_id: z.string().optional(),
+    item_ids: z.array(z.number()).optional(),
+    ensure_pdfs: z.boolean().default(true).optional(),
+    include_data: z.boolean().default(true).optional(),
+  }),
+  z.object({
     action: z.literal("read"),
     table_id: z
       .string()
@@ -934,7 +942,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "table",
     description:
-      "Manage research analysis tables. List tables, create new tables, add papers, add columns, generate AI data, or read table contents.",
+      "Manage research analysis tables. List tables, create new tables, add papers, add columns, generate AI data, complete PDF-aware generation, or read table contents. Prefer action='complete_generation' when you need final generated values returned in the same tool call.",
     inputSchema: tableParams,
   },
   {

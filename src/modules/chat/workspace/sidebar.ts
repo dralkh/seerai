@@ -18,7 +18,7 @@ import {
   convertDocxToMarkdown,
 } from "../../docxConverter";
 import { ChatContextManager } from "../context/contextManager";
-import { createIconButton, createSvgIcon } from "../ui/icons";
+import { createIconButton, createSvgIcon, setButtonLoading } from "../ui/icons";
 
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 
@@ -132,6 +132,22 @@ export function createWorkspaceSidebar(
     }
   });
   actions.appendChild(newFileBtn);
+
+  const refreshBtn = createIconButton(
+    doc,
+    "refresh",
+    "Refresh artifacts and changes",
+    async () => {
+      const restore = setButtonLoading(refreshBtn, "", 14);
+      refreshBtn.disabled = true;
+      try {
+        await refreshWorkspaceSidebar(sidebar, callbacks);
+      } finally {
+        restore();
+      }
+    },
+  );
+  actions.appendChild(refreshBtn);
 
   // Commit button - shows commit dropdown
   const commitActionBtn = createIconButton(

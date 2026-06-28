@@ -303,6 +303,14 @@ export interface GenerateTableDataParams {
   item_ids?: number[]; // If not provided, generate for all items
 }
 
+export interface CompleteTableGenerationParams {
+  table_id: string;
+  column_id?: string;
+  item_ids?: number[];
+  ensure_pdfs?: boolean;
+  include_data?: boolean;
+}
+
 /**
  * Parameters for read_table tool
  */
@@ -611,6 +619,21 @@ export interface GenerateTableDataResult {
   table_id: string;
 }
 
+export interface CompleteTableGenerationResult {
+  table_id: string;
+  generated_count: number;
+  generation_errors: string[];
+  pdf_discovery: {
+    total: number;
+    searched: number;
+    found: number;
+    not_found: number;
+    failed: number;
+    skipped_existing_pdf: number;
+  };
+  table: ReadTableResult;
+}
+
 /**
  * Result from read_table
  */
@@ -803,7 +826,14 @@ export interface CollectionParams {
  * Consolidates: list_tables, create_table, add_to_table, create_table_column, generate_table_data, read_table
  */
 export interface TableParams {
-  action: "list" | "create" | "add_papers" | "add_column" | "generate" | "read";
+  action:
+    | "list"
+    | "create"
+    | "add_papers"
+    | "add_column"
+    | "generate"
+    | "complete_generation"
+    | "read";
   // Common
   table_id?: string;
   // For create
@@ -816,6 +846,7 @@ export interface TableParams {
   // For generate
   column_id?: string;
   item_ids?: number[];
+  ensure_pdfs?: boolean;
   // For read
   include_data?: boolean;
 }

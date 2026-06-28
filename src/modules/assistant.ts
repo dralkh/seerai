@@ -170,6 +170,7 @@ import {
   createToolProcessUI,
   createQuestionPanel,
   getFriendlyToolAction,
+  truncateMiddle,
 } from "./chat/agenticChat";
 import { ToolResult } from "./chat/tools/toolTypes";
 import { getFilteredAgentTools } from "./chat/tools/toolDefinitions";
@@ -375,6 +376,7 @@ function buildToolPromptSections(): string {
 - table({ action: "add_papers", table_id: "...", paper_ids: [...] }) — add papers to an existing table
 - table({ action: "add_column", table_id: "...", column_name: "...", ai_prompt: "..." }) — add an AI-powered analysis column (e.g., "Methodology", "Result Summary")
 - table({ action: "generate", table_id: "...", column_id?: "..." }) — trigger AI generation of column data. Only call AFTER adding all desired columns.
+- table({ action: "complete_generation", table_id: "...", column_id?: "...", ensure_pdfs: true, include_data: true }) — find missing PDFs, wait for all table generation, then return completed table values. Prefer this when you need to inspect the final extraction results.
 - table({ action: "read", table_id: "...", include_data: true }) — read table contents with generated data`);
   }
 
@@ -5278,7 +5280,10 @@ export class Assistant {
             if (label) {
               label.textContent = "Agent stopped";
             }
-            if (subLabel) subLabel.textContent = error;
+            if (subLabel) {
+              subLabel.textContent = truncateMiddle(error, 180);
+              subLabel.title = error;
+            }
             toolProcessContainer.classList.remove("is-running", "is-complete");
             toolProcessContainer.classList.add("is-failed");
             if (icon) {
@@ -14606,7 +14611,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           type: "click",
           listener: async () => {
             if (pdfSearchBatchActive) return; // Don't start new search while one is running
-            await this.searchAllPdfsInTable(doc, searchPdfBtn);
+            await this.searchAllPdfsInTable(doc, searchPdfBtn, item);
           },
         },
       ],
@@ -16676,6 +16681,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   private static async searchAllPdfsInTable(
     doc: Document,
     btn: HTMLElement,
+    rootItem?: Zotero.Item,
   ): Promise<void> {
     Zotero.debug("[seerai] Search all PDF clicked");
 
@@ -16791,16 +16797,18 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       if (!tr) return;
 
       const computedCells = tr.querySelectorAll("td");
+      const isPdfSearchCell = (cell: HTMLElement): boolean => {
+        if (cell.getAttribute("data-pdf-search-paper-id") === String(paperId)) {
+          return true;
+        }
+        return !!cell.querySelector(
+          ".search-pdf-btn, .source-link-btn, .process-pdf-btn, .attach-pdf-btn",
+        );
+      };
       computedCells.forEach((td: Element) => {
-        const content = String(td.innerHTML);
-        if (
-          content.includes("Search PDF") ||
-          content.includes("Source-Link") ||
-          content.includes("Searching") ||
-          content.includes("") ||
-          content.includes("Retrying")
-        ) {
-          const cell = td as HTMLElement;
+        const cell = td as HTMLElement;
+        if (isPdfSearchCell(cell)) {
+          cell.setAttribute("data-pdf-search-paper-id", String(paperId));
           switch (status) {
             case "searching":
               this.setTableCellStatus(
@@ -16819,11 +16827,11 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               );
               break;
             case "found":
-              this.setTableCellStatus(
+              this.setTableCellAction(
                 cell,
                 "review",
                 "Process PDF",
-                "var(--highlight-primary)",
+                "process-pdf-btn",
               );
               break;
             case "skipped":
@@ -17040,6 +17048,11 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
     );
     (btn as HTMLButtonElement).disabled = false;
     btn.style.cursor = "pointer";
+    if (rootItem) {
+      setTimeout(() => {
+        this.debounceTableRefresh(doc, rootItem);
+      }, 500);
+    }
     setTimeout(() => {
       this.setTableButtonContent(doc, btn, "search", "Find PDFs", 12);
     }, 4000);

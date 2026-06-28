@@ -12,6 +12,8 @@ import {
   AddToTableResult,
   CreateTableColumnParams,
   CreateTableColumnResult,
+  CompleteTableGenerationParams,
+  CompleteTableGenerationResult,
   GenerateTableDataParams,
   GenerateTableDataResult,
   ReadTableParams,
@@ -21,7 +23,8 @@ import {
   AgentConfig,
 } from "./toolTypes";
 import { getTableStore } from "../tableStore";
-import { TableConfig } from "../tableTypes";
+import { PersistedPdfDiscovery, TableConfig } from "../tableTypes";
+import { runConcurrentTasks } from "../../../utils/concurrentRunner";
 
 /**
  * Unified table tool dispatcher
@@ -61,6 +64,17 @@ export async function executeTable(
           table_id: params.table_id!,
           column_id: params.column_id,
           item_ids: params.item_ids,
+        },
+        config,
+      );
+    case "complete_generation":
+      return executeCompleteTableGeneration(
+        {
+          table_id: params.table_id!,
+          column_id: params.column_id,
+          item_ids: params.item_ids,
+          ensure_pdfs: params.ensure_pdfs,
+          include_data: params.include_data,
         },
         config,
       );
@@ -142,6 +156,86 @@ async function findTable(tableId: string | undefined): Promise<any | null> {
   if (allTables.length === 1) return allTables[0];
 
   return null;
+}
+
+function hasPdfAttachment(item: Zotero.Item): boolean {
+  const attachments = item.getAttachments() || [];
+  return attachments.some((attId: number) => {
+    const attachment = Zotero.Items.get(attId);
+    return (
+      attachment &&
+      (attachment.attachmentContentType === "application/pdf" ||
+        attachment.attachmentPath?.toLowerCase().endsWith(".pdf"))
+    );
+  });
+}
+
+function aiColumns(table: any, columnId?: string): any[] {
+  return columnId
+    ? table.columns?.filter((c: any) => c.id === columnId) || []
+    : table.columns?.filter(
+        (c: any) =>
+          c.type === "ai-generated" || c.aiPrompt || c.type === "computed",
+      ) || [];
+}
+
+function buildReadTableResult(table: any, includeData = true): ReadTableResult {
+  const defaultColumns = [
+    { id: "title", name: "Title" },
+    { id: "author", name: "Authors" },
+    { id: "year", name: "Year" },
+  ];
+
+  const columns =
+    table.columns && table.columns.length > 0
+      ? table.columns.map((col: any) => ({
+          id: col.id,
+          name: col.name,
+          ai_prompt: col.aiPrompt || undefined,
+        }))
+      : defaultColumns;
+
+  const rows: ReadTableResult["rows"] = [];
+  const paperIds = table.addedPaperIds || [];
+  const generatedData = table.generatedData || {};
+
+  for (const paperId of paperIds) {
+    const item = Zotero.Items.get(paperId);
+    if (!item) continue;
+
+    const title = (item.getField("title") as string) || "Untitled";
+    const rowData: Record<string, string> = {};
+
+    if (includeData) {
+      const creators = item.getCreators();
+      rowData["title"] = title;
+      rowData["author"] =
+        creators
+          .map((c: any) => `${c.firstName || ""} ${c.lastName || ""}`.trim())
+          .join(", ") || "Unknown";
+      rowData["year"] = (item.getField("year") as string) || "";
+
+      const paperData =
+        generatedData[paperId] || generatedData[String(paperId)] || {};
+      for (const [colId, value] of Object.entries(paperData)) {
+        rowData[colId] = String(value || "");
+      }
+    }
+
+    rows.push({
+      item_id: paperId,
+      title,
+      data: rowData,
+    });
+  }
+
+  return {
+    table_id: table.id,
+    name: table.name,
+    columns,
+    rows,
+    total_rows: rows.length,
+  };
 }
 
 /**
@@ -522,6 +616,165 @@ async function executeGenerateTableData(
   }
 }
 
+async function ensureTablePdfs(
+  table: TableConfig,
+  itemIds: number[],
+): Promise<CompleteTableGenerationResult["pdf_discovery"]> {
+  const stats: CompleteTableGenerationResult["pdf_discovery"] = {
+    total: itemIds.length,
+    searched: 0,
+    found: 0,
+    not_found: 0,
+    failed: 0,
+    skipped_existing_pdf: 0,
+  };
+  const tasks: Array<{ paperId: number; item: Zotero.Item }> = [];
+
+  for (const paperId of itemIds) {
+    const item = Zotero.Items.get(paperId);
+    if (!item || !item.isRegularItem()) {
+      stats.failed++;
+      continue;
+    }
+    if (hasPdfAttachment(item)) {
+      stats.skipped_existing_pdf++;
+      continue;
+    }
+    tasks.push({ paperId, item });
+  }
+
+  if (tasks.length === 0) return stats;
+
+  const { findAndAttachPdfForItem } = await import("../../assistant");
+  const tableStore = getTableStore();
+  if (!table.pdfDiscoveryData) table.pdfDiscoveryData = {};
+
+  await runConcurrentTasks<{ paperId: number; item: Zotero.Item }, boolean>({
+    tasks,
+    concurrency: 5,
+    maxRetries: 2,
+    retryDelayMs: 2000,
+    executor: async (task) => {
+      stats.searched++;
+      return await findAndAttachPdfForItem(task.item);
+    },
+    onTaskComplete: (task, success) => {
+      const discovery: PersistedPdfDiscovery = {
+        status: success ? "found" : "not_found",
+        discoveredAt: new Date().toISOString(),
+      };
+      table.pdfDiscoveryData![task.paperId] = discovery;
+      if (success) stats.found++;
+      else stats.not_found++;
+    },
+    onTaskError: (task, error, _index, willRetry) => {
+      if (!willRetry) {
+        table.pdfDiscoveryData![task.paperId] = {
+          status: "error",
+          discoveredAt: new Date().toISOString(),
+        };
+        stats.failed++;
+        Zotero.debug(
+          `[seerai] complete_generation PDF discovery failed for ${task.paperId}: ${error.message}`,
+        );
+      }
+    },
+  });
+
+  await tableStore.saveConfig(table);
+  return stats;
+}
+
+async function executeCompleteTableGeneration(
+  params: CompleteTableGenerationParams,
+  _config: AgentConfig,
+): Promise<ToolResult> {
+  try {
+    const {
+      table_id,
+      column_id,
+      item_ids,
+      ensure_pdfs = true,
+      include_data = true,
+    } = params;
+    Zotero.debug(
+      `[seerai] Tool: complete_generation table=${table_id} column=${column_id || "all"} ensure_pdfs=${ensure_pdfs}`,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const table = await findTable(table_id);
+    if (!table) {
+      return {
+        success: false,
+        error: `Table with ID "${table_id}" not found`,
+      };
+    }
+
+    const columnsToGenerate = aiColumns(table, column_id);
+    if (columnsToGenerate.length === 0) {
+      return {
+        success: false,
+        error: "No AI-generated columns found to generate data for",
+      };
+    }
+
+    const itemsToProcess = item_ids || table.addedPaperIds || [];
+    if (itemsToProcess.length === 0) {
+      return {
+        success: false,
+        error: "No items in table to generate data for",
+      };
+    }
+
+    const pdfDiscovery = ensure_pdfs
+      ? await ensureTablePdfs(table, itemsToProcess)
+      : {
+          total: itemsToProcess.length,
+          searched: 0,
+          found: 0,
+          not_found: 0,
+          failed: 0,
+          skipped_existing_pdf: 0,
+        };
+
+    const { Assistant } = await import("../../assistant");
+    const generation = await Assistant.generateDataForTable(
+      table.id,
+      itemsToProcess,
+      columnsToGenerate.map((c: any) => c.id),
+    );
+
+    const freshTable = (await findTable(table.id)) || table;
+    const tableResult = buildReadTableResult(freshTable, include_data);
+    const result: CompleteTableGenerationResult = {
+      table_id: table.id,
+      generated_count: generation.generatedCount,
+      generation_errors: generation.errors,
+      pdf_discovery: pdfDiscovery,
+      table: tableResult,
+    };
+    const columnNames = columnsToGenerate.map((c: any) => c.name).join(", ");
+
+    return {
+      success: true,
+      data: result,
+      summary:
+        `Completed table generation for "${freshTable.name}" (${generation.generatedCount} cells across ${columnNames}). ` +
+        `PDF discovery: ${pdfDiscovery.found} found, ${pdfDiscovery.not_found} not found, ${pdfDiscovery.failed} failed, ${pdfDiscovery.skipped_existing_pdf} already had PDFs. ` +
+        (generation.errors.length
+          ? `${generation.errors.length} generation errors occurred.`
+          : "Generated table data is included."),
+    };
+  } catch (error) {
+    Zotero.debug(`[seerai] Tool: complete_generation error: ${error}`);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 /**
  * Execute read_table tool - reads complete table structure and data
  */
@@ -548,76 +801,18 @@ async function executeReadTable(
       };
     }
 
-    // Get default columns if none defined
-    const defaultColumns = [
-      { id: "title", name: "Title" },
-      { id: "author", name: "Authors" },
-      { id: "year", name: "Year" },
-    ];
-
-    const columns =
-      table.columns && table.columns.length > 0
-        ? table.columns.map((col: any) => ({
-            id: col.id,
-            name: col.name,
-            ai_prompt: col.aiPrompt || undefined,
-          }))
-        : defaultColumns;
-
-    // Build rows with data
-    const rows: ReadTableResult["rows"] = [];
-    const paperIds = table.addedPaperIds || [];
-    const generatedData = table.generatedData || {};
-
-    for (const paperId of paperIds) {
-      const item = Zotero.Items.get(paperId);
-      if (!item) continue;
-
-      const title = (item.getField("title") as string) || "Untitled";
-      const rowData: Record<string, string> = {};
-
-      if (include_data) {
-        // Add standard columns
-        const creators = item.getCreators();
-        rowData["title"] = title;
-        rowData["author"] =
-          creators
-            .map((c: any) => `${c.firstName || ""} ${c.lastName || ""}`.trim())
-            .join(", ") || "Unknown";
-        rowData["year"] = (item.getField("year") as string) || "";
-
-        // Add generated data for AI columns
-        const paperData = generatedData[paperId] || {};
-        for (const [colId, value] of Object.entries(paperData)) {
-          rowData[colId] = String(value || "");
-        }
-      }
-
-      rows.push({
-        item_id: paperId,
-        title,
-        data: rowData,
-      });
-    }
-
-    const result: ReadTableResult = {
-      table_id: table.id,
-      name: table.name,
-      columns,
-      rows,
-      total_rows: rows.length,
-    };
+    const result = buildReadTableResult(table, include_data);
 
     // Build summary for AI
-    const columnSummary = columns.map((c: any) => c.name).join(", ");
+    const columnSummary = result.columns.map((c: any) => c.name).join(", ");
     const dataCells = include_data
-      ? Object.keys(rows[0]?.data || {}).length * rows.length
+      ? Object.keys(result.rows[0]?.data || {}).length * result.rows.length
       : 0;
 
     return {
       success: true,
       data: result,
-      summary: `Table "${table.name}" contains ${rows.length} papers with ${columns.length} columns (${columnSummary}). ${include_data ? `${dataCells} data cells included.` : "Structure only."}`,
+      summary: `Table "${table.name}" contains ${result.rows.length} papers with ${result.columns.length} columns (${columnSummary}). ${include_data ? `${dataCells} data cells included.` : "Structure only."}`,
     };
   } catch (error) {
     Zotero.debug(`[seerai] Tool: read_table error: ${error}`);

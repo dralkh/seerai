@@ -6,7 +6,7 @@
  * Rate Limit: 1 request per second with API key
  */
 
-import { config } from "../../package.json";
+import { getPref } from "../utils/prefs";
 
 // ==================== Types ====================
 
@@ -79,6 +79,39 @@ export interface BulkSearchResult {
   data: SemanticScholarPaper[];
 }
 
+export interface SemanticScholarConnectionDiagnostic {
+  ok: boolean;
+  status?: number;
+  state:
+    | "accepted"
+    | "missing-key"
+    | "rejected-key"
+    | "rate-limited"
+    | "network-error"
+    | "api-error";
+  message: string;
+}
+
+export function semanticScholarApiErrorMessage(
+  status: number,
+  body: string,
+  hasApiKey: boolean,
+): string {
+  if ((status === 401 || status === 403) && hasApiKey) {
+    return `Semantic Scholar API key was rejected (${status}). Verify the saved key or create a new key. Response: ${body}`;
+  }
+  if (status === 401 || status === 403) {
+    return `Semantic Scholar blocked this request (${status}). Add a Semantic Scholar API key in Settings for reliable access. Response: ${body}`;
+  }
+  if (status === 429 && hasApiKey) {
+    return `Semantic Scholar rate limit hit (${status}) even with an API key. Wait and try again. Response: ${body}`;
+  }
+  if (status === 429) {
+    return `Semantic Scholar unauthenticated rate limit hit (${status}). If you saved a key, seerai may not be reading it correctly. Response: ${body}`;
+  }
+  return `Semantic Scholar API error (${status}): ${body}`;
+}
+
 // Fields of study supported by Semantic Scholar
 export const FIELDS_OF_STUDY = [
   "Computer Science",
@@ -143,9 +176,12 @@ class SemanticScholarService {
    * Get the API key from Zotero preferences
    */
   private getApiKey(): string {
-    const prefPrefix = config.prefsPrefix;
-    return (
-      (Zotero.Prefs.get(`${prefPrefix}.semanticScholarApiKey`) as string) || ""
+    return (getPref("semanticScholarApiKey") as string) || "";
+  }
+
+  private createApiError(response: Response, body: string): Error {
+    return new Error(
+      semanticScholarApiErrorMessage(response.status, body, !!this.getApiKey()),
     );
   }
 
@@ -298,20 +334,19 @@ class SemanticScholarService {
     // The anonymous relevance endpoint is heavily throttled and frequently
     // returns 403/429 under shared load. Retry with backoff before giving up.
     const maxAttempts = 3;
-    let lastStatus = 0;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         const response = await this.rateLimitedFetch(url);
         if (response.ok) {
           return (await response.json()) as unknown as SearchResult;
         }
-        lastStatus = response.status;
         const errorText = await response.text();
-        const transient = response.status === 403 || response.status === 429;
+        const transient =
+          response.status === 408 ||
+          response.status === 429 ||
+          response.status >= 500;
         if (!transient || attempt === maxAttempts - 1) {
-          throw new Error(
-            `Semantic Scholar API error (${response.status}): ${errorText}`,
-          );
+          throw this.createApiError(response, errorText);
         }
         Zotero.debug(
           `[seerai] Semantic Scholar ${response.status}, retrying (attempt ${attempt + 1})`,
@@ -322,11 +357,6 @@ class SemanticScholarService {
       } catch (error) {
         if (attempt === maxAttempts - 1) {
           Zotero.debug(`[seerai] Semantic Scholar search error: ${error}`);
-          if (lastStatus === 403 && !this.getApiKey()) {
-            throw new Error(
-              "Semantic Scholar blocked this request (403). The public API is rate-limited; add a free Semantic Scholar API key in Settings for reliable access.",
-            );
-          }
           throw error;
         }
       }
@@ -361,9 +391,7 @@ class SemanticScholarService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          `Semantic Scholar API error (${response.status}): ${errorText}`,
-        );
+        throw this.createApiError(response, errorText);
       }
 
       const data = (await response.json()) as unknown as BulkSearchResult;
@@ -405,9 +433,7 @@ class SemanticScholarService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          `Semantic Scholar API error (${response.status}): ${errorText}`,
-        );
+        throw this.createApiError(response, errorText);
       }
 
       return (await response.json()) as unknown as SemanticScholarPaper;
@@ -446,7 +472,7 @@ class SemanticScholarService {
       const response = await this.rateLimitedFetch(url);
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(`API error (${response.status}): ${text}`);
+        throw this.createApiError(response, text);
       }
       const data = (await response.json()) as unknown as {
         data: any[];
@@ -503,7 +529,7 @@ class SemanticScholarService {
       const response = await this.rateLimitedFetch(url);
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(`API error (${response.status}): ${text}`);
+        throw this.createApiError(response, text);
       }
       const data = (await response.json()) as unknown as {
         data: any[];
@@ -567,9 +593,7 @@ class SemanticScholarService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          `Semantic Scholar API error (${response.status}): ${errorText}`,
-        );
+        throw this.createApiError(response, errorText);
       }
 
       const data = (await response.json()) as unknown as {
@@ -587,6 +611,51 @@ class SemanticScholarService {
    */
   hasApiKey(): boolean {
     return !!this.getApiKey();
+  }
+
+  async testConnection(): Promise<SemanticScholarConnectionDiagnostic> {
+    if (!this.getApiKey()) {
+      return {
+        ok: false,
+        state: "missing-key",
+        message: "No Semantic Scholar API key is configured.",
+      };
+    }
+    const url = `${this.baseUrl}/paper/search?query=${encodeURIComponent("machine learning")}&limit=1&fields=title,year`;
+    try {
+      const response = await this.rateLimitedFetch(url);
+      if (response.ok) {
+        return {
+          ok: true,
+          status: response.status,
+          state: "accepted",
+          message: "Semantic Scholar API key was accepted.",
+        };
+      }
+      const body = await response.text();
+      const message = semanticScholarApiErrorMessage(
+        response.status,
+        body,
+        true,
+      );
+      return {
+        ok: false,
+        status: response.status,
+        state:
+          response.status === 401 || response.status === 403
+            ? "rejected-key"
+            : response.status === 429
+              ? "rate-limited"
+              : "api-error",
+        message,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        state: "network-error",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   /**
@@ -653,9 +722,7 @@ class SemanticScholarService {
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(
-          `Author batch error (${response.status}): ${errorText}`,
-        );
+        throw this.createApiError(response, errorText);
       }
 
       return (await response.json()) as unknown as SemanticScholarAuthorDetails[];

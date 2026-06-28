@@ -625,7 +625,7 @@ function safeJsonParse(value: string): Record<string, unknown> {
   }
 }
 
-function truncateMiddle(value: string, max = 140): string {
+export function truncateMiddle(value: string, max = 140): string {
   if (value.length <= max) return value;
   const head = Math.floor((max - 3) * 0.62);
   const tail = max - 3 - head;

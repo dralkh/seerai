@@ -490,6 +490,13 @@ export async function executeSearchExternal(
       query.mode === "source" && activeProviders.length === 1
         ? results.providers[activeProviders[0]]?.total || results.items.length
         : results.items.length;
+    const allActiveProvidersFailed =
+      papers.length === 0 &&
+      activeProviders.length > 0 &&
+      activeProviders.every((id) => {
+        const state = results.providers[id];
+        return !!(state?.error || state?.skippedReason);
+      });
 
     const data: SearchExternalResult = {
       total,
@@ -502,6 +509,15 @@ export async function executeSearchExternal(
       },
       degraded: providerErrors.length > 0,
     };
+
+    if (allActiveProvidersFailed) {
+      return {
+        success: false,
+        data,
+        error: `External scholarly search failed: ${providerErrors.join("; ")}`,
+        summary: `External scholarly search failed: ${providerErrors.join("; ")}`,
+      };
+    }
 
     return {
       success: true,

@@ -582,6 +582,14 @@ export const TableParamsSchema = z.discriminatedUnion("action", [
     item_ids: z.array(z.number().int().positive()).optional(),
   }),
   z.object({
+    action: z.literal("complete_generation"),
+    table_id: z.string().min(1).describe("Table ID"),
+    column_id: z.string().optional(),
+    item_ids: z.array(z.number().int().positive()).optional(),
+    ensure_pdfs: z.boolean().default(true).optional(),
+    include_data: z.boolean().default(true).optional(),
+  }),
+  z.object({
     action: z.literal("read"),
     table_id: z
       .string()

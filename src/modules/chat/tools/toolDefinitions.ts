@@ -870,7 +870,7 @@ export const agentTools: ToolDefinition[] = [
     function: {
       name: TOOL_NAMES.TABLE,
       description:
-        "Manage research analysis tables. List tables, create new tables, add papers, add columns, generate AI data, or read table contents.",
+        "Manage research analysis tables. List tables, create new tables, add papers, add columns, generate AI data, complete PDF-aware generation, or read table contents. Prefer action='complete_generation' when you need final generated values returned in the same tool call.",
       parameters: {
         type: "object",
         properties: {
@@ -882,6 +882,7 @@ export const agentTools: ToolDefinition[] = [
               "add_papers",
               "add_column",
               "generate",
+              "complete_generation",
               "read",
             ],
             description: "Action to perform on tables",
@@ -913,11 +914,17 @@ export const agentTools: ToolDefinition[] = [
           item_ids: {
             type: "array",
             items: { type: "integer" },
-            description: "Specific items (for generate)",
+            description: "Specific items (for generate/complete_generation)",
+          },
+          ensure_pdfs: {
+            type: "boolean",
+            description:
+              "For complete_generation, find and attach missing PDFs before generation (default: true)",
           },
           include_data: {
             type: "boolean",
-            description: "Include cell data (for read)",
+            description:
+              "Include cell data (for read/complete_generation, default: true)",
           },
         },
         required: ["action"],
