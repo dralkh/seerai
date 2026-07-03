@@ -101,6 +101,17 @@ function discoverySummary(models: DiscoveredModel[]): string {
   return `Connected · ${models.length} models · ${counts.join(" · ")}`;
 }
 
+function mergeDiscoveredModels(
+  existing: DiscoveredModel[],
+  incoming: DiscoveredModel[],
+): DiscoveredModel[] {
+  const merged = new Map(existing.map((model) => [model.id, model]));
+  for (const model of incoming) {
+    merged.set(model.id, model);
+  }
+  return Array.from(merged.values());
+}
+
 function matchingRoutingPreset(models: Partial<Record<ModelType, ModelRef>>) {
   return getModelRoutingPresets().find((preset) =>
     CAPABILITIES.every((capability) => {
@@ -474,6 +485,7 @@ export function showProviderManagerDialog(
   let discovered: DiscoveredModel[] = [...(existing?.models || [])];
   let configured: ProviderModel[] = [...(existing?.configuredModels || [])];
   let modelPolicy = existing?.modelPolicy || "automatic";
+  let manuallyEditedModels = false;
   const lanes = element(doc, "div", "seerai-capability-lanes");
 
   const renderLanes = () => {
@@ -503,6 +515,7 @@ export function showProviderManagerDialog(
         remove.title = `Remove from ${capabilityLabel(capability)}`;
         remove.appendChild(createSvgIcon(doc, "close", { size: 11 }));
         remove.addEventListener("click", () => {
+          manuallyEditedModels = true;
           model.capabilities = model.capabilities.filter(
             (item) => item !== capability,
           );
@@ -537,6 +550,7 @@ export function showProviderManagerDialog(
       add.addEventListener("click", () => {
         const modelId = modelInput.value.trim();
         if (!modelId) return;
+        manuallyEditedModels = true;
         const endpoint = endpointInput.value.trim();
         if (endpoint) {
           try {
@@ -577,7 +591,10 @@ export function showProviderManagerDialog(
             updatedAt: now,
           });
         }
-        modelPolicy = "scoped";
+        modelPolicy =
+          discovered.length > 0 || (existing?.models?.length || 0) > 0
+            ? "automatic"
+            : "scoped";
         modelInput.value = "";
         endpointInput.value = "";
         renderLanes();
@@ -796,15 +813,23 @@ export function showProviderManagerDialog(
       } catch (reason) {
         if (configured.length === 0) throw reason;
       }
+      const mergedDiscovered =
+        discovered.length > 0
+          ? mergeDiscoveredModels(existing?.models || [], discovered)
+          : existing?.models || [];
+      const effectiveModelPolicy =
+        manuallyEditedModels && mergedDiscovered.length > 0
+          ? "automatic"
+          : modelPolicy;
       const value = {
         ...draft,
         adapterId: existing?.adapterId || draft.adapterId,
         modelsURL: existing?.modelsURL || draft.modelsURL,
         enabled: existing?.enabled ?? draft.enabled,
         isActive: existing?.isActive ?? draft.isActive,
-        models: discovered,
-        configuredModels: modelPolicy === "scoped" ? configured : [],
-        modelPolicy,
+        models: mergedDiscovered,
+        configuredModels: configured,
+        modelPolicy: effectiveModelPolicy,
       };
       let provider: ProviderConfig;
       if (existing) {
@@ -1249,6 +1274,9 @@ export function createModelRoutingPanel(
                 openCapability = undefined;
                 renderRoutes();
               });
+              inherited.addEventListener("mousedown", (event) =>
+                event.preventDefault(),
+              );
               choices.appendChild(inherited);
             }
             const matches = available.filter((item) => {
@@ -1286,6 +1314,9 @@ export function createModelRoutingPanel(
                 renderRoutes();
               };
               choice.addEventListener("click", choose);
+              choice.addEventListener("mousedown", (event) =>
+                event.preventDefault(),
+              );
               choice.addEventListener("keydown", (event) => {
                 const keyEvent = event as KeyboardEvent;
                 if (keyEvent.key === "Enter" || keyEvent.key === " ") choose();
@@ -1300,6 +1331,9 @@ export function createModelRoutingPanel(
               );
               empty.type = "button";
               empty.textContent = "No matching models · Manage providers";
+              empty.addEventListener("mousedown", (event) =>
+                event.preventDefault(),
+              );
               empty.addEventListener("click", () => manage.click());
               choices.appendChild(empty);
             } else if (matches.length > 24) {
@@ -1483,6 +1517,8 @@ export function showModelRoutingPopover(
       !popover.contains(event.target as Node) &&
       !anchor.contains(event.target as Node)
     ) {
+      const active = doc.activeElement;
+      if (active && popover.contains(active)) return;
       close();
     }
   };

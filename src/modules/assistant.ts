@@ -7000,8 +7000,7 @@ export class Assistant {
         e.stopPropagation();
         if (!currentTableData || currentTableData.selectedRowIds.size === 0)
           return;
-        // Logic will be handled in generateAllEmptyColumns by checking selection
-        this.generateAllEmptyColumns(doc, item);
+        this.generateAllEmptyColumns(doc, item, { selectedOnly: true });
       },
     );
     bulkActionsContainer.appendChild(genSelectedBtn);
@@ -16011,6 +16010,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
   private static async generateAllEmptyColumns(
     doc: Document,
     item: Zotero.Item,
+    options: { selectedOnly?: boolean } = {},
   ): Promise<void> {
     Zotero.debug("[seerai] Generate All clicked");
 
@@ -16064,8 +16064,8 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
         (r) => r.paperId === paperId,
       );
 
-      // Filter by selection if active
       if (
+        options.selectedOnly &&
         currentTableData?.selectedRowIds.size &&
         !currentTableData.selectedRowIds.has(paperId)
       ) {
@@ -16083,13 +16083,6 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
           continue;
         }
 
-        // Calculate correct DOM index
-        // In createPapersTable:
-        // Index 0: Paper (Title + Author + Year + Sources + ZoteroKey + DOI) - Combined
-        // Index 1..N: Other Columns (excluding core columns)
-        // Index N+1: Actions
-
-        // Find index of this column in "otherColumns"
         const coreColumnIds = [
           "title",
           "author",
@@ -16107,12 +16100,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
         if (otherColIndex === -1) continue;
 
-        // Map to DOM index (1-based because 0 is "Paper")
-        const domIndex = otherColIndex + 1;
-
-        // Target the specific TD
-        if (domIndex >= tr.children.length) continue;
-        const td = tr.children[domIndex] as HTMLElement;
+        const td = Array.from(tr.children).find(
+          (cell) =>
+            (cell as HTMLElement).getAttribute("data-column-id") === col.id,
+        ) as HTMLElement | undefined;
         if (!td) continue;
 
         // Add to tasks
@@ -16361,9 +16352,10 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
         if (otherColIndex === -1) continue;
 
-        const domIndex = otherColIndex + 1;
-        if (domIndex >= tr.children.length) continue;
-        const td = tr.children[domIndex] as HTMLElement;
+        const td = Array.from(tr.children).find(
+          (cell) =>
+            (cell as HTMLElement).getAttribute("data-column-id") === col.id,
+        ) as HTMLElement | undefined;
         if (!td) continue;
 
         tasks.push({
@@ -16550,11 +16542,13 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
             if (!cellVal.trim()) {
               // This cell is empty, so it might show the "OCR" prompt
               // Actual index in DOM depends on visible columns
-              const visibleIdx = currentTableConfig!.columns
-                .filter((c) => c.visible)
-                .findIndex((c) => c.id === col.id);
-              if (visibleIdx !== -1 && tr.children[visibleIdx]) {
-                tds.push(tr.children[visibleIdx] as HTMLElement);
+              const cell = Array.from(tr.children).find(
+                (child) =>
+                  (child as HTMLElement).getAttribute("data-column-id") ===
+                  col.id,
+              ) as HTMLElement | undefined;
+              if (cell) {
+                tds.push(cell);
               }
             }
           }
@@ -20076,6 +20070,10 @@ You MUST call the generate_tags function.`;
       (col) => col.visible && !coreColumnIds.includes(col.id),
     );
 
+    const rowNumberMinWidth = 32;
+    let rowNumberColumnWidth =
+      (currentTableConfig as any)?.rowNumberColumnWidth ?? rowNumberMinWidth;
+
     // Paper column width (stored in config or default to 280)
     let paperColumnWidth = (currentTableConfig as any)?.paperColumnWidth ?? 280;
 
@@ -20084,11 +20082,116 @@ You MUST call the generate_tags function.`;
     // and shrink proportionally when the panel narrows, regardless of
     // how wide the user has manually resized individual columns.
     const actionsColumnWidth = 70;
-    const totalColumnWidth =
+    const getTotalColumnWidth = () =>
+      rowNumberColumnWidth +
       paperColumnWidth +
       otherColumns.reduce((sum, col) => sum + col.width, 0) +
       actionsColumnWidth;
-    const paperPct = ((paperColumnWidth / totalColumnWidth) * 100).toFixed(2);
+    const pct = (width: number, total = getTotalColumnWidth()) =>
+      ((width / total) * 100).toFixed(2);
+    const totalColumnWidth = getTotalColumnWidth();
+    const rowNumberPct = pct(rowNumberColumnWidth, totalColumnWidth);
+    const paperPct = pct(paperColumnWidth, totalColumnWidth);
+    const updateRenderedColumnWidths = () => {
+      const total = getTotalColumnWidth();
+      const nextRowNumberPct = pct(rowNumberColumnWidth, total);
+      const nextPaperPct = pct(paperColumnWidth, total);
+
+      table
+        .querySelectorAll("td:nth-child(1), th:nth-child(1)")
+        .forEach((cell: Element) => {
+          (cell as HTMLElement).style.width = `${nextRowNumberPct}%`;
+        });
+      table
+        .querySelectorAll("td:nth-child(2), th:nth-child(2)")
+        .forEach((cell: Element) => {
+          (cell as HTMLElement).style.width = `${nextPaperPct}%`;
+        });
+      otherColumns.forEach((col, idx) => {
+        const colPct = pct(col.width, total);
+        table
+          .querySelectorAll(
+            `td:nth-child(${idx + 3}), th:nth-child(${idx + 3})`,
+          )
+          .forEach((cell: Element) => {
+            (cell as HTMLElement).style.width = `${colPct}%`;
+            (cell as HTMLElement).style.maxWidth = `${colPct}%`;
+          });
+      });
+      const actionsPct = pct(actionsColumnWidth, total);
+      const lastColIdx = otherColumns.length + 3;
+      table
+        .querySelectorAll(
+          `td:nth-child(${lastColIdx}), th:nth-child(${lastColIdx})`,
+        )
+        .forEach((cell: Element) => {
+          (cell as HTMLElement).style.width = `${actionsPct}%`;
+        });
+    };
+
+    const numberHeader = ztoolkit.UI.createElement(doc, "th", {
+      properties: { innerText: "#" },
+      styles: {
+        position: "relative",
+        backgroundColor: "var(--background-secondary)",
+        borderBottom: "1px solid rgba(128, 128, 128, 0.4)",
+        borderRight: "1px solid rgba(128, 128, 128, 0.4)",
+        padding: "8px 6px",
+        textAlign: "center",
+        fontWeight: "600",
+        width: `${rowNumberPct}%`,
+        minWidth: "32px",
+        userSelect: "none",
+      },
+    });
+    const numberResizeHandle = ztoolkit.UI.createElement(doc, "div", {
+      properties: { className: "column-resize-handle" },
+      styles: {
+        position: "absolute",
+        right: "0",
+        top: "0",
+        bottom: "0",
+        width: "6px",
+        cursor: "col-resize",
+        backgroundColor: "transparent",
+      },
+    });
+    numberResizeHandle.addEventListener("mouseenter", () => {
+      numberResizeHandle.style.backgroundColor = "var(--highlight-primary)";
+    });
+    numberResizeHandle.addEventListener("mouseleave", () => {
+      numberResizeHandle.style.backgroundColor = "transparent";
+    });
+    numberResizeHandle.addEventListener("mousedown", (e: MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const startX = e.clientX;
+      const startWidth = rowNumberColumnWidth;
+
+      const onMouseMove = (moveE: MouseEvent) => {
+        const delta = moveE.clientX - startX;
+        rowNumberColumnWidth = Math.max(rowNumberMinWidth, startWidth + delta);
+        updateRenderedColumnWidths();
+      };
+
+      const onMouseUp = async () => {
+        doc.removeEventListener("mousemove", onMouseMove);
+        doc.removeEventListener("mouseup", onMouseUp);
+
+        if (currentTableConfig) {
+          (currentTableConfig as any).rowNumberColumnWidth =
+            rowNumberColumnWidth;
+          const tableStore = getTableStore();
+          await tableStore.saveConfig(currentTableConfig);
+        }
+      };
+
+      doc.addEventListener("mousemove", onMouseMove);
+      doc.addEventListener("mouseup", onMouseUp);
+    });
+    numberHeader.appendChild(numberResizeHandle);
+    headerRow.appendChild(numberHeader);
 
     // Add combined "Paper" header (for title, author, year, sources)
     const paperHeader = ztoolkit.UI.createElement(doc, "th", {
@@ -20160,46 +20263,7 @@ You MUST call the generate_tags function.`;
         const delta = moveE.clientX - startX;
         const newWidth = Math.max(40, startWidth + delta);
         paperColumnWidth = newWidth;
-
-        // Recalculate all column percentages so the table always fits 100%
-        const newTotal =
-          newWidth +
-          otherColumns.reduce((sum, col) => sum + col.width, 0) +
-          actionsColumnWidth;
-        const newPaperPct = ((newWidth / newTotal) * 100).toFixed(2);
-
-        // Update header width
-        (paperHeader as HTMLElement).style.width = `${newPaperPct}%`;
-
-        // Update all Paper cells (first column)
-        const cells = table.querySelectorAll(
-          `td:nth-child(1), th:nth-child(1)`,
-        );
-        cells.forEach((cell: Element) => {
-          (cell as HTMLElement).style.width = `${newPaperPct}%`;
-        });
-
-        // Update other column percentages
-        otherColumns.forEach((col, idx) => {
-          const colPct = ((col.width / newTotal) * 100).toFixed(2);
-          const colCells = table.querySelectorAll(
-            `td:nth-child(${idx + 2}), th:nth-child(${idx + 2})`,
-          );
-          colCells.forEach((cell: Element) => {
-            (cell as HTMLElement).style.width = `${colPct}%`;
-            (cell as HTMLElement).style.maxWidth = `${colPct}%`;
-          });
-        });
-
-        // Update actions column percentage
-        const actionsPct = ((actionsColumnWidth / newTotal) * 100).toFixed(2);
-        const lastColIdx = otherColumns.length + 2;
-        const actionsCells = table.querySelectorAll(
-          `td:nth-child(${lastColIdx}), th:nth-child(${lastColIdx})`,
-        );
-        actionsCells.forEach((cell: Element) => {
-          (cell as HTMLElement).style.width = `${actionsPct}%`;
-        });
+        updateRenderedColumnWidths();
       };
 
       const onMouseUp = async () => {
@@ -20358,55 +20422,12 @@ You MUST call the generate_tags function.`;
 
           const startX = e.clientX;
           const startWidth = col.width;
-          const colIndex = otherColumns.findIndex((c) => c.id === col.id) + 1; // +1 for Paper column
 
           const onMouseMove = (moveE: MouseEvent) => {
             const delta = moveE.clientX - startX;
             const newWidth = Math.max(col.minWidth, startWidth + delta);
             col.width = newWidth;
-
-            // Recalculate all column percentages so the table always fits 100%
-            const newTotal =
-              paperColumnWidth +
-              otherColumns.reduce((sum, c) => sum + c.width, 0) +
-              actionsColumnWidth;
-            const colPct = ((newWidth / newTotal) * 100).toFixed(2);
-
-            // Update header width
-            th.style.width = `${colPct}%`;
-
-            // Update all cells in this column (+2 because Paper is +1 and nth-child is 1-indexed)
-            const cells = table.querySelectorAll(
-              `td:nth-child(${colIndex + 1}), th:nth-child(${colIndex + 1})`,
-            );
-            cells.forEach((cell: Element) => {
-              (cell as HTMLElement).style.width = `${colPct}%`;
-              (cell as HTMLElement).style.maxWidth = `${colPct}%`;
-            });
-
-            // Update paper column percentage
-            const paperPctNew = ((paperColumnWidth / newTotal) * 100).toFixed(
-              2,
-            );
-            const paperCells = table.querySelectorAll(
-              `td:nth-child(1), th:nth-child(1)`,
-            );
-            paperCells.forEach((cell: Element) => {
-              (cell as HTMLElement).style.width = `${paperPctNew}%`;
-            });
-
-            // Update actions column percentage
-            const actionsPctNew = (
-              (actionsColumnWidth / newTotal) *
-              100
-            ).toFixed(2);
-            const lastColIdx = otherColumns.length + 2;
-            const actionsCells = table.querySelectorAll(
-              `td:nth-child(${lastColIdx}), th:nth-child(${lastColIdx})`,
-            );
-            actionsCells.forEach((cell: Element) => {
-              (cell as HTMLElement).style.width = `${actionsPctNew}%`;
-            });
+            updateRenderedColumnWidths();
           };
 
           const onMouseUp = async () => {
@@ -20458,7 +20479,7 @@ You MUST call the generate_tags function.`;
     // Create body
     const tbody = ztoolkit.UI.createElement(doc, "tbody", {});
 
-    tableData.rows.forEach((row) => {
+    tableData.rows.forEach((row, rowIndex) => {
       const tr = ztoolkit.UI.createElement(doc, "tr", {
         properties: {
           className: tableData.selectedRowIds.has(row.paperId)
@@ -20529,8 +20550,31 @@ You MUST call the generate_tags function.`;
         ],
       });
 
+      const rowNumber =
+        ((tableData.currentPage || 1) - 1) * (tableData.pageSize || 25) +
+        rowIndex +
+        1;
+      const numberCell = ztoolkit.UI.createElement(doc, "td", {
+        properties: { innerText: String(rowNumber) },
+        attributes: { "data-row-number": String(rowNumber) },
+        styles: {
+          padding: "8px 6px",
+          borderBottom: "1px solid rgba(128, 128, 128, 0.4)",
+          borderRight: "1px solid rgba(128, 128, 128, 0.4)",
+          verticalAlign: "top",
+          width: `${rowNumberPct}%`,
+          minWidth: "32px",
+          textAlign: "center",
+          color: "var(--text-tertiary)",
+          fontVariantNumeric: "tabular-nums",
+          userSelect: "none",
+        },
+      });
+      tr.appendChild(numberCell);
+
       // Create combined "Paper" cell (title, author, year, sources)
       const paperCell = ztoolkit.UI.createElement(doc, "td", {
+        attributes: { "data-paper-cell": "true" },
         styles: {
           padding: "8px 10px",
           borderBottom: "1px solid rgba(128, 128, 128, 0.4)",
@@ -20688,6 +20732,7 @@ You MUST call the generate_tags function.`;
         const isEmpty = !cellValue || cellValue.trim() === "";
 
         const td = ztoolkit.UI.createElement(doc, "td", {
+          attributes: { "data-column-id": col.id },
           styles: {
             padding: "8px 10px",
             borderBottom: "1px solid rgba(128, 128, 128, 0.4)",
@@ -21053,7 +21098,9 @@ You MUST call the generate_tags function.`;
                   // Update metadata UI in the first cell
                   const tr = td.parentElement as HTMLTableRowElement;
                   if (tr) {
-                    const paperCell = tr.cells[0];
+                    const paperCell = tr.querySelector(
+                      '[data-paper-cell="true"]',
+                    ) as HTMLElement | null;
                     if (paperCell && paperCell.children.length > 1) {
                       const metaDiv = paperCell.children[1] as HTMLElement;
                       const author = row.data["author"] || "";
@@ -22722,8 +22769,14 @@ You MUST call the generate_tags function.`;
       return;
     }
 
+    let quickClickOutsideHandler: ((e: Event) => void) | null = null;
+
     // Helper to close dropdown with animation
     const closeDropdown = () => {
+      if (quickClickOutsideHandler) {
+        doc.removeEventListener("click", quickClickOutsideHandler);
+        quickClickOutsideHandler = null;
+      }
       dropdown.style.opacity = "0";
       dropdown.style.transform = "translateY(-5px)";
       setTimeout(() => dropdown.remove(), 150);
@@ -22954,6 +23007,38 @@ You MUST call the generate_tags function.`;
 
     content.appendChild(aiParamsContainer);
 
+    const commitQuickColumn = async (): Promise<boolean> => {
+      const name = nameInput.value.trim();
+      if (!name || !currentTableConfig) return false;
+      const aiPrompt = promptInput.value.trim();
+      const customTemp = parseFloat(tempSlider.value);
+      const customMaxTokens = parseInt(maxLenInput.value);
+
+      const newColumn: TableColumn = {
+        id: `custom_${Date.now()}`,
+        name,
+        width: 150,
+        minWidth: 80,
+        visible: true,
+        sortable: false,
+        resizable: true,
+        type: "computed",
+        aiPrompt:
+          aiPrompt ||
+          `Extract information related to "${name}" from this paper.`,
+        temperature:
+          customTemp !== getEffectiveTableTemp() ? customTemp : undefined,
+        maxTokens: !isNaN(customMaxTokens) ? customMaxTokens : undefined,
+      };
+      currentTableConfig.columns.push(newColumn);
+      const tableStore = getTableStore();
+      await tableStore.saveConfig(currentTableConfig);
+      if (currentContainer && currentItem) {
+        this.renderInterface(currentContainer, currentItem);
+      }
+      return true;
+    };
+
     // Add button
     const addBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
@@ -22974,45 +23059,11 @@ You MUST call the generate_tags function.`;
         {
           type: "click",
           listener: async () => {
-            const name = nameInput.value.trim();
-            if (!name) {
+            if (!(await commitQuickColumn())) {
               nameInput.style.borderColor = "#c62828";
               return;
             }
-
-            if (currentTableConfig) {
-              const aiPrompt = promptInput.value.trim();
-              const customTemp = parseFloat(tempSlider.value);
-              const customMaxTokens = parseInt(maxLenInput.value);
-
-              const newColumn: TableColumn = {
-                id: `custom_${Date.now()}`,
-                name,
-                width: 150,
-                minWidth: 80,
-                visible: true,
-                sortable: false,
-                resizable: true,
-                type: "computed",
-                aiPrompt:
-                  aiPrompt ||
-                  `Extract information related to "${name}" from this paper.`,
-                temperature:
-                  customTemp !== getEffectiveTableTemp()
-                    ? customTemp
-                    : undefined,
-                maxTokens: !isNaN(customMaxTokens)
-                  ? customMaxTokens
-                  : undefined,
-              };
-              currentTableConfig.columns.push(newColumn);
-              const tableStore = getTableStore();
-              await tableStore.saveConfig(currentTableConfig);
-              closeDropdown();
-              if (currentContainer && currentItem) {
-                this.renderInterface(currentContainer, currentItem);
-              }
-            }
+            closeDropdown();
           },
         },
       ],
@@ -23045,15 +23096,16 @@ You MUST call the generate_tags function.`;
     setTimeout(() => nameInput.focus(), 50);
 
     // Click outside to close
-    const handleClickOutside = (e: Event) => {
+    const handleClickOutside = async (e: Event) => {
       const target = e.target as Node;
       // Check if click is inside dropdown or on the anchor button
       if (!dropdown.contains(target) && !anchorEl.contains(target)) {
+        await commitQuickColumn();
         closeDropdown();
-        doc.removeEventListener("click", handleClickOutside);
       }
     };
     setTimeout(() => {
+      quickClickOutsideHandler = handleClickOutside;
       doc.addEventListener("click", handleClickOutside);
     }, 150);
   }
@@ -23084,11 +23136,25 @@ You MUST call the generate_tags function.`;
     const tableStore = getTableStore();
     await tableStore.saveConfig(currentTableConfig);
 
-    // Re-render the interface
     if (currentContainer && currentItem) {
-      this.renderInterface(currentContainer, currentItem);
+      const activeContainer = currentContainer;
+      const tableWrapper = activeContainer.querySelector(
+        ".table-wrapper",
+      ) as HTMLElement | null;
+      const scrollTop = tableWrapper?.scrollTop ?? 0;
+      const scrollLeft = tableWrapper?.scrollLeft ?? 0;
+      const restoreTableScroll = () => {
+        const nextWrapper = activeContainer.querySelector(
+          ".table-wrapper",
+        ) as HTMLElement | null;
+        if (!nextWrapper) return;
+        nextWrapper.scrollTop = scrollTop;
+        nextWrapper.scrollLeft = scrollLeft;
+      };
 
-      // After render, find the new column header and open editor
+      await this.renderInterface(activeContainer, currentItem);
+      restoreTableScroll();
+
       setTimeout(() => {
         const headerCells = doc.querySelectorAll("th[data-column-id]");
         const newColHeader = (Array.from(headerCells) as HTMLElement[]).find(
@@ -23096,13 +23162,18 @@ You MUST call the generate_tags function.`;
         );
 
         if (newColHeader) {
+          const canonicalColumn =
+            currentTableConfig?.columns.find(
+              (col) => col.id === newColumn.id,
+            ) || newColumn;
           this.showTableColumnEditPopover(
             doc,
             newColHeader,
-            newColumn,
+            canonicalColumn,
             item,
             container,
           );
+          restoreTableScroll();
         }
       }, 100);
     }
@@ -23127,22 +23198,12 @@ You MUST call the generate_tags function.`;
 
     // Debounce timer for auto-save
     let saveDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+    let commitEdits: () => Promise<void> = async () => {};
+    let closeEditor: () => void = () => {};
 
     const autoSave = async () => {
       if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
-      saveDebounceTimer = setTimeout(async () => {
-        if (currentTableConfig) {
-          const tableStore = getTableStore();
-          await tableStore.saveConfig(currentTableConfig);
-          // Update header text in place
-          const headerText = anchorEl.querySelector(
-            ".column-header-text",
-          ) as HTMLElement;
-          if (headerText) {
-            headerText.innerText = column.name;
-          }
-        }
-      }, 300);
+      saveDebounceTimer = setTimeout(() => void commitEdits(), 300);
     };
 
     // Backdrop for click-outside-to-close
@@ -23159,12 +23220,10 @@ You MUST call the generate_tags function.`;
       listeners: [
         {
           type: "click",
-          listener: (e: Event) => {
+          listener: async (e: Event) => {
             e.stopPropagation();
-            if (saveDebounceTimer) clearTimeout(saveDebounceTimer);
-            backdrop.remove();
-            const p = doc.getElementById("table-column-editor-popover");
-            if (p) p.remove();
+            await commitEdits();
+            closeEditor();
           },
         },
       ],
@@ -23231,6 +23290,7 @@ You MUST call the generate_tags function.`;
       column.name = nameInput.value;
       autoSave();
     });
+    nameInput.addEventListener("blur", () => void commitEdits());
     popover.appendChild(nameInput);
 
     // AI Prompt label
@@ -23271,6 +23331,7 @@ You MUST call the generate_tags function.`;
       column.aiPrompt = promptInput.value;
       autoSave();
     });
+    promptInput.addEventListener("blur", () => void commitEdits());
     popover.appendChild(promptInput);
 
     const paramContainer = ztoolkit.UI.createElement(doc, "div", {
@@ -23450,6 +23511,64 @@ You MUST call the generate_tags function.`;
 
     popover.appendChild(paramContainer);
 
+    commitEdits = async () => {
+      if (saveDebounceTimer) {
+        clearTimeout(saveDebounceTimer);
+        saveDebounceTimer = null;
+      }
+      if (!currentTableConfig) return;
+      const target =
+        currentTableConfig.columns.find((col) => col.id === column.id) ||
+        column;
+      const nextName = nameInput.value.trim() || "New Column";
+      const nextPrompt =
+        promptInput.value.trim() ||
+        `Extract information related to "${nextName}" from this paper.`;
+      target.name = nextName;
+      target.aiPrompt = nextPrompt;
+      target.temperature = column.temperature;
+      target.maxTokens = column.maxTokens;
+      column.name = nextName;
+      column.aiPrompt = nextPrompt;
+      const tableStore = getTableStore();
+      await tableStore.saveConfig(currentTableConfig);
+      const headerText = anchorEl.querySelector(
+        ".column-header-text",
+      ) as HTMLElement;
+      if (headerText) {
+        headerText.innerText = target.name;
+      }
+      anchorEl.setAttribute("title", target.aiPrompt || "");
+    };
+
+    const saveBtn = ztoolkit.UI.createElement(doc, "button", {
+      namespace: "html",
+      properties: {
+        innerHTML: iconMarkup("save", { size: 13 }) + " Save Changes",
+      },
+      styles: {
+        padding: "8px 12px",
+        fontSize: "12px",
+        color: "var(--highlight-text)",
+        border: "1px solid var(--highlight-primary)",
+        borderRadius: "6px",
+        backgroundColor: "var(--highlight-primary)",
+        cursor: "pointer",
+        marginTop: "6px",
+      },
+      listeners: [
+        {
+          type: "click",
+          listener: async () => {
+            await commitEdits();
+            closeEditor();
+          },
+        },
+      ],
+    });
+
+    popover.appendChild(saveBtn);
+
     // Remove Column button
     const removeBtn = ztoolkit.UI.createElement(doc, "button", {
       namespace: "html",
@@ -23483,8 +23602,7 @@ You MUST call the generate_tags function.`;
               }
               const tableStore = getTableStore();
               await tableStore.saveConfig(currentTableConfig);
-              backdrop.remove();
-              popover.remove();
+              closeEditor();
               // Re-render
               if (currentContainer && currentItem) {
                 this.renderInterface(currentContainer, currentItem);
@@ -23532,8 +23650,23 @@ You MUST call the generate_tags function.`;
       doc.documentElement?.appendChild(popover);
     }
 
-    // Focus the name input
-    nameInput.focus();
+    const onEditorKeydown = async (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      await commitEdits();
+      closeEditor();
+    };
+    closeEditor = () => {
+      backdrop.remove();
+      popover.remove();
+      doc.removeEventListener("keydown", onEditorKeydown);
+    };
+    doc.addEventListener("keydown", onEditorKeydown);
+
+    try {
+      nameInput.focus({ preventScroll: true });
+    } catch {
+      nameInput.focus();
+    }
     nameInput.select();
   }
 
@@ -28838,6 +28971,11 @@ ${tableRows}  </tbody>
             }
             await this.addItemWithNotes(currentItem);
           }
+          await getMessageStore().saveConversationState(
+            stateManager.getStates(),
+            stateManager.getOptions(),
+            ChatContextManager.getInstance().getSerializableItems(),
+          );
         },
         onModelChange: () => {
           void getMessageStore().saveConversationState(

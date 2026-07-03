@@ -310,6 +310,16 @@ export class ChatStateManager {
         ...data.options,
       };
     }
+    try {
+      const savedMode = Zotero.Prefs.get(
+        "extensions.seerai.selectionMode",
+      ) as string;
+      if (savedMode && ["lock", "default", "explore"].includes(savedMode)) {
+        this.options.selectionMode = savedMode as ChatOptions["selectionMode"];
+      }
+    } catch (e) {
+      Zotero.debug(`[seerai] Could not apply selection mode pref: ${e}`);
+    }
     this.notify();
   }
 

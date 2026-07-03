@@ -514,7 +514,9 @@ export function getConfiguredProviderModels(
   const configuredByRemoteId = new Map(
     (provider.configuredModels || []).map((model) => [model.modelId, model]),
   );
-  return provider.models.map((model) => {
+  const seenRemoteIds = new Set<string>();
+  const discovered = provider.models.map((model) => {
+    seenRemoteIds.add(model.id);
     const configured = configuredByRemoteId.get(model.id);
     if (configured) return configured;
     const now = provider.modelsLastFetched || provider.updatedAt;
@@ -528,6 +530,10 @@ export function getConfiguredProviderModels(
       updatedAt: now,
     };
   });
+  const configuredOnly = (provider.configuredModels || []).filter(
+    (model) => !seenRemoteIds.has(model.modelId),
+  );
+  return [...discovered, ...configuredOnly];
 }
 
 export function addProviderModel(
@@ -642,7 +648,13 @@ export function replaceDiscoveredModels(
 ): void {
   const provider = getProviderConfig(providerId);
   if (!provider) return;
-  provider.models = models;
+  if (models.length > 0) {
+    const merged = new Map(provider.models.map((model) => [model.id, model]));
+    for (const model of models) {
+      merged.set(model.id, model);
+    }
+    provider.models = Array.from(merged.values());
+  }
   provider.modelsLastFetched = new Date().toISOString();
   provider.updatedAt = provider.modelsLastFetched;
   changed();

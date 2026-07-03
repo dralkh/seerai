@@ -1,6 +1,7 @@
 import { assert } from "chai";
 import { resolveModelFromState } from "../src/modules/chat/modelResolver";
 import {
+  getConfiguredProviderModels,
   mergeProviderModelUpdate,
   migrateLegacyModels,
   renameModelRoutingPresetInState,
@@ -196,6 +197,41 @@ describe("Provider model routing", function () {
     };
     const resolved = resolveModelFromState(state, "chat");
     assert.equal(resolved?.model.modelId, "discovered-chat");
+  });
+
+  it("keeps manually added models additive in automatic mode", function () {
+    const automatic = provider("auto", "Automatic", [], {
+      modelPolicy: "automatic",
+      models: [
+        {
+          id: "discovered-chat",
+          object: "model",
+          displayName: "Discovered Chat",
+          capabilities: ["chat"],
+        },
+      ],
+      configuredModels: [
+        model("manual", "manual-chat", ["chat"]),
+        {
+          ...model("configured-discovered", "discovered-chat", ["chat"]),
+          displayName: "Configured Discovered",
+          ragAlwaysUse: true,
+        },
+      ],
+    });
+    const available = getConfiguredProviderModels(automatic);
+    assert.sameMembers(
+      available.map((item) => item.modelId),
+      ["discovered-chat", "manual-chat"],
+    );
+    assert.equal(
+      available.find((item) => item.modelId === "discovered-chat")?.displayName,
+      "Configured Discovered",
+    );
+    assert.isTrue(
+      available.find((item) => item.modelId === "discovered-chat")
+        ?.ragAlwaysUse,
+    );
   });
 
   it("persists RAG metadata for an automatically discovered model", function () {
