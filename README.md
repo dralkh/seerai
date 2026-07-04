@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/dralkh-seerai-badge.png)](https://mseep.ai/app/dralkh-seerai)
+
 # seerai — AI Research Assistant Plugin for Zotero
 
 <p align="center">
