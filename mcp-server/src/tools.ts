@@ -199,366 +199,202 @@ const importPaperParams = z
 
 // ==================== Consolidated Tool Parameter Schemas ====================
 
-const contextParams = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("list") }),
-  z.object({
-    action: z.literal("add"),
-    items: z
-      .array(
-        z.object({
-          type: z.enum([
-            "paper",
-            "tag",
-            "author",
-            "collection",
-            "topic",
-            "table",
-            "review",
-          ]),
-          id: z.union([z.number(), z.string()]).optional(),
-          name: z.string().optional(),
-        }),
-      )
-      .min(1)
-      .describe("Items to add to context"),
-  }),
-  z.object({
-    action: z.literal("remove"),
-    items: z
-      .array(
-        z.object({
-          type: z.enum([
-            "paper",
-            "tag",
-            "author",
-            "collection",
-            "topic",
-            "table",
-            "review",
-          ]),
-          id: z.union([z.number(), z.string()]).optional(),
-        }),
-      )
-      .min(1)
-      .describe("Items to remove from context"),
-  }),
-]);
+const contextItemParams = z.object({
+  type: z.enum([
+    "paper",
+    "tag",
+    "author",
+    "collection",
+    "topic",
+    "table",
+    "review",
+  ]),
+  id: z.union([z.number(), z.string()]).optional(),
+  name: z.string().optional(),
+});
 
-const collectionParams = z.discriminatedUnion("action", [
-  z.object({
-    action: z.literal("find"),
-    name: z.string().min(1).describe("Collection name to search for"),
-    library_id: z.number().optional(),
-    parent_id: z.number().optional(),
-  }),
-  z.object({
-    action: z.literal("create"),
-    name: z.string().min(1).describe("Name for new collection"),
-    parent_id: z.number().optional(),
-    library_id: z.number().optional(),
-  }),
-  z.object({
-    action: z.literal("list"),
-    collection_id: z.number().describe("Collection ID to list"),
-  }),
-  z.object({
-    action: z.literal("add_item"),
-    collection_id: z.number().describe("Target collection ID"),
-    item_ids: z.array(z.number()).min(1).describe("Item IDs to add"),
-    remove_from_others: z.boolean().default(false).optional(),
-  }),
-  z.object({
-    action: z.literal("remove_item"),
-    collection_id: z.number().describe("Collection ID"),
-    item_ids: z.array(z.number()).min(1).describe("Item IDs to remove"),
-  }),
-]);
+const contextParams = z.object({
+  action: z.enum(["list", "add", "remove"]),
+  items: z
+    .array(contextItemParams)
+    .min(1)
+    .optional()
+    .describe("Items to add or remove from context"),
+});
 
-const tableParams = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("list") }),
-  z.object({
-    action: z.literal("create"),
-    name: z.string().min(1).describe("Table name"),
-    paper_ids: z.array(z.number()).optional().describe("Initial papers"),
-  }),
-  z.object({
-    action: z.literal("add_papers"),
-    table_id: z.string().min(1).describe("Table ID"),
-    paper_ids: z.array(z.number()).min(1).describe("Paper IDs to add"),
-  }),
-  z.object({
-    action: z.literal("add_column"),
-    table_id: z.string().min(1).describe("Table ID"),
-    column_name: z.string().min(1).describe("Column name"),
-    ai_prompt: z.string().min(1).describe("AI prompt for data generation"),
-  }),
-  z.object({
-    action: z.literal("generate"),
-    table_id: z.string().min(1).describe("Table ID"),
-    column_id: z.string().optional(),
-    item_ids: z.array(z.number()).optional(),
-  }),
-  z.object({
-    action: z.literal("complete_generation"),
-    table_id: z.string().min(1).describe("Table ID"),
-    column_id: z.string().optional(),
-    item_ids: z.array(z.number()).optional(),
-    ensure_pdfs: z.boolean().default(true).optional(),
-    include_data: z.boolean().default(true).optional(),
-  }),
-  z.object({
-    action: z.literal("read"),
-    table_id: z
-      .string()
-      .optional()
-      .describe("Table ID (most recent if omitted)"),
-    include_data: z.boolean().default(true).optional(),
-  }),
-]);
+const collectionParams = z.object({
+  action: z.enum(["find", "create", "list", "add_item", "remove_item"]),
+  name: z
+    .string()
+    .min(1)
+    .optional()
+    .describe("Collection name for find/create"),
+  library_id: z.number().optional(),
+  parent_id: z.number().optional(),
+  collection_id: z.number().optional().describe("Collection ID"),
+  item_ids: z.array(z.number()).min(1).optional().describe("Item IDs"),
+  remove_from_others: z.boolean().default(false).optional(),
+});
 
-const noteParams = z.discriminatedUnion("action", [
-  z.object({
-    action: z.literal("create"),
-    parent_item_id: z.number().optional(),
-    collection_id: z.number().optional(),
-    title: z.string().min(1).describe("Note title"),
-    content: z.string().min(1).describe("Note content (markdown)"),
-    tags: z.array(z.string()).optional(),
-  }),
-  z.object({
-    action: z.literal("edit"),
-    note_id: z.number().describe("Note ID to edit"),
-    operations: z
-      .array(
-        z.object({
-          type: z.enum(["replace", "insert", "append", "prepend", "delete"]),
-          search: z.string().optional(),
-          content: z.string().optional(),
-          position: z.string().optional(),
-          replace_all: z.boolean().default(false).optional(),
-        }),
-      )
-      .min(1),
-    convert_markdown: z.boolean().default(true).optional(),
-  }),
-]);
+const tableParams = z.object({
+  action: z.enum([
+    "list",
+    "create",
+    "add_papers",
+    "add_column",
+    "generate",
+    "complete_generation",
+    "read",
+  ]),
+  name: z.string().min(1).optional().describe("Table name"),
+  table_id: z
+    .string()
+    .optional()
+    .describe("Table ID (most recent if omitted for read)"),
+  paper_ids: z.array(z.number()).optional().describe("Paper IDs"),
+  column_name: z.string().min(1).optional().describe("Column name"),
+  ai_prompt: z.string().min(1).optional().describe("AI prompt"),
+  column_id: z.string().optional(),
+  item_ids: z.array(z.number()).optional(),
+  ensure_pdfs: z.boolean().default(true).optional(),
+  include_data: z.boolean().default(true).optional(),
+});
 
-const relatedPapersParams = z.discriminatedUnion("action", [
-  z.object({
-    action: z.literal("citations"),
-    paper_id: z.string().describe("Semantic Scholar paper ID"),
-    limit: z.number().min(1).max(50).default(10).optional(),
-  }),
-  z.object({
-    action: z.literal("references"),
-    paper_id: z.string().describe("Semantic Scholar paper ID"),
-    limit: z.number().min(1).max(50).default(10).optional(),
-  }),
-]);
+const noteParams = z.object({
+  action: z.enum(["create", "edit"]),
+  parent_item_id: z.number().optional(),
+  collection_id: z.number().optional(),
+  title: z.string().min(1).optional().describe("Note title"),
+  content: z.string().min(1).optional().describe("Note content (markdown)"),
+  tags: z.array(z.string()).optional(),
+  note_id: z.number().optional().describe("Note ID to edit"),
+  operations: z
+    .array(
+      z.object({
+        type: z.enum(["replace", "insert", "append", "prepend", "delete"]),
+        search: z.string().optional(),
+        content: z.string().optional(),
+        position: z.string().optional(),
+        replace_all: z.boolean().default(false).optional(),
+      }),
+    )
+    .min(1)
+    .optional(),
+  convert_markdown: z.boolean().default(true).optional(),
+});
 
-const webParams = z.discriminatedUnion("action", [
-  z.object({
-    action: z.literal("search"),
-    query: z.string().min(1).describe("Search query"),
-    limit: z.number().min(1).max(20).default(5).optional(),
-  }),
-  z.object({
-    action: z.literal("read"),
-    url: z.string().describe("URL to read"),
-  }),
-]);
+const relatedPapersParams = z.object({
+  action: z.enum(["citations", "references"]),
+  paper_id: z.string().describe("Semantic Scholar paper ID"),
+  limit: z.number().min(1).max(50).default(10).optional(),
+});
 
-const systematicReviewParams = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("list_projects") }),
-  z.object({
-    action: z.literal("get_project"),
-    project_id: z.string().optional(),
-  }),
-  z.object({
-    action: z.literal("get_records"),
-    project_id: z.string().optional(),
-  }),
-  z.object({
-    action: z.literal("get_synthesis"),
-    project_id: z.string().optional(),
-    run_id: z.string().optional(),
-  }),
-  z.object({
-    action: z.literal("get_gaps"),
-    project_id: z.string().optional(),
-    run_id: z.string().optional(),
-  }),
-  z.object({
-    action: z.literal("get_prisma"),
-    project_id: z.string().optional(),
-  }),
-  z.object({
-    action: z.literal("get_sources"),
-    project_id: z.string().optional(),
-  }),
-  z.object({
-    action: z.literal("sync_sources"),
-    project_id: z.string().optional(),
-    sources: z.array(
+const webParams = z.object({
+  action: z.enum(["search", "read"]),
+  query: z.string().min(1).optional().describe("Search query"),
+  url: z.string().optional().describe("URL to read"),
+  limit: z.number().min(1).max(20).default(5).optional(),
+});
+
+const systematicReviewParams = z.object({
+  action: z.enum([
+    "list_projects",
+    "get_project",
+    "get_records",
+    "get_synthesis",
+    "get_gaps",
+    "get_prisma",
+    "get_sources",
+    "sync_sources",
+    "get_protocol",
+    "validate_protocol",
+    "rollback_protocol",
+    "update_protocol",
+    "create_project",
+    "add_papers",
+    "remove_papers",
+    "get_extraction_template",
+    "propose_extraction_template",
+    "activate_extraction_template",
+    "update_extraction_template",
+    "start_analysis_job",
+    "start_extraction_job",
+    "run_evidence_analysis",
+    "run_gap_analysis",
+    "retry_failed_extractions",
+    "get_extraction_logs",
+    "get_review_job",
+    "pause_review_job",
+    "cancel_review_job",
+    "retry_review_job",
+    "get_extractions",
+    "review_extractions",
+    "get_synthesis_readiness",
+    "analyze_papers",
+    "save_extraction",
+    "run_synthesis",
+    "confirm_synthesis",
+    "generate_gaps",
+    "update_gap",
+    "screen",
+  ]),
+  project_id: z.string().optional(),
+  run_id: z.string().optional(),
+  sources: z
+    .array(
       z.object({
         collection_id: z.number().int().positive(),
         type: z.enum(["Database", "Register", "Other source"]),
         label: z.string().trim().min(1),
         include_subfolders: z.boolean().default(true).optional(),
       }),
-    ),
-  }),
-  z.object({
-    action: z.literal("get_protocol"),
-    project_id: z.string().optional(),
-  }),
-  z.object({
-    action: z.literal("validate_protocol"),
-    project_id: z.string().optional(),
-  }),
-  z.object({
-    action: z.literal("rollback_protocol"),
-    project_id: z.string().optional(),
-    revision_id: z.string().min(1),
-  }),
-  z.object({
-    action: z.literal("update_protocol"),
-    project_id: z.string().optional(),
-    research_question: z.string().optional(),
-    framework: z.string().optional(),
-    dimensions: z
-      .array(
-        z.object({
-          key: z.string().min(1),
-          label: z.string().min(1),
-          description: z.string().optional(),
-          value: z.string(),
-          keyword_aids: z.array(z.string()).optional(),
-          evidence_labels: z.array(z.string()).optional(),
-        }),
-      )
-      .optional(),
-    inclusion_rules: z.array(z.string()).optional(),
-    exclusion_rules: z.array(z.string()).optional(),
-    include_keyword_aids: z.array(z.string()).optional(),
-    exclude_keyword_aids: z.array(z.string()).optional(),
-  }),
-  z.object({
-    action: z.literal("create_project"),
-    name: z.string().trim().min(1),
-  }),
-  z.object({
-    action: z.literal("add_papers"),
-    project_id: z.string().optional(),
-    paper_ids: z.array(z.number().int().positive()).min(1),
-  }),
-  z.object({
-    action: z.literal("remove_papers"),
-    project_id: z.string().optional(),
-    paper_ids: z.array(z.number().int().positive()).min(1),
-  }),
-  z.object({
-    action: z.literal("get_extraction_template"),
-    project_id: z.string().optional(),
-  }),
-  z.object({
-    action: z.literal("propose_extraction_template"),
-    project_id: z.string().optional(),
-    instructions: z.string().optional(),
-  }),
-  z.object({
-    action: z.literal("activate_extraction_template"),
-    project_id: z.string().optional(),
-    template_id: z.string().min(1),
-  }),
-  z.object({
-    action: z.literal("update_extraction_template"),
-    project_id: z.string().optional(),
-    template_id: z.string().min(1),
-    name: z.string().trim().min(1).optional(),
-    instructions: z.string().optional(),
-    outcomes: z
-      .array(
-        z.object({
-          id: z.string().optional(),
-          name: z.string().trim().min(1),
-          aliases: z.array(z.string()).optional(),
-          description: z.string().optional(),
-          measures: z.array(z.enum(["OR", "RR", "HR", "MD", "SMD"])).min(1),
-          timepoints: z.array(z.string()).optional(),
-          unit: z.string().optional(),
-          direction: z.enum(["higher_better", "lower_better"]).optional(),
-          required: z.boolean().optional(),
-        }),
-      )
-      .optional(),
-  }),
-  z.object({
-    action: z.literal("start_analysis_job"),
-    project_id: z.string().optional(),
-    paper_ids: z.array(z.number().int().positive()).min(1),
-  }),
-  z.object({
-    action: z.literal("start_extraction_job"),
-    project_id: z.string().optional(),
-    paper_ids: z.array(z.number().int().positive()).min(1),
-  }),
-  z.object({
-    action: z.literal("run_evidence_analysis"),
-    project_id: z.string().optional(),
-    paper_ids: z.array(z.number().int().positive()).min(1).optional(),
-  }),
-  z.object({
-    action: z.literal("run_gap_analysis"),
-    project_id: z.string().optional(),
-    paper_ids: z.array(z.number().int().positive()).min(1).optional(),
-  }),
-  z.object({
-    action: z.literal("retry_failed_extractions"),
-    project_id: z.string().optional(),
-  }),
-  z.object({
-    action: z.literal("get_extraction_logs"),
-    project_id: z.string().optional(),
-    paper_id: z.number().int().positive().optional(),
-  }),
-  z.object({
-    action: z.enum([
-      "get_review_job",
-      "pause_review_job",
-      "cancel_review_job",
-      "retry_review_job",
-    ]),
-    project_id: z.string().optional(),
-    job_id: z.string().min(1),
-  }),
-  z.object({
-    action: z.literal("get_extractions"),
-    project_id: z.string().optional(),
-    paper_id: z.number().int().positive().optional(),
-    extraction_status: z.enum(["proposed", "verified", "rejected"]).optional(),
-  }),
-  z.object({
-    action: z.literal("review_extractions"),
-    project_id: z.string().optional(),
-    paper_id: z.number().int().positive(),
-    extraction_ids: z.array(z.string().min(1)).min(1),
-    verification_status: z.enum(["verified", "rejected"]),
-  }),
-  z.object({
-    action: z.literal("get_synthesis_readiness"),
-    project_id: z.string().optional(),
-  }),
-  z.object({
-    action: z.literal("analyze_papers"),
-    project_id: z.string().optional(),
-    paper_ids: z.array(z.number().int().positive()).min(1),
-  }),
-  z.object({
-    action: z.literal("save_extraction"),
-    project_id: z.string().optional(),
-    paper_id: z.number().int().positive(),
-    extraction: z.object({
+    )
+    .optional(),
+  revision_id: z.string().min(1).optional(),
+  research_question: z.string().optional(),
+  framework: z.string().optional(),
+  dimensions: z
+    .array(
+      z.object({
+        key: z.string().min(1),
+        label: z.string().min(1),
+        description: z.string().optional(),
+        value: z.string(),
+        keyword_aids: z.array(z.string()).optional(),
+        evidence_labels: z.array(z.string()).optional(),
+      }),
+    )
+    .optional(),
+  inclusion_rules: z.array(z.string()).optional(),
+  exclusion_rules: z.array(z.string()).optional(),
+  include_keyword_aids: z.array(z.string()).optional(),
+  exclude_keyword_aids: z.array(z.string()).optional(),
+  name: z.string().trim().min(1).optional(),
+  paper_ids: z.array(z.number().int().positive()).min(1).optional(),
+  instructions: z.string().optional(),
+  template_id: z.string().min(1).optional(),
+  outcomes: z
+    .array(
+      z.object({
+        id: z.string().optional(),
+        name: z.string().trim().min(1),
+        aliases: z.array(z.string()).optional(),
+        description: z.string().optional(),
+        measures: z.array(z.enum(["OR", "RR", "HR", "MD", "SMD"])).min(1),
+        timepoints: z.array(z.string()).optional(),
+        unit: z.string().optional(),
+        direction: z.enum(["higher_better", "lower_better"]).optional(),
+        required: z.boolean().optional(),
+      }),
+    )
+    .optional(),
+  paper_id: z.number().int().positive().optional(),
+  job_id: z.string().min(1).optional(),
+  extraction_status: z.enum(["proposed", "verified", "rejected"]).optional(),
+  extraction_ids: z.array(z.string().min(1)).min(1).optional(),
+  verification_status: z.enum(["verified", "rejected"]).optional(),
+  extraction: z
+    .object({
       id: z.string().optional(),
       outcome: z.string().trim().min(1),
       effect_type: z.enum(["OR", "RR", "HR", "MD", "SMD"]),
@@ -574,48 +410,28 @@ const systematicReviewParams = z.discriminatedUnion("action", [
       source_page: z.string().optional(),
       source_quote: z.string().optional(),
       verification_status: z.enum(["proposed", "verified"]).optional(),
-    }),
-  }),
-  z.object({
-    action: z.literal("run_synthesis"),
-    project_id: z.string().optional(),
-    force: z.boolean().optional(),
-  }),
-  z.object({
-    action: z.literal("confirm_synthesis"),
-    project_id: z.string().optional(),
-    domain_id: z.string().min(1),
-    selected_model: z.enum(["common_effect", "random_effects", "narrative"]),
-  }),
-  z.object({
-    action: z.literal("generate_gaps"),
-    project_id: z.string().optional(),
-    synthesis_run_id: z.string().optional(),
-    force: z.boolean().optional(),
-  }),
-  z.object({
-    action: z.literal("update_gap"),
-    project_id: z.string().optional(),
-    gap_id: z.string().min(1),
-    title: z.string().optional(),
-    severity: z.enum(["high", "medium", "low"]).optional(),
-    description: z.string().optional(),
-    implication: z.string().optional(),
-    status: z.enum(["draft", "accepted", "rejected", "ignored"]).optional(),
-    reviewer_note: z.string().optional(),
-  }),
-  z.object({
-    action: z.literal("screen"),
-    project_id: z.string().optional(),
-    paper_ids: z.array(z.number().int().positive()).min(1),
-    decision: z.enum(["undecided", "included", "maybe", "excluded"]),
-    reason: z.string().optional(),
-    stage: z
-      .enum(["title_abstract", "full_text", "final"])
-      .default("title_abstract")
-      .optional(),
-  }),
-]);
+    })
+    .optional(),
+  force: z.boolean().optional(),
+  domain_id: z.string().min(1).optional(),
+  selected_model: z
+    .enum(["common_effect", "random_effects", "narrative"])
+    .optional(),
+  synthesis_run_id: z.string().optional(),
+  gap_id: z.string().min(1).optional(),
+  title: z.string().optional(),
+  severity: z.enum(["high", "medium", "low"]).optional(),
+  description: z.string().optional(),
+  implication: z.string().optional(),
+  status: z.enum(["draft", "accepted", "rejected", "ignored"]).optional(),
+  reviewer_note: z.string().optional(),
+  decision: z.enum(["undecided", "included", "maybe", "excluded"]).optional(),
+  reason: z.string().optional(),
+  stage: z
+    .enum(["title_abstract", "full_text", "final"])
+    .default("title_abstract")
+    .optional(),
+});
 
 // ==================== Workspace Tool Parameter Schemas ====================
 
@@ -772,19 +588,18 @@ const skillInfoParams = z.object({
   name: z.string().describe("Skill name or ID"),
 });
 
-const todoAdapterParams = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("read") }),
-  z.object({
-    action: z.literal("write"),
-    todos: z.array(
+const todoAdapterParams = z.object({
+  action: z.enum(["read", "write"]),
+  todos: z
+    .array(
       z.object({
         id: z.string(),
         content: z.string(),
         status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
       }),
-    ),
-  }),
-]);
+    )
+    .optional(),
+});
 
 const delegateTaskParams = z.object({
   task: z.string(),

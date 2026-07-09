@@ -53,6 +53,25 @@ const ACTIVE_TOOLS = filterToolsByProfile(
   process.env.SEERAI_MCP_TOOL_PROFILE,
 );
 
+function toMcpInputSchema(name: string, inputSchema: any): Record<string, unknown> {
+  const schema = zodToJsonSchema(inputSchema, {
+    name,
+    $refStrategy: "none",
+  }) as Record<string, unknown>;
+
+  if (typeof schema.$ref === "string" && schema.definitions) {
+    const definitionName = schema.$ref.replace("#/definitions/", "");
+    const definitions = schema.definitions as Record<string, unknown>;
+    const definition = definitions[definitionName];
+    if (definition && typeof definition === "object" && !Array.isArray(definition)) {
+      return definition as Record<string, unknown>;
+    }
+  }
+
+  const { $schema: _schema, definitions: _definitions, ...rest } = schema;
+  return rest;
+}
+
 class SeerAIMcpServer {
   private server: Server;
   private zoteroClient: ZoteroClient;
@@ -86,10 +105,7 @@ class SeerAIMcpServer {
         tools: ACTIVE_TOOLS.map((tool) => ({
           name: tool.name,
           description: tool.description,
-          inputSchema: zodToJsonSchema(tool.inputSchema, {
-            name: tool.name,
-            $refStrategy: "none",
-          }),
+          inputSchema: toMcpInputSchema(tool.name, tool.inputSchema),
         })),
       };
     });
