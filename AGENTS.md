@@ -160,6 +160,7 @@ seerai/
 │   │   │   │   ├── antigravityAgent.ts  # Antigravity CLI
 │   │   │   │   ├── hermesAgent.ts       # Hermes (Nous) CLI
 │   │   │   │   ├── openclawAgent.ts     # OpenClaw gateway CLI
+│   │   │   │   ├── cursorAgent.ts       # Cursor Agent CLI (`cursor-agent`)
 │   │   │   │   ├── mcpBridge.ts         # Bundled MCP server bridge for CLI harnesses
 │   │   │   │   ├── harnessPrompt.ts     # System prompt for CLI agentic turns
 │   │   │   │   ├── toolActivityBridge.ts # Live tool-activity surfacing from harnesses
@@ -447,7 +448,7 @@ Models are addressed by a `ModelRef` (provider + local model id) and resolved at
 
 ### Local CLI Providers
 
-`src/modules/chat/cli/` lets seerai delegate a chat turn to a **locally installed agent CLI** instead of an HTTP API. Supported: **Codex** (OpenAI), **Claude Code**, **Antigravity**, **Hermes (Nous)**, **OpenClaw**. (GitHub Copilot's adapter file still exists but is not currently registered.)
+`src/modules/chat/cli/` lets seerai delegate a chat turn to a **locally installed agent CLI** instead of an HTTP API. Supported: **Codex** (OpenAI), **Claude Code**, **Antigravity**, **Hermes (Nous)**, **OpenClaw**, **Cursor Agent** (`cursor-agent`). (GitHub Copilot's adapter file still exists but is not currently registered.)
 
 - seerai stores **no credentials** — it inherits whatever login session the CLI already holds.
 - Each CLI is described by a `CliAgentDef` (`cliTypes.ts`): binary name, one-shot args, stream format (`json-lines` | `raw-text`), line parser, auth-failure patterns, optional `prepare()` and live `listModels`.

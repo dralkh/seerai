@@ -209,7 +209,7 @@ End-to-end systematic review workflow built directly into Zotero:
     - 48-96g Vram - Qwen3.5 122B A10B / Mistral Medium 3.5 / NVIDIA Nemotron 3 Super /
     - 128g Vram - MiniMax-M3 / MiMo-V2.5-Pro / GLM-5.2 / Kimi K2.6 / DeepSeek V4 Pro / Nemotron 3 Ultra / Qwen3.5 397B A17B / DeepSeek-V4-Flash
 
-- **Local CLI Agents**: Route chat through a CLI you already have installed and logged in — **Codex**, **Claude Code**, **Antigravity**, or **GitHub Copilot**. seerai stores no credentials; it reuses the CLI's own session.
+- **Local CLI Agents**: Route chat through a CLI you already have installed and logged in — **Codex**, **Claude Code**, **Antigravity**, **Cursor Agent** (`cursor-agent`), or **GitHub Copilot**. seerai stores no credentials; it reuses the CLI's own session.
 - **CLI MCP Harness**: Local CLI agents can optionally connect to the bundled seerai MCP server so they can read and act on your Zotero library while you chat.
 - **Capability-Based Routing**: Assign separate models per capability — chat, embeddings, image, video, text-to-speech, and speech-to-text — and route each request to the right endpoint automatically.
 - **Smart Rate Limiting**: Per-model configuration for concurrency, RPM, and TPM to prevent provider errors.
@@ -349,7 +349,7 @@ seerai/
 │   │   ├── chat/          # Chat engine & state
 │   │   │   ├── rag/       # RAG pipeline (chunker, embeddings, retrieval, vector store)
 │   │   │   ├── tools/     # Agentic tool system (search, note, table, web, workspace, skills, etc.)
-│   │   │   ├── cli/       # Local CLI providers (Codex, Claude, Antigravity, Copilot)
+│   │   │   ├── cli/       # Local CLI providers (Codex, Claude, Antigravity, Cursor, Copilot)
 │   │   │   ├── skills/    # Agent skills registry
 │   │   │   └── workspace/ # File workspace (editor, sidebar, git CLI, diff viewer, store)
 │   │   ├── search/        # Federated scholarly search (11 providers, query IR + compilers)

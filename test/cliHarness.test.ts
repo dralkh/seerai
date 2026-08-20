@@ -11,6 +11,11 @@ import {
 import { hermesAgentDef } from "../src/modules/chat/cli/hermesAgent";
 import { openclawAgentDef } from "../src/modules/chat/cli/openclawAgent";
 import {
+  buildCursorArgs,
+  cursorAgentDef,
+  parseCursorModels,
+} from "../src/modules/chat/cli/cursorAgent";
+import {
   formatToolNotice,
   isSeeraiTool,
 } from "../src/modules/chat/cli/toolNotice";
@@ -43,6 +48,7 @@ const EXPECTED_AGENT_IDS = [
   "antigravity",
   "hermes",
   "openclaw",
+  "cursor",
 ];
 
 function kinds(results: CliParseResult[]): string[] {
@@ -59,10 +65,10 @@ const parseOpenClawFinal = (raw: string): CliParseResult =>
 
 describe("CLI harness integration", function () {
   // ───────────────────────────────────────────────────────────────
-  // 1. Registry — exactly our scope (Hermes/Claude/Codex/Antigravity/OpenClaw)
+  // 1. Registry — exactly our scope (Hermes/Claude/Codex/Antigravity/OpenClaw/Cursor)
   // ───────────────────────────────────────────────────────────────
   describe("agent registry", function () {
-    it("registers exactly the five supported harnesses", function () {
+    it("registers exactly the six supported harnesses", function () {
       assert.deepEqual(
         listCliAgents().map((a) => a.id),
         EXPECTED_AGENT_IDS,
@@ -76,6 +82,7 @@ describe("CLI harness integration", function () {
     it("resolves the new harnesses by id", function () {
       assert.equal(getCliAgent("hermes")?.bin, "hermes");
       assert.equal(getCliAgent("openclaw")?.bin, "openclaw");
+      assert.equal(getCliAgent("cursor")?.bin, "cursor-agent");
     });
 
     it("gives every agent a non-empty name, bin and guidance", function () {
@@ -108,6 +115,7 @@ describe("CLI harness integration", function () {
         "antigravity-cli",
         "claude-cli",
         "codex-cli",
+        "cursor-cli",
         "hermes-cli",
         "openclaw-cli",
       ]);
@@ -180,6 +188,37 @@ describe("CLI harness integration", function () {
       assert.deepEqual(
         openclawAgentDef.buildArgs({ prompt: "go", model: "ops" }),
         ["agent", "--agent", "ops", "--message", "go", "--json"],
+      );
+    });
+
+    it("Cursor uses print/ask for chat and drops ask when agentic", function () {
+      assert.notStrictEqual(cursorAgentDef.stdinPrompt, false);
+      assert.deepEqual(buildCursorArgs({}), [
+        "-p",
+        "--trust",
+        "--output-format",
+        "text",
+        "--mode",
+        "ask",
+      ]);
+      assert.deepEqual(buildCursorArgs({ agentic: true, model: "sonnet-4" }), [
+        "-p",
+        "--trust",
+        "--output-format",
+        "text",
+        "--model",
+        "sonnet-4",
+      ]);
+      assert.notInclude(buildCursorArgs({ agentic: true }).join(" "), "--force");
+      assert.notInclude(buildCursorArgs({ agentic: true }).join(" "), "--yolo");
+    });
+
+    it("Cursor model list parser skips banners and errors", function () {
+      assert.deepEqual(
+        parseCursorModels(
+          "Available models\ngpt-5\nsonnet-4  Sonnet\nNo models available for this account.\n",
+        ).map((m) => m.id),
+        ["gpt-5", "sonnet-4"],
       );
     });
 

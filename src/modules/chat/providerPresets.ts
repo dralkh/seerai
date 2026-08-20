@@ -152,6 +152,28 @@ export const providerPresets: ProviderPreset[] = [
     catalogModels: [{ id: "default", capabilities: ["chat", "reasoning"] }],
   },
   {
+    id: "cursor-cli",
+    name: "Cursor Agent CLI",
+    requiresApiKey: false,
+    isLocal: true,
+    icon: ICON_CODEX,
+    apiURL: "cli://cursor",
+    authMethod: "none",
+    supportsModelDiscovery: false,
+    adapterId: "local-cli",
+    cliAgentId: "cursor",
+    defaultModel: "default",
+    verifiedCapabilities: ["chat", "reasoning"],
+    notes:
+      "Uses your locally installed Cursor Agent CLI (`cursor-agent`) and its login. Run `cursor-agent login` in a terminal once — Desktop Cursor being signed in does not count — then click Detect. The binary must be `cursor-agent`, not `agent`. `default` uses the CLI's current model. No API key is stored by seerai.",
+    catalogModels: [
+      { id: "default", capabilities: ["chat", "reasoning"] },
+      { id: "gpt-5", capabilities: ["chat", "reasoning"] },
+      { id: "sonnet-4", capabilities: ["chat", "reasoning"] },
+      { id: "sonnet-4-thinking", capabilities: ["chat", "reasoning"] },
+    ],
+  },
+  {
     id: "anthropic",
     name: "Anthropic (Claude)",
     requiresApiKey: true,
