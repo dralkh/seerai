@@ -274,8 +274,58 @@ export async function initProviderConfigs(): Promise<void> {
       Zotero.Prefs.get(ACTIVE_MODEL_KEY) as string | undefined,
     );
   }
+  if (loaded.providers.length === 0) {
+    loaded = seedCursorCliIfEmpty(loaded);
+  }
   state = loaded;
   await persist();
+}
+
+/** First-run: if the user has connected nothing, attach Cursor Agent CLI as
+ *  the chat default. No API key is stored — auth stays on `cursor-agent login`.
+ *  OCR / embeddings / cloud keys are left empty on purpose. */
+function seedCursorCliIfEmpty(
+  base: ProviderRegistryState,
+): ProviderRegistryState {
+  const preset = getPresetById("cursor-cli");
+  if (!preset) return base;
+  const now = new Date().toISOString();
+  const providerId = generateId();
+  const modelId = generateId();
+  const model: ProviderModel = {
+    id: modelId,
+    modelId: preset.defaultModel || "default",
+    displayName: "default",
+    capabilities: ["chat", "reasoning"],
+    createdAt: now,
+    updatedAt: now,
+  };
+  const provider = normalizeProvider({
+    id: providerId,
+    presetId: preset.id,
+    name: preset.name,
+    apiURL: preset.apiURL,
+    apiKey: "",
+    authMethod: "none",
+    models: [],
+    configuredModels: [model],
+    modelPolicy: "scoped",
+    isActive: true,
+    enabled: true,
+    adapterId: "local-cli",
+    cliAgentId: "cursor",
+    createdAt: now,
+    updatedAt: now,
+  });
+  return {
+    ...base,
+    providers: [provider],
+    defaults: {
+      ...base.defaults,
+      chat: { providerId, localModelId: modelId },
+    },
+    migratedAt: base.migratedAt || now,
+  };
 }
 
 export function getProviderRegistryState(): ProviderRegistryState {
