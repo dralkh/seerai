@@ -187,6 +187,17 @@ function jsonConfigPath(agentId: string): string | null {
   if (agentId === "antigravity")
     return homePath(".gemini", "config", "mcp_config.json");
   if (agentId === "openclaw") return homePath(".openclaw", "openclaw.json");
+  if (agentId === "cursor") return homePath(".cursor", "mcp.json");
+  return null;
+}
+
+/**
+ * Cursor's CLI permission file. `--approve-mcps` only approves the server;
+ * without an allowlist entry in this file, Cursor rejects every individual
+ * MCP tool call in non-interactive (`-p`) runs.
+ */
+function cliPermissionConfigPath(agentId: string): string | null {
+  if (agentId === "cursor") return homePath(".cursor", "cli-config.json");
   return null;
 }
 
@@ -219,11 +230,10 @@ function serverEntry(
   return { command: nodePath, args: [serverPath], env: buildMcpEnv() };
 }
 
-/** Add or remove the seerai-zotero entry in a `{ mcpServers: {…} }` JSON file. */
-async function mergeJsonMcpServer(
+/** Read-modify-write a JSON config, keeping a `.seerai-bak` backup. */
+async function mutateJsonConfig(
   path: string,
-  entry: Record<string, unknown> | null,
-  connect: boolean,
+  mutate: (cfg: Record<string, unknown>) => void,
 ): Promise<void> {
   let cfg: Record<string, unknown> = {};
   try {
@@ -237,10 +247,55 @@ async function mergeJsonMcpServer(
   } catch {
     cfg = {};
   }
-  applyMcpServerEntry(cfg, entry, connect);
+  mutate(cfg);
   const dir = PathUtils.parent(path);
   if (dir) await IOUtils.makeDirectory(dir, { ignoreExisting: true });
   await IOUtils.writeUTF8(path, `${JSON.stringify(cfg, null, 2)}\n`);
+}
+
+/**
+ * Add or remove the seerai-zotero entry in a `{ mcpServers: {…} }` JSON file,
+ * preserving other servers and keeping a `.seerai-bak` backup. Exported for
+ * testing (the full connect flow also needs the addon-hosted MCP bundle, which
+ * only exists in a real install).
+ */
+export async function mergeJsonMcpServer(
+  path: string,
+  entry: Record<string, unknown> | null,
+  connect: boolean,
+): Promise<void> {
+  await mutateJsonConfig(path, (cfg) =>
+    applyMcpServerEntry(cfg, entry, connect),
+  );
+}
+
+/**
+ * Pure: add or remove `Mcp(<server>:*)` in a Cursor CLI config's
+ * `permissions.allow` list, preserving all other permissions. Exported for
+ * testing. Cursor's docs: permissions tokens live in
+ * `~/.cursor/cli-config.json` and `Mcp(server:tool)` uses `*` wildcards.
+ */
+export function applyMcpPermission(
+  cfg: Record<string, unknown>,
+  connect: boolean,
+): Record<string, unknown> {
+  const permissions =
+    cfg.permissions && typeof cfg.permissions === "object"
+      ? (cfg.permissions as Record<string, unknown>)
+      : {};
+  const allow = Array.isArray(permissions.allow)
+    ? (permissions.allow as unknown[]).filter(
+        (item): item is string => typeof item === "string",
+      )
+    : [];
+  const token = `Mcp(${MCP_SERVER_NAME}:*)`;
+  permissions.allow = connect
+    ? allow.includes(token)
+      ? allow
+      : [...allow, token]
+    : allow.filter((item) => item !== token);
+  cfg.permissions = permissions;
+  return cfg;
 }
 
 export interface ConnectResult {
@@ -274,6 +329,12 @@ export async function connectHarness(agentId: string): Promise<ConnectResult> {
         serverEntry(nodePath, serverPath),
         true,
       );
+      const permissionPath = cliPermissionConfigPath(agentId);
+      if (permissionPath) {
+        await mutateJsonConfig(permissionPath, (cfg) =>
+          applyMcpPermission(cfg, true),
+        );
+      }
     } else if (agentId === "hermes") {
       // `hermes mcp add` connects to the server to discover tools, then prompts
       // "Enable all N tools? [Y/n]" — auto-confirm with "y" on stdin. Absolute
@@ -330,6 +391,12 @@ export async function disconnectHarness(
     const jsonPath = jsonConfigPath(agentId);
     if (jsonPath) {
       await mergeJsonMcpServer(jsonPath, null, false);
+      const permissionPath = cliPermissionConfigPath(agentId);
+      if (permissionPath) {
+        await mutateJsonConfig(permissionPath, (cfg) =>
+          applyMcpPermission(cfg, false),
+        );
+      }
     } else if (agentId === "hermes") {
       await runCliCapture("hermes", ["mcp", "remove", MCP_SERVER_NAME], 15000);
     }

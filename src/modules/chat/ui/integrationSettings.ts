@@ -7,8 +7,10 @@ import {
   indexItemsForRAG,
   indexScopeForRAG,
   isBulkIndexRunning,
+  subscribeBulkIndex,
   type BulkIndexStatus,
 } from "../rag/bulkIndexer";
+import { isIndexableItem } from "../rag/itemSources";
 
 // Renders the Seer-AI preference sections (MCP, data management, OCR, web
 // search, RAG, etc.) as styled HTML that matches the AI providers / default
@@ -1088,10 +1090,10 @@ export function renderRagIndexSettings(
       const items =
         Zotero.getActiveZoteroPane()
           ?.getSelectedItems()
-          .filter((i) => i.isRegularItem()) || [];
+          .filter((i) => isIndexableItem(i)) || [];
       if (items.length === 0) {
         doc.defaultView?.alert(
-          "Select one or more regular items in your Zotero library first.",
+          "Select one or more items (or PDF/text attachments) in your Zotero library first.",
         );
         return;
       }
@@ -1125,6 +1127,10 @@ export function renderRagIndexSettings(
     progressBar.style.display = running ? "" : "none";
   };
 
+  // Set when this pane is following a job it did not start (e.g. the item
+  // context menu did), so the pane resets when that job finishes.
+  let unsubscribeRunningJob: (() => void) | null = null;
+
   const onProgress = (status: BulkIndexStatus) => {
     progressLabel.textContent = formatBulkIndexStatus(status);
     if (status.phase === "enumerating") {
@@ -1133,8 +1139,10 @@ export function renderRagIndexSettings(
       progressBar.value = Math.round((status.done / status.total) * 100);
     }
     if (status.phase === "done" || status.phase === "cancelled") {
-      if (status.phase === "done") progressBar.value = 100;
+      if (status.phase === "done" && !status.error) progressBar.value = 100;
       setRunning(false);
+      unsubscribeRunningJob?.();
+      unsubscribeRunningJob = null;
     }
   };
 
@@ -1151,9 +1159,11 @@ export function renderRagIndexSettings(
   };
 
   // Reflect a bulk index that is already running (e.g. started from the item
-  // context menu) when the preferences pane opens.
+  // context menu) when the preferences pane opens, and keep following it so
+  // the controls reset when it completes.
   if (isBulkIndexRunning()) {
     setRunning(true);
     progressLabel.textContent = "Indexing already in progress...";
+    unsubscribeRunningJob = subscribeBulkIndex(onProgress);
   }
 }

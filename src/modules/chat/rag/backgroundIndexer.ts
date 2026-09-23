@@ -14,6 +14,7 @@ import { getEmbeddingService } from "./embeddingService";
 import { chunkPaperContent } from "./chunker";
 import { getVectorStore, VectorStore } from "./vectorStore";
 import { getRAGConfig } from "./retrievalEngine";
+import { isBulkIndexRunning } from "./bulkIndexer";
 
 const PENDING_FILE_NAME = "_pending.json";
 const PROCESS_GAP_MS = 5000;
@@ -81,6 +82,14 @@ export function enqueueForIndexing(itemId: number): void {
 async function processNext(): Promise<void> {
   if (pendingQueue.length === 0 || processing) return;
 
+  // Defer while a user-initiated bulk index runs: the same items are being
+  // indexed there, and racing the two would duplicate embedding calls and
+  // interleave vector-store writes. The queue drains after the bulk run.
+  if (isBulkIndexRunning()) {
+    Zotero.debug("[seerai] BG Indexer: bulk index running — deferring");
+    return;
+  }
+
   processing = true;
   const itemId = pendingQueue.shift()!;
   enqueuedIds.delete(itemId);
@@ -143,6 +152,7 @@ async function processNext(): Promise<void> {
       publicationYear,
       content.title,
       firstCreator,
+      embeddingService.getConfigFingerprint() || undefined,
     );
 
     Zotero.debug(

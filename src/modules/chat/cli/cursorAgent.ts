@@ -11,6 +11,7 @@
 
 import type { ModelCapability } from "../providerTypes";
 import type { CliAgentDef, CliInvokeOptions } from "./cliTypes";
+import { isHarnessConnected } from "./mcpBridge";
 
 export function parseCursorModels(
   output: string,
@@ -43,6 +44,11 @@ export function buildCursorArgs(options: CliInvokeOptions): string[] {
   const args = ["-p", "--trust", "--output-format", "text"];
   if (!options.agentic) {
     args.push("--mode", "ask");
+  }
+  // When the seerai MCP bridge is connected, auto-approve its server so a
+  // headless turn doesn't stall on an interactive approval prompt.
+  if (options.agentic && isHarnessConnected("cursor")) {
+    args.push("--approve-mcps");
   }
   if (options.model && options.model !== "default") {
     args.push("--model", options.model);

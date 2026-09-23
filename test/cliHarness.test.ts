@@ -28,7 +28,10 @@ import {
   buildClaudeMcpConfig,
   buildCodexMcpArgs,
   applyMcpServerEntry,
+  applyMcpPermission,
   isHarnessConnected,
+  mergeJsonMcpServer,
+  resolveNodePath,
   MCP_SERVER_NAME,
   HERMES_TOOLSETS,
 } from "../src/modules/chat/cli/mcpBridge";
@@ -223,6 +226,33 @@ describe("CLI harness integration", function () {
         ).map((m) => m.id),
         ["gpt-5", "sonnet-4"],
       );
+    });
+
+    it("Cursor auto-approves the MCP server only when connected", function () {
+      const previousZotero = (globalThis as any).Zotero;
+      try {
+        (globalThis as any).Zotero = {
+          Prefs: {
+            get: (key: string) =>
+              key.endsWith("mcpConnectedHarnesses")
+                ? JSON.stringify({ cursor: true })
+                : undefined,
+          },
+        };
+        assert.include(
+          buildCursorArgs({ agentic: true }).join(" "),
+          "--approve-mcps",
+          "connected agentic runs must not stall on MCP approval",
+        );
+        assert.notInclude(
+          buildCursorArgs({ agentic: false }).join(" "),
+          "--approve-mcps",
+          "plain chat turns never need MCP approval",
+        );
+      } finally {
+        if (previousZotero === undefined) delete (globalThis as any).Zotero;
+        else (globalThis as any).Zotero = previousZotero;
+      }
     });
 
     it("Codex/Claude keep their existing flags and thread the model through", function () {
@@ -625,12 +655,13 @@ describe("CLI harness integration", function () {
       assert.equal(args.filter((a) => a === "-c").length, 4);
     });
 
-    it("registers MCP for Claude/Codex only (not the tool-less harnesses)", function () {
+    it("registers MCP for Claude/Codex only (persistent config for the rest)", function () {
       assert.isFunction(getCliAgent("claude")?.registerMcp);
       assert.isFunction(getCliAgent("codex")?.registerMcp);
       assert.isUndefined(getCliAgent("hermes")?.registerMcp);
       assert.isUndefined(getCliAgent("antigravity")?.registerMcp);
       assert.isUndefined(getCliAgent("openclaw")?.registerMcp);
+      assert.isUndefined(getCliAgent("cursor")?.registerMcp);
     });
   });
 
@@ -720,6 +751,47 @@ describe("CLI harness integration", function () {
     });
   });
 
+  describe("Cursor CLI permissions merge (applyMcpPermission)", function () {
+    it("adds the MCP allowlist token and preserves other permissions", function () {
+      const cfg: Record<string, unknown> = {
+        permissions: { allow: ["Shell(ls)"], deny: ["Shell(rm)"] },
+      };
+      applyMcpPermission(cfg, true);
+      const permissions = cfg.permissions as {
+        allow: string[];
+        deny: string[];
+      };
+      assert.include(permissions.allow, "Shell(ls)");
+      assert.include(permissions.allow, `Mcp(${MCP_SERVER_NAME}:*)`);
+      assert.deepEqual(permissions.deny, ["Shell(rm)"]);
+    });
+
+    it("is idempotent and removes only the seerai token", function () {
+      const cfg: Record<string, unknown> = {
+        permissions: { allow: ["Shell(ls)"] },
+      };
+      applyMcpPermission(cfg, true);
+      applyMcpPermission(cfg, true);
+      const permissions = cfg.permissions as { allow: string[] };
+      assert.lengthOf(
+        permissions.allow.filter((item) => item.includes(MCP_SERVER_NAME)),
+        1,
+      );
+
+      applyMcpPermission(cfg, false);
+      assert.deepEqual(permissions.allow, ["Shell(ls)"]);
+    });
+
+    it("creates permissions when the config has none", function () {
+      const cfg: Record<string, unknown> = {};
+      applyMcpPermission(cfg, true);
+      assert.include(
+        (cfg.permissions as { allow: string[] }).allow,
+        `Mcp(${MCP_SERVER_NAME}:*)`,
+      );
+    });
+  });
+
   describe("harness connected state", function () {
     it("treats Claude/Codex as auto-connected", function () {
       assert.isTrue(isHarnessConnected("claude"));
@@ -730,6 +802,68 @@ describe("CLI harness integration", function () {
       assert.isFalse(isHarnessConnected("hermes"));
       assert.isFalse(isHarnessConnected("antigravity"));
       assert.isFalse(isHarnessConnected("openclaw"));
+      assert.isFalse(isHarnessConnected("cursor"));
+    });
+  });
+
+  describe("Cursor MCP config write (Zotero integration)", function () {
+    this.timeout(60000);
+
+    it("resolves the absolute node path harnesses need", async function () {
+      const nodePath = await resolveNodePath();
+      assert.isNotNull(
+        nodePath,
+        "node must resolve from the Zotero environment for harness configs",
+      );
+      assert.match(nodePath!, /node/i);
+    });
+
+    it("merges the seerai server into a real mcp.json file", async function () {
+      const dir = PathUtils.join(Zotero.DataDirectory.dir, "mcp-bridge-test");
+      const configPath = PathUtils.join(dir, "mcp.json");
+      const backupPath = `${configPath}.seerai-bak`;
+      await IOUtils.makeDirectory(dir, { ignoreExisting: true });
+      await IOUtils.writeUTF8(
+        configPath,
+        JSON.stringify({
+          mcpServers: { github: { command: "github-mcp" } },
+        }),
+      );
+
+      try {
+        const entry = {
+          command: "/usr/local/bin/node",
+          args: ["/data/seerai/bin/seerai-mcp.cjs"],
+          env: buildMcpEnv(),
+        };
+        await mergeJsonMcpServer(configPath, entry, true);
+
+        const written = JSON.parse(await IOUtils.readUTF8(configPath));
+        assert.isDefined(written.mcpServers.github, "other servers preserved");
+        const seerai = written.mcpServers[MCP_SERVER_NAME];
+        assert.equal(seerai.command, "/usr/local/bin/node");
+        assert.isTrue(seerai.args[0].endsWith("seerai-mcp.cjs"));
+        assert.equal(seerai.env.SEERAI_MCP_TOOL_PROFILE, "research");
+        assert.equal(seerai.env.ZOTERO_API_URL, "http://127.0.0.1:23119");
+        assert.isTrue(
+          await IOUtils.exists(backupPath),
+          "a .seerai-bak backup should be kept",
+        );
+
+        await mergeJsonMcpServer(configPath, null, false);
+        const removed = JSON.parse(await IOUtils.readUTF8(configPath));
+        assert.isUndefined(removed.mcpServers[MCP_SERVER_NAME]);
+        assert.isDefined(removed.mcpServers.github, "other servers preserved");
+      } finally {
+        try {
+          await IOUtils.remove(dir, {
+            recursive: true,
+            ignoreAbsent: true,
+          } as any);
+        } catch {
+          /* ignore */
+        }
+      }
     });
   });
 });

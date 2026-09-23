@@ -906,9 +906,10 @@ export const SemanticSearchParamsSchema = z.object({
     .int()
     .min(0)
     .max(100)
-    .default(30)
     .optional()
-    .describe("Minimum relevance score 0-100"),
+    .describe(
+      "Minimum relevance score 0-100. Omit to use the configured Smart Context minimum score; 0 disables the filter.",
+    ),
   sources: z
     .array(z.enum(["abstract", "pdf", "note", "metadata", "table", "file"]))
     .optional()
@@ -1016,9 +1017,10 @@ export const SearchSimilarParamsSchema = z.object({
     .int()
     .min(0)
     .max(100)
-    .default(30)
     .optional()
-    .describe("Minimum relevance score 0-100"),
+    .describe(
+      "Minimum relevance score 0-100. Omit to use the configured Smart Context minimum score; 0 disables the filter.",
+    ),
   scope: z
     .enum(["context", "library", "collection"])
     .default("library")

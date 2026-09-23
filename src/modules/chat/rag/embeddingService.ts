@@ -5,6 +5,7 @@
  */
 
 import { RateLimiter } from "../../../utils/rateLimiter";
+import { isAbortError, scopedFetch, throwIfAborted } from "../../search/env";
 import { requireResolvedModel, resolveModel } from "../modelResolver";
 import type {
   EmbeddingRequest,
@@ -69,6 +70,29 @@ export class EmbeddingService {
   }
 
   /**
+   * Stable identity of the configured embedding pipeline (provider, adapter,
+   * model, endpoint, dimensions). Vectors are only comparable when this
+   * matches: two providers can serve the same model name with different
+   * weights, and changing the endpoint or dimensions changes the vector space
+   * even when the model name doesn't.
+   */
+  getConfigFingerprint(): string | null {
+    try {
+      const resolved = resolveModel("embedding");
+      if (!resolved) return null;
+      return [
+        resolved.provider.id,
+        resolved.adapterId,
+        resolved.model.modelId,
+        resolved.endpoint,
+        resolved.model.dimensions ?? "",
+      ].join("|");
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Resolve the embedding API endpoint URL from the active config.
    *
    * Priority:
@@ -94,7 +118,7 @@ export class EmbeddingService {
    * Create embedding(s) for one or more texts.
    *
    * @param input  Single text string or array of strings (max 2048)
-   * @param options  Optional: encoding_format, dimensions, user
+   * @param options  Optional: encoding_format, dimensions, user, signal
    * @returns The full EmbeddingResponse
    */
   async createEmbeddings(
@@ -103,8 +127,10 @@ export class EmbeddingService {
       encoding_format?: "float" | "base64";
       dimensions?: number;
       user?: string;
+      signal?: AbortSignal;
     },
   ): Promise<EmbeddingResponse> {
+    throwIfAborted(options?.signal);
     const { endpoint, model, headers, resolved } = this.resolveEndpoint();
 
     // Use explicitly passed dimensions, or fall back to the configured value,
@@ -115,7 +141,10 @@ export class EmbeddingService {
     // Check if this model supports the dimensions parameter
     let effectiveDimensions: number | undefined;
     if (candidateDimensions) {
-      const modelSupports = await this.modelSupportsDimensions(model);
+      const modelSupports = await this.modelSupportsDimensions(
+        model,
+        options?.signal,
+      );
       effectiveDimensions = modelSupports ? candidateDimensions : undefined;
       if (!modelSupports && candidateDimensions) {
         Zotero.debug(
@@ -148,10 +177,12 @@ export class EmbeddingService {
     );
 
     try {
-      const response = await fetch(endpoint, {
+      throwIfAborted(options?.signal);
+      const response = await scopedFetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...headers },
         body: JSON.stringify(body),
+        signal: options?.signal,
       });
 
       if (!response.ok) {
@@ -178,7 +209,10 @@ export class EmbeddingService {
 
       return data;
     } catch (error) {
-      if ((error as Error).message.startsWith("Embedding API error:")) {
+      if (
+        isAbortError(error) ||
+        (error as Error).message.startsWith("Embedding API error:")
+      ) {
         throw error;
       }
       Zotero.debug(`[seerai] Embedding request failed: ${error}`);
@@ -191,8 +225,11 @@ export class EmbeddingService {
   /**
    * Convenience: get a single embedding vector for one text.
    */
-  async getEmbedding(text: string): Promise<number[]> {
-    const response = await this.createEmbeddings(text);
+  async getEmbedding(
+    text: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<number[]> {
+    const response = await this.createEmbeddings(text, options);
     if (!response.data?.[0]?.embedding) {
       throw new Error("No embedding returned in response");
     }
@@ -203,8 +240,14 @@ export class EmbeddingService {
    * Get embedding with session-level caching for repeated queries.
    * Caches by model:query key with 5-minute TTL.
    */
-  async getQueryEmbedding(query: string): Promise<number[]> {
-    const model = this.getConfiguredModel() || "unknown";
+  async getQueryEmbedding(
+    query: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<number[]> {
+    // Key by the full pipeline identity, not just the model name — switching
+    // providers/endpoints must not reuse vectors from the previous space.
+    const model =
+      this.getConfigFingerprint() || this.getConfiguredModel() || "unknown";
     const key = `${model}:${query}`;
 
     const cached = this.queryCache.get(key);
@@ -215,7 +258,7 @@ export class EmbeddingService {
       return cached.embedding;
     }
 
-    const embedding = await this.getEmbedding(query);
+    const embedding = await this.getEmbedding(query, options);
 
     if (this.queryCache.size >= EmbeddingService.QUERY_CACHE_MAX) {
       const oldest = this.queryCache.keys().next().value;
@@ -238,8 +281,12 @@ export class EmbeddingService {
    * Batches are sent in parallel (up to MAX_CONCURRENT_BATCHES at a time)
    * to reduce total latency.
    */
-  async getEmbeddings(texts: string[]): Promise<number[][]> {
+  async getEmbeddings(
+    texts: string[],
+    options?: { signal?: AbortSignal },
+  ): Promise<number[][]> {
     if (texts.length === 0) return [];
+    throwIfAborted(options?.signal);
 
     const MAX_ITEMS_PER_BATCH = 2048;
     // Use the user-configured max tokens for the embedding model.
@@ -292,13 +339,16 @@ export class EmbeddingService {
       i < batches.length;
       i += EmbeddingService.MAX_CONCURRENT_BATCHES
     ) {
+      throwIfAborted(options?.signal);
       const wave = batches.slice(
         i,
         i + EmbeddingService.MAX_CONCURRENT_BATCHES,
       );
       const waveResults = await Promise.all(
         wave.map(async (batch) => {
-          const response = await this.createEmbeddings(batch.texts);
+          const response = await this.createEmbeddings(batch.texts, {
+            signal: options?.signal,
+          });
           // Sort by index to ensure correct ordering within batch
           const sorted = [...response.data].sort((a, b) => a.index - b.index);
           return {
@@ -325,10 +375,13 @@ export class EmbeddingService {
    * Uses the cached model list from the provider's embedding-models endpoint.
    * For providers without a known models endpoint, conservatively returns true.
    */
-  async modelSupportsDimensions(model: string): Promise<boolean> {
+  async modelSupportsDimensions(
+    model: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     if (!resolveModel("embedding")) return true;
 
-    const models = await this.fetchEmbeddingModels();
+    const models = await this.fetchEmbeddingModels(signal);
     if (models.length === 0) return true;
 
     const modelInfo = models.find((m) => m.id === model);
@@ -342,10 +395,13 @@ export class EmbeddingService {
    * Attempts the standard /api/v1/embedding-models endpoint from the base URL.
    * Returns empty array if the endpoint doesn't exist or fails.
    */
-  async fetchEmbeddingModels(): Promise<EmbeddingModelInfo[]> {
+  async fetchEmbeddingModels(
+    signal?: AbortSignal,
+  ): Promise<EmbeddingModelInfo[]> {
     const resolved = resolveModel("embedding");
     if (!resolved) return [];
 
+    throwIfAborted(signal);
     const cacheKey = resolved.provider.apiURL;
     const cached = this.modelListCache.get(cacheKey);
     if (cached) {
@@ -363,9 +419,10 @@ export class EmbeddingService {
 
       Zotero.debug(`[seerai] Fetching embedding models from ${modelsUrl}`);
 
-      const response = await fetch(modelsUrl, {
+      const response = await scopedFetch(modelsUrl, {
         method: "GET",
         headers: resolved.headers,
+        signal,
       });
 
       if (!response.ok) {
@@ -394,6 +451,8 @@ export class EmbeddingService {
       );
       return models;
     } catch (error) {
+      // An abort is not a provider failure — don't poison the negative cache.
+      if (isAbortError(error)) throw error;
       this.modelListCache.set(cacheKey, {
         models: [],
         fetchedAt: Date.now(),

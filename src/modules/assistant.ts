@@ -14,7 +14,6 @@ import {
   resetChatStateManager,
   ChatStateManager,
 } from "./chat/stateManager";
-import { truncateToTokenBudget } from "./chat/tokenizer";
 import { wireCodePreviewButtons } from "./chat/ui/messageRenderer";
 import {
   SelectedItem,
@@ -182,8 +181,12 @@ import {
   shouldActivateRAG,
   getRAGConfig,
   computeTokenBudget,
+  contextSafetyMargin,
+  fitContextToModelWindow,
 } from "./chat/rag/retrievalEngine";
 import { getEmbeddingService } from "./chat/rag/embeddingService";
+import { getIndexableAttachmentIdsAsync } from "./chat/rag/itemSources";
+import { enumerateScopeItems } from "./chat/rag/bulkIndexer";
 import type { RAGProgressEvent } from "./chat/rag/types";
 import { evaluateGeneration, isEvalEnabled } from "./chat/rag/evaluator";
 import {
@@ -514,6 +517,11 @@ let totalSearchResults: number = 0; // Total count from API
 let isSearching = false;
 let renderGeneration = 0;
 let renderLock: Promise<void> = Promise.resolve();
+
+// Live ResizeObserver for the chat layout. Module-level because each render
+// builds a fresh mainWrapper — storing the observer on the element means the
+// old observer is never found (and never disconnected) on the next render.
+let activeChatLayoutObserver: ResizeObserver | null = null;
 
 // Cache for Unpaywall PDF URLs (paperId -> pdfUrl)
 const unpaywallPdfCache = new Map<string, string>();
@@ -1564,6 +1572,64 @@ export class Assistant {
     return undefined;
   }
 
+  /** Display name for a RAG searchable unit (attachments borrow the parent title). */
+  private static ragDisplayName(item: Zotero.Item): string {
+    if (item.isAttachment()) {
+      const parent = item.parentItemID
+        ? Zotero.Items.get(item.parentItemID)
+        : null;
+      const parentTitle = parent
+        ? (parent.getField("title") as string) || ""
+        : "";
+      return (
+        parentTitle || (item.getField("title") as string) || `Item ${item.id}`
+      );
+    }
+    return (item.getField("title") as string) || `Item ${item.id}`;
+  }
+
+  /**
+   * Add a regular item and each of its PDF/text attachments as separate
+   * searchable units. The parent carries abstract/notes/metadata; every
+   * attachment carries its own extracted text, so multi-PDF items are fully
+   * covered without duplicating passages under the parent.
+   */
+  private static async expandIndexableItemsForRAG(
+    sourceItem: Zotero.Item,
+    seenPaperIds: Set<number>,
+    paperItems: Array<{
+      id: number;
+      type: string;
+      displayName: string;
+      metadata?: Record<string, any>;
+    }>,
+    metadata?: Record<string, any>,
+  ): Promise<void> {
+    if (!seenPaperIds.has(sourceItem.id)) {
+      seenPaperIds.add(sourceItem.id);
+      paperItems.push({
+        id: sourceItem.id,
+        type: "paper",
+        displayName: this.ragDisplayName(sourceItem),
+        metadata,
+      });
+    }
+    const displayName = this.ragDisplayName(sourceItem);
+    for (const attId of await getIndexableAttachmentIdsAsync(sourceItem)) {
+      if (seenPaperIds.has(attId)) continue;
+      seenPaperIds.add(attId);
+      paperItems.push({
+        id: attId,
+        type: "paper",
+        displayName,
+        metadata,
+      });
+      Zotero.debug(
+        `[seerai] RAG expand: + attachment ${attId} (${displayName})`,
+      );
+    }
+  }
+
   /**
    * Content extractor for the RAG retrieval engine.
    * Extracts structured content (abstract, notes, PDF text) from a Zotero item
@@ -1656,16 +1722,26 @@ export class Assistant {
         }
       }
 
-      // Get PDF text — skip if a same-title note already contains the content
+      // Get PDF text. PDF/text attachments are indexed as their own searchable
+      // units (bulk enumeration and expandContextItemsForRAG cover all of
+      // them), so a parent with attachments contributes abstract/notes only —
+      // this avoids duplicating every PDF passage under the parent.
       let pdfText: string | undefined;
+      const indexableAttachmentIds =
+        await getIndexableAttachmentIdsAsync(zoteroItem);
       if (hasSameTitleNote) {
         Zotero.debug(
           `[seerai] RAG: skipping PDF extraction for item ${itemId} — same-title note already included`,
         );
+      } else if (indexableAttachmentIds.length > 0) {
+        Zotero.debug(
+          `[seerai] RAG: item ${itemId} has ${indexableAttachmentIds.length} indexable attachment(s) — ` +
+            `they are indexed separately; parent entry keeps abstract/notes only`,
+        );
       } else {
         const attachmentIds = zoteroItem.getAttachments();
         for (const attId of attachmentIds) {
-          const att = Zotero.Items.get(attId);
+          const att = await Zotero.Items.getAsync(attId);
           if (!att || att.attachmentContentType !== "application/pdf") continue;
           const text = await Assistant.getAttachmentTextForRAG(att);
           if (text && text.length > 0) {
@@ -1725,12 +1801,12 @@ export class Assistant {
         // Direct reference. Attachments selected from the item tree are stored
         // as type "paper"; keep the attachment itself as the searchable unit
         // (its own PDF text) and label it with the parent's title.
-        const zItem = Zotero.Items.get(item.id);
+        const zItem = await Zotero.Items.getAsync(item.id);
         if (zItem?.isAttachment()) {
           if (!seenPaperIds.has(item.id)) {
             seenPaperIds.add(item.id);
             const parent = zItem.parentItemID
-              ? Zotero.Items.get(zItem.parentItemID)
+              ? await Zotero.Items.getAsync(zItem.parentItemID)
               : null;
             const parentTitle = parent
               ? (parent.getField("title") as string) || ""
@@ -1747,6 +1823,13 @@ export class Assistant {
                 `(${parentTitle || item.displayName})`,
             );
           }
+        } else if (zItem) {
+          await this.expandIndexableItemsForRAG(
+            zItem,
+            seenPaperIds,
+            paperItems,
+            item.metadata,
+          );
         } else if (!seenPaperIds.has(item.id)) {
           seenPaperIds.add(item.id);
           paperItems.push({
@@ -1768,15 +1851,13 @@ export class Assistant {
 
           for (const itemID of itemIDs) {
             if (seenPaperIds.has(itemID)) continue;
-            const zItem = Zotero.Items.get(itemID);
+            const zItem = await Zotero.Items.getAsync(itemID);
             if (!zItem || !zItem.isRegularItem()) continue;
-            seenPaperIds.add(itemID);
-            paperItems.push({
-              id: itemID,
-              type: "paper",
-              displayName:
-                (zItem.getField("title") as string) || `Item ${itemID}`,
-            });
+            await this.expandIndexableItemsForRAG(
+              zItem,
+              seenPaperIds,
+              paperItems,
+            );
           }
           Zotero.debug(
             `[seerai] RAG expand: tag "${tagName}" → ${itemIDs.length} papers`,
@@ -1790,23 +1871,28 @@ export class Assistant {
         // Expand collection → all child items (recursive)
         try {
           const collectionId = item.id as number;
-          const collection = Zotero.Collections.get(collectionId);
+          const collection = await Zotero.Collections.getAsync(collectionId);
           if (collection) {
-            const childItemIDs = collection.getChildItems(true);
+            // Shared scope enumeration: recursive subcollections + PDF/text
+            // attachments, matching what bulk indexing covers.
+            const childItemIDs = await enumerateScopeItems({
+              kind: "collection",
+              id: collectionId,
+              label: collection.name,
+            });
             for (const childId of childItemIDs) {
               if (seenPaperIds.has(childId)) continue;
-              const zItem = Zotero.Items.get(childId);
-              if (!zItem || !zItem.isRegularItem()) continue;
+              const zItem = await Zotero.Items.getAsync(childId);
+              if (!zItem) continue;
               seenPaperIds.add(childId);
               paperItems.push({
                 id: childId,
                 type: "paper",
-                displayName:
-                  (zItem.getField("title") as string) || `Item ${childId}`,
+                displayName: Assistant.ragDisplayName(zItem),
               });
             }
             Zotero.debug(
-              `[seerai] RAG expand: collection "${item.displayName}" → ${childItemIDs.length} items (recursive)`,
+              `[seerai] RAG expand: collection "${item.displayName}" → ${childItemIDs.length} indexable items (recursive)`,
             );
           }
         } catch (e) {
@@ -1826,15 +1912,13 @@ export class Assistant {
 
           for (const itemID of itemIDs) {
             if (seenPaperIds.has(itemID)) continue;
-            const zItem = Zotero.Items.get(itemID);
+            const zItem = await Zotero.Items.getAsync(itemID);
             if (!zItem || !zItem.isRegularItem()) continue;
-            seenPaperIds.add(itemID);
-            paperItems.push({
-              id: itemID,
-              type: "paper",
-              displayName:
-                (zItem.getField("title") as string) || `Item ${itemID}`,
-            });
+            await this.expandIndexableItemsForRAG(
+              zItem,
+              seenPaperIds,
+              paperItems,
+            );
           }
           Zotero.debug(
             `[seerai] RAG expand: author "${authorName}" → ${itemIDs.length} papers`,
@@ -1859,15 +1943,22 @@ export class Assistant {
           );
           for (const paper of included) {
             if (seenPaperIds.has(paper.id)) continue;
-            const zItem = Zotero.Items.get(paper.id);
+            const zItem = await Zotero.Items.getAsync(paper.id);
             if (!zItem) continue;
-            seenPaperIds.add(paper.id);
-            paperItems.push({
-              id: paper.id,
-              type: "paper",
-              displayName:
-                (zItem.getField("title") as string) || `Item ${paper.id}`,
-            });
+            if (zItem.isRegularItem()) {
+              await this.expandIndexableItemsForRAG(
+                zItem,
+                seenPaperIds,
+                paperItems,
+              );
+            } else {
+              seenPaperIds.add(paper.id);
+              paperItems.push({
+                id: paper.id,
+                type: "paper",
+                displayName: Assistant.ragDisplayName(zItem),
+              });
+            }
           }
           const revision = getActiveProtocolRevision(state.protocol);
           const synthesis = service.getSynthesis(state);
@@ -2596,7 +2687,7 @@ export class Assistant {
           // Actual generated data
           const generatedData = tableConfig.generatedData || {};
           for (const paperId of tableConfig.addedPaperIds) {
-            const zoteroItem = Zotero.Items.get(paperId);
+            const zoteroItem = await Zotero.Items.getAsync(paperId);
             if (!zoteroItem) continue;
 
             // Paper metadata
@@ -5870,12 +5961,12 @@ export class Assistant {
 
     const ResizeObserverCtor = doc.defaultView?.ResizeObserver;
     if (ResizeObserverCtor) {
-      // A re-render replaces mainWrapper; drop the old observer so stale
-      // wrappers don't keep firing layout work.
-      (mainWrapper as any)._layoutObserver?.disconnect?.();
+      // A re-render replaces mainWrapper; disconnect the previous render's
+      // observer so stale wrappers don't keep firing layout work.
+      activeChatLayoutObserver?.disconnect();
       const layoutObserver = new ResizeObserverCtor(applyResponsiveLayout);
       layoutObserver.observe(mainWrapper);
-      (mainWrapper as any)._layoutObserver = layoutObserver;
+      activeChatLayoutObserver = layoutObserver;
     }
     applyResponsiveLayout();
 
@@ -31636,8 +31727,11 @@ Rules:
       `[seerai] handleSendWithStreamingAndImages: entered, isRetry=${isRetry}, isStreaming=${this.isStreaming}, input.value="${(input.value || "").trim().slice(0, 30)}"`,
     );
 
-    // Reset abort state for a new request
+    // Reset abort state for a new request. The turn signal covers the whole
+    // send flow (RAG retrieval/indexing included) so Stop aborts in-flight
+    // embedding requests, not just the streaming completion.
     openAIService.resetAbortState();
+    const turnSignal = openAIService.beginTurn();
 
     // Auto-refresh drive context files (check for newer versions on Drive)
     const activeChatId = getMessageStore().getConversationId();
@@ -32763,6 +32857,7 @@ Rules:
                 tokenBudget: ragTokenBudget,
                 adaptiveRetrieval: true,
                 hybridSearch: true,
+                signal: turnSignal,
                 onProgress: ragProgressUI
                   ? (event: RAGProgressEvent) => {
                       ragProgressUI!.update(event);
@@ -32811,6 +32906,11 @@ Rules:
               Zotero.debug(
                 "[seerai] RAG returned no results, keeping full-text context",
               );
+              // Retrieval did not replace the context, so the raw context must
+              // still be fitted to the model window below. Leaving ragActive
+              // set here skipped that guard and could still produce
+              // "Context too large" on a large parent item.
+              ragActive = false;
               session.ragStats = {
                 chunksRetrieved: 0,
                 tokensUsed: 0,
@@ -32824,6 +32924,9 @@ Rules:
           } // end if (ragActive)
         } catch (e) {
           Zotero.debug(`[seerai] RAG skipped, falling back to full-text: ${e}`);
+          // Same as the no-results branch: the original context is kept, so
+          // the truncation guard below must run.
+          ragActive = false;
           // Save minimal ragStats so indicator persists across tab switch re-render
           session.ragStats = {
             chunksRetrieved: 0,
@@ -32846,47 +32949,33 @@ Rules:
         }
       }
 
-      // ── Fit the raw context to the model window ───────────────────────────
-      // When retrieval did not replace the context (no passages found, RAG
-      // off, or embeddings unconfigured), trim the raw context to the model
-      // budget instead of hard-failing. This is what lets a medium-context
-      // model work with a large parent item.
-      let contextTruncatedForBudget = false;
-      if (!ragActive) {
-        const contextLength = activeModelForRAG?.contextLength || 128000;
-        const reservedOutput = options.maxTokens || 4096;
-        const safetyMargin = Math.ceil(contextLength * 0.12);
-        const historyBudget = Math.min(contextLength * 0.2, 40000);
-        const historyTokens = Math.min(
-          conversationMessages
-            .filter(
-              (m: ChatMessage) => m.role !== "system" && m.role !== "error",
-            )
-            .reduce(
-              (sum: number, m: ChatMessage) =>
-                sum + ChatStateManager.countTokens(m.content),
-              0,
-            ),
-          historyBudget,
+      // ── Fit the assembled context to the model window ─────────────────────
+      // Runs on every path — raw context, retrieval that found nothing or
+      // failed, and retrieval output — so the request cannot exceed the window
+      // because of context size. This is what lets a medium-context model work
+      // with a large parent item.
+      const contextTokensBeforeFit = ChatStateManager.countTokens(context);
+      const fitted = fitContextToModelWindow({
+        context,
+        contextLength: activeModelForRAG?.contextLength || 128000,
+        reservedOutputTokens: options.maxTokens || 4096,
+        historyTokens: conversationMessages
+          .filter((m: ChatMessage) => m.role !== "system" && m.role !== "error")
+          .reduce(
+            (sum: number, m: ChatMessage) =>
+              sum + ChatStateManager.countTokens(m.content),
+            0,
+          ),
+        userMessageTokens: ChatStateManager.countTokens(text),
+      });
+      context = fitted.context;
+      const contextTruncatedForBudget = fitted.truncated;
+      if (contextTruncatedForBudget) {
+        Zotero.debug(
+          `[seerai] Context trimmed to fit model window: ` +
+            `~${contextTokensBeforeFit} → ~${fitted.budget} tokens ` +
+            `(retrievalApplied=${ragActive})`,
         );
-        const contextBudget = Math.max(
-          2000,
-          contextLength -
-            reservedOutput -
-            safetyMargin -
-            historyTokens -
-            2000 - // system prompt overhead
-            ChatStateManager.countTokens(text),
-        );
-        const contextTokens = ChatStateManager.countTokens(context);
-        if (contextTokens > contextBudget) {
-          context = truncateToTokenBudget(context, contextBudget);
-          contextTruncatedForBudget = true;
-          Zotero.debug(
-            `[seerai] Context trimmed to fit model window: ` +
-              `~${contextTokens} → ~${contextBudget} tokens`,
-          );
-        }
       }
 
       if (contextTruncatedForBudget && contentDiv) {
@@ -32894,11 +32983,13 @@ Rules:
         const warnEl = warnDoc.createElement("div");
         warnEl.style.cssText =
           "color: #b26a00; font-size: 12px; margin: 8px 0;";
-        warnEl.textContent =
-          "Context was truncated to fit the model window." +
-          (effectiveRAGEnabled
-            ? " Smart Context found no passages to retrieve — check the embedding provider and model in Advanced Retrieval settings."
-            : " Enable Smart Context / Always Use RAG to use retrieval-based context.");
+        warnEl.textContent = ragActive
+          ? "Retrieved passages were trimmed to fit the model window. " +
+            "Lower RAG Top-K or increase the model's Context Window to keep full passages."
+          : "Context was truncated to fit the model window." +
+            (effectiveRAGEnabled
+              ? " Smart Context found no passages to retrieve — check the embedding provider and model in Advanced Retrieval settings."
+              : " Enable Smart Context / Always Use RAG to use retrieval-based context.");
         contentDiv.appendChild(warnEl);
       }
 
@@ -33176,7 +33267,7 @@ ${includeNativeToolPrompt ? workspaceTree : ""}`;
       // can underestimate actual tokenizer output by 20-30%.
       const modelContextLength = activeModel?.contextLength || 128000;
       const reservedOutputTokens = chatOptions.maxTokens || 4096;
-      const preFlightSafetyMargin = Math.ceil(modelContextLength * 0.1);
+      const preFlightSafetyMargin = contextSafetyMargin(modelContextLength);
       const totalInputTokens = messages.reduce((sum, m) => {
         const content =
           typeof m.content === "string" ? m.content : JSON.stringify(m.content);
@@ -33461,6 +33552,7 @@ ${includeNativeToolPrompt ? workspaceTree : ""}`;
                   : ragConfig.minScore,
               passthroughContext: retryPassthrough,
               hybridSearch: true,
+              signal: turnSignal,
             },
           );
 
@@ -33713,6 +33805,7 @@ Note: Context was automatically reduced using semantic search due to size constr
               tokenBudget: dTokenBudget,
               adaptiveRetrieval: true,
               hybridSearch: true,
+              signal: turnSignal,
             },
           );
 

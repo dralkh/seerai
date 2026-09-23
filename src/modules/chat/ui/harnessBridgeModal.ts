@@ -8,7 +8,12 @@ const HTML_NS = "http://www.w3.org/1999/xhtml";
 
 // Harnesses whose tools reach seerai's library ONLY via a persistent MCP config
 // (Claude/Codex attach automatically per session, so they need no modal).
-const PERSISTENT_HARNESSES = new Set(["hermes", "antigravity", "openclaw"]);
+const PERSISTENT_HARNESSES = new Set([
+  "hermes",
+  "antigravity",
+  "openclaw",
+  "cursor",
+]);
 
 /**
  * Offer to connect seerai's research-tool bridge for a freshly-connected CLI

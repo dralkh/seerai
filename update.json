@@ -3,79 +3,13 @@
     "seerai@zotero.org": {
       "updates": [
         {
-          "version": "1.9.41",
-          "update_link": "https://github.com/dralkh/seerai/releases/download/1.9.41/seerai.xpi",
-          "update_hash": "sha512:966862d22162d3800e3c9fbfe3938a11bba7a450b076a679db8dd147376d6533d55227dadfd5134eb72e9651d0a7408832344c89d71859c2ea2effc7e5d0d712",
+          "version": "1.9.42",
+          "update_link": "https://github.com/dralkh/seerai/releases/download/1.9.42/seerai.xpi",
+          "update_hash": "sha512:e5cd439c76237683404929f05db32334a5973e73dc1e86c32915a2ad7f7f0de0358db9dd812b55b41a3531070ef1972a9c606b5e81e3d6bb9642280d9c9e90c6",
           "applications": {
             "zotero": {
               "strict_min_version": "8.0",
               "strict_max_version": "10.0.*"
-            }
-          }
-        },
-        {
-          "version": "1.9.4",
-          "update_link": "https://github.com/dralkh/seerai/releases/download/1.9.4/seerai.xpi",
-          "update_hash": "sha512:c052c576cbd0f4c99091ae3637bc83857865824f12743c6891eccf1bb3458787c1a035c1d78437f7b25374673c551be9421912149f6ebf0b894c9842dc38f1e2",
-          "applications": {
-            "zotero": {
-              "strict_min_version": "8.0",
-              "strict_max_version": "9.*"
-            }
-          }
-        },
-        {
-          "version": "1.9.3",
-          "update_link": "https://github.com/dralkh/seerai/releases/download/1.9.3/seerai.xpi",
-          "update_hash": "sha512:17a4ee7840d9f554880d8820dd460c452c2025fb1b172b4edb544f8b6e5e5654c5e21fd1f242bbcf73bd37488e58fb98d78bd8b337239523c864549f5fcb8745",
-          "applications": {
-            "zotero": {
-              "strict_min_version": "8.0",
-              "strict_max_version": "9.*"
-            }
-          }
-        },
-        {
-          "version": "1.9.1",
-          "update_link": "https://github.com/dralkh/seerai/releases/download/1.9.1/seerai.xpi",
-          "update_hash": "sha512:ee49e0f3ff32a766523ecf77cecd7b770c02080e208abf6585570af3e6a1b1ca99e72a6ae9135e3d631acc9cf3aac6e995db8e5fd0d60bf5cf51c1b73318a4e8",
-          "applications": {
-            "zotero": {
-              "strict_min_version": "8.0",
-              "strict_max_version": "9.*"
-            }
-          }
-        },
-        {
-          "version": "1.9.0",
-          "update_link": "https://github.com/dralkh/seerai/releases/download/1.9.0/seerai.xpi",
-          "update_hash": "sha512:0a7141a40f199cb488eb7a06a238543019a7e58f8acee52e9abbc9ba9bf52f38dc6e48e17e565b2490bf673cd6d0968170a63d1a642270a19ab25a878dec5ae3",
-          "applications": {
-            "zotero": {
-              "strict_min_version": "8.0",
-              "strict_max_version": "9.*"
-            }
-          }
-        },
-        {
-          "version": "1.8.2",
-          "update_link": "https://github.com/dralkh/seerai/releases/download/1.8.2/seerai.xpi",
-          "update_hash": "sha512:2505c3a506b76ab67a8a1bdbe715b4ff96bf2e2d9cc60cc93db78097dc20c5f409ab0fe81a0e16a041aebbb79c459806308dff805c004eadabed0f1c16c09184",
-          "applications": {
-            "zotero": {
-              "strict_min_version": "8.0",
-              "strict_max_version": "9.*"
-            }
-          }
-        },
-        {
-          "version": "1.8.1",
-          "update_link": "https://github.com/dralkh/seerai/releases/download/1.8.1/seerai.xpi",
-          "update_hash": "sha512:efb15d7999f5eaf593badc33f9abdd6a87f9535fefc9b362866e17a9f8d474dcb76cc308e8b917ef0127008b53f2754f055e18556c181e56abb5cba1073aea84",
-          "applications": {
-            "zotero": {
-              "strict_min_version": "8.0",
-              "strict_max_version": "9.*"
             }
           }
         }

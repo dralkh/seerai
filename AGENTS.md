@@ -19,6 +19,7 @@ npm run release        # Create GitHub release (zotero-plugin release)
 npm run test           # Run test suite (zotero-plugin test → mocha-based)
 npm run test:extraction-eval  # LLM extraction evaluation harness (tsx test/extractionModelEval.ts)
 npm run test:pipeline-eval    # Systematic-review pipeline evaluation harness (tsx test/pipelineEval.ts)
+npm run test:rag-live         # Live RAG eval vs a real embedding provider (tsx test/ragLive.ts)
 npm run update-deps    # Update all dependencies to latest (npm update --save)
 
 # MCP server (separate package)
@@ -29,6 +30,8 @@ cd mcp-server && npm run start    # Run compiled MCP server
 ```
 
 **Always run `npm run lint:check` and `npm run build` after making changes.**
+
+**Live harness keys (`.env`, gitignored):** `test/ragLive.ts` (`npm run test:rag-live`) reads `EMBEDDING_BASE_URL` (default `https://nano-gpt.com/api/v1`), `EMBEDDING_API_KEY` (or `NANOGPT_API_KEY`/`LLM_API_KEY`), `EMBEDDING_MODEL` (+ optional `EMBEDDING_DIMENSIONS`) to run the production embedding client + retrieval pipeline against a real provider with minimal Zotero stubs. Setting `EMBEDDING_MODEL2` adds a second phase that switches models in the same data dir and asserts the embedding fingerprint invalidates and re-indexes every item on demand. Verified live against NanoGPT with `text-embedding-3-small` (1536 dims) and `BAAI/bge-m3` (1024 dims). `test/llmLive.ts` / `test/pipelineEval.ts` read `LLM_BASE_URL`/`LLM_API_KEY`/`LLM_MODEL`/`LLM_MODEL2`. In the plugin itself, provider keys are entered in Preferences → seerai → **AI providers** and stored in `{DataDirectory}/seerai/providerConfigs.json`.
 
 **Tests (`npm test`):** Only run when the change touches testable logic (service helpers, state shapes, protocol/template flow, persistence schemas, bug fixes). Skip for pure formatting, comment, UI-style-only, or non-functional edits. When a test is warranted, run only the relevant file rather than the full suite when possible (e.g. `npx mocha test/<file>.test.ts`).
 
@@ -270,6 +273,7 @@ seerai/
 │   ├── bulkIndexerZotero.test.ts # Bulk scope enumeration (runs inside Zotero)
 │   ├── embeddingLocalServerZotero.test.ts # Real HTTP embedding → retrieval E2E
 │   ├── ragPipelineZotero.test.ts # Full retrieval pipeline with a stubbed embedder
+│   ├── ragScopeZotero.test.ts  # Scope coverage: subcollections, multi-attachment items, hash skip
 │   ├── queryCompiler.test.ts / queryThreading.test.ts
 │   ├── scholarly*.test.ts      # Federated search (http, fixtures, search, live)
 │   └── systematicReview*.test.ts
@@ -426,10 +430,12 @@ chunker.ts → embeddingService.ts → vectorStore.ts → retrievalEngine.ts
 - Triggered when context tokens exceed `ragTokenThreshold` pref (default 64K)
 - Features: BM25+RRF hybrid retrieval, MMR diversity, query expansion, multi-query, HyDE, contextual retrieval, sentence-window retrieval, query decomposition, citation-graph traversal, cross-encoder reranking (Jina/Cohere), correction loops
 - Configurable via many prefs under `rag*` namespace (see `addon/prefs.js`)
-- **Bulk pre-indexing** (`bulkIndexer.ts`): `indexScopeForRAG()` / `indexItemsForRAG()` enumerate a collection/library or explicit items, skip fresh vectors (content hash, `dateModified`, embedding-model change), and index in waves via `indexItemsNow()` in `retrievalEngine.ts`, reporting `BulkIndexStatus` and honoring cancellation. Library scopes enumerate/count regular items with a DB query (`countLibraryRegularItems`) so large libraries aren't loaded item-by-item. UI: Preferences → **Vector Index** section (`integrationSettings.ts:renderRagIndexSettings`) and the item context menu **Index for Smart Context** (`hooks.ts`).
-- **Attachments are first-class RAG items**: `Assistant.extractContentForRAG` accepts attachment IDs directly (parent metadata is borrowed for the title), and `expandContextItemsForRAG` keeps directly-selected PDFs as searchable items. Selected parent books no longer inject raw full text ahead of retrieval — when retrieval yields nothing the raw context is trimmed to the model window (`truncateToTokenBudget` in `tokenizer.ts`) with a visible warning.
-- **Score filtering**: `minScore <= 0` means "no lower bound" (`resolveMinScore` in `vectorStore.ts`); cosine similarity is in [-1, 1] and some providers (mistral-embed) return negative scores for relevant passages.
-- **Embedding-model changes invalidate vectors**: `collectItemsToIndex` marks entries stale when `embeddingModel` differs, and dimension-mismatch repair scans every scoped item (not just the first).
+- **Scope model** (`itemSources.ts`): a searchable unit is a regular item (abstract/notes/metadata) or a PDF/text attachment. Every attachment is indexed separately, so a book with several PDFs contributes all of them; parent entries don't duplicate attachment text. `enumerateScopeItems()` / `countScopeItems()` in `bulkIndexer.ts` are the single source of truth (recursive subcollections, standalone attachments, DB-level SQL for libraries) and are shared by bulk indexing, collection context expansion, and `semantic_search` scoping.
+- **Bulk pre-indexing** (`bulkIndexer.ts`): `indexScopeForRAG()` / `indexItemsForRAG()` reserve the job before the first await (a second concurrent start is rejected), report `BulkIndexStatus` to a listener set (`subscribeBulkIndex()`), and honor cancellation between waves. `planIndexRun()` skips fresh vectors (embedding fingerprint/model, `dateModified`) and verifies with a content hash when an item changed, reusing the extracted content for indexing. UI: Preferences → **Vector Index** section (`integrationSettings.ts:renderRagIndexSettings`, follows a running job to completion) and the item context menu **Index for Smart Context** (`hooks.ts`). The background indexer defers while a bulk run is active.
+- **Attachments are first-class RAG items**: `Assistant.extractContentForRAG` accepts attachment IDs directly (parent metadata is borrowed for the title), and `expandContextItemsForRAG` expands regular items into their attachments (and keeps directly-selected PDFs as searchable units). Selected parent books no longer inject raw full text ahead of retrieval — when retrieval yields nothing or fails, the raw context is trimmed to the model window (`fitContextToModelWindow` in `retrievalEngine.ts`) with a visible warning.
+- **Score filtering**: `minScore <= 0` means "no lower bound" (`resolveMinScore` in `vectorStore.ts`); cosine similarity is in [-1, 1] and some providers (mistral-embed) return negative scores for relevant passages. Tool schemas do **not** default `min_score` (it must reach the handler as `undefined` so the configured RAG score applies); `semantic_search` / `search_similar` also skip entries whose stored vectors came from a different embedding pipeline and report the count.
+- **Embedding identity invalidates vectors**: `EmbeddingService.getConfigFingerprint()` (provider|adapter|model|endpoint|dimensions) is stored on vector entries and used in the query cache key; `collectItemsToIndex`, `filterItemsNeedingIndex`, and `planIndexRun` treat a fingerprint or model-name change as stale, and dimension-mismatch repair scans every scoped item (not just the first).
+- **Budget policy**: `contextSafetyMargin()` (10%) is shared by `computeTokenBudget()`, `fitContextToModelWindow()`, and the chat pre-flight check; `truncateToTokenBudget()` re-counts and hard-trims so mixed-density text (e.g. CJK + English) actually fits the requested budget.
 
 ### Zotero 10 Compatibility
 
@@ -472,7 +478,7 @@ Models are addressed by a `ModelRef` (provider + local model id) and resolved at
 - Each CLI is described by a `CliAgentDef` (`cliTypes.ts`): binary name, one-shot args, stream format (`json-lines` | `raw-text`), line parser, auth-failure patterns, optional `prepare()` and live `listModels`.
 - `cliRunner.ts` spawns the binary, feeds one flattened prompt over stdin, and streams stdout into `ProviderEvent`s; `cliProvider.ts` implements the `AgentProvider` interface; `cliDetection.ts` probes PATH/version/auth. Provider configs reference an agent via `cliAgentId`.
 - Images are dropped (CLIs receive text only).
-- **Agentic mode**: when seerai's agentic mode is ON, CLI harnesses run as full agents in the chat workspace and can receive seerai's research tools over a bundled MCP bridge (`mcpBridge.ts`). Claude and Codex attach the MCP server automatically per session; Hermes, Antigravity, and OpenClaw are connected via persistent config (and shown a one-click connect modal from `harnessBridgeModal.ts`). When agentic mode is OFF, the harness is forced into a plain-chat turn with no tools or file writes.
+- **Agentic mode**: when seerai's agentic mode is ON, CLI harnesses run as full agents in the chat workspace and can receive seerai's research tools over a bundled MCP bridge (`mcpBridge.ts`). Claude and Codex attach the MCP server automatically per session; Hermes, Antigravity, OpenClaw, and Cursor are connected via persistent config (`~/.cursor/mcp.json` for Cursor; `--approve-mcps` is passed for connected agentic Cursor runs) and shown a one-click connect modal from `harnessBridgeModal.ts`. Cursor also requires a tool allowlist entry: connect writes `Mcp(seerai-zotero:*)` into `~/.cursor/cli-config.json` `permissions.allow` (and disconnect removes it) — `--approve-mcps` only approves the server, so without this entry Cursor rejects every individual tool call in non-interactive (`-p`) runs. Verified against cursor-agent 2026.09.18. When agentic mode is OFF, the harness is forced into a plain-chat turn with no tools or file writes.
 - **Tool-activity surfacing**: harnesses report their own tool calls (built-ins or configured MCP/skills). `toolActivityBridge.ts` relays seerai-MCP tool calls back to the chat UI, and `toolNotice.ts` formats harness tool activity so the user can see what ran — including when it was a harness-native tool rather than a seerai tool.
 
 ### Federated Scholarly Search

@@ -1,7 +1,7 @@
 {
   "name": "seerai",
   "type": "module",
-  "version": "1.9.41",
+  "version": "1.9.42",
   "description": "seerai - Intelligent Research Assistant for Zotero",
   "config": {
     "addonName": "seerai",
@@ -29,6 +29,7 @@
     "test": "zotero-plugin test",
     "test:extraction-eval": "tsx test/extractionModelEval.ts",
     "test:pipeline-eval": "tsx test/pipelineEval.ts",
+    "test:rag-live": "tsx test/ragLive.ts",
     "update-deps": "npm update --save"
   },
   "dependencies": {

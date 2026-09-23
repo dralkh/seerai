@@ -124,6 +124,11 @@ export interface VectorStoreEntry {
   indexedAt: string; // ISO date
   /** Parent windows for sentence-window retrieval (maps parent chunk ID → text) */
   parentWindows?: Record<string, string>;
+  /**
+   * Full embedding pipeline identity at index time (provider/adapter/model/
+   * endpoint/dimensions). Optional for entries indexed before this existed.
+   */
+  embeddingFingerprint?: string;
 }
 
 /** Per-item metadata in the global index (no embedding vectors) */
@@ -144,6 +149,8 @@ export interface VectorIndexEntry {
   publicationYear?: number;
   /** ~300 char snippet from the abstract (or longest) chunk, cached at index time */
   snippet?: string;
+  /** Full embedding pipeline identity at index time (see VectorStoreEntry) */
+  embeddingFingerprint?: string;
 }
 
 /** Global index manifest file */
@@ -263,6 +270,12 @@ export interface RetrievalOptions {
   correctiveEnabled?: boolean;
   /** Callback for live progress updates during retrieval */
   onProgress?: RAGProgressCallback;
+  /**
+   * Abort signal for the owning turn/job. Aborts in-flight embedding requests
+   * and stops the pipeline early; an aborted retrieval returns an empty result
+   * rather than throwing, so callers can proceed (the turn itself is stopping).
+   */
+  signal?: AbortSignal;
 }
 
 /** A retrieved chunk with its relevance score */

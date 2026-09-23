@@ -229,6 +229,7 @@ export class VectorStore {
     publicationYear?: number,
     title?: string,
     firstCreator?: string,
+    embeddingFingerprint?: string,
   ): Promise<void> {
     if (chunks.length !== embeddings.length) {
       throw new Error(
@@ -254,6 +255,7 @@ export class VectorStore {
       contentHash,
       indexedAt: new Date().toISOString(),
       parentWindows,
+      embeddingFingerprint,
     };
 
     // Save to disk
@@ -282,6 +284,7 @@ export class VectorStore {
       firstCreator: firstAuthor,
       publicationYear,
       snippet,
+      embeddingFingerprint,
     };
     await this.saveIndex();
 

@@ -26,6 +26,7 @@ import {
   formatBulkIndexStatus,
   indexItemsForRAG,
 } from "./modules/chat/rag/bulkIndexer";
+import { isIndexableItem } from "./modules/chat/rag/itemSources";
 
 const ocrService = new OcrService();
 
@@ -305,13 +306,7 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
       generateTagsMenuItem.hidden = !isRegularSelection;
 
       // Index for Smart Context: regular items and PDF/text attachments
-      const hasIndexableItems = items.some(
-        (item) =>
-          item.isRegularItem() ||
-          (item.isAttachment() &&
-            (item.attachmentContentType === "application/pdf" ||
-              (item.attachmentContentType || "").startsWith("text/"))),
-      );
+      const hasIndexableItems = items.some((item) => isIndexableItem(item));
       indexRagMenu.hidden = !hasIndexableItems;
     });
   }
@@ -537,13 +532,7 @@ async function searchPdfsForSelectedItems() {
  */
 async function indexSelectedItemsForRAG() {
   const items = Zotero.getActiveZoteroPane().getSelectedItems();
-  const indexable = items.filter(
-    (item) =>
-      item.isRegularItem() ||
-      (item.isAttachment() &&
-        (item.attachmentContentType === "application/pdf" ||
-          (item.attachmentContentType || "").startsWith("text/"))),
-  );
+  const indexable = items.filter((item) => isIndexableItem(item));
   if (indexable.length === 0) {
     ztoolkit.log("Smart Context indexing: no indexable items selected");
     return;

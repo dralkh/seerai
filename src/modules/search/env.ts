@@ -59,3 +59,19 @@ export function createAbortError(message = "Aborted"): Error {
   error.name = "AbortError";
   return error;
 }
+
+/**
+ * True for both AbortSignal aborts (`AbortError`) and request timeouts
+ * (`TimeoutError`) — neither is a genuine failure, so callers should stop
+ * quietly instead of counting failures.
+ */
+export function isAbortError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const name = (error as { name?: string }).name;
+  return name === "AbortError" || name === "TimeoutError";
+}
+
+/** Throw an AbortError when the signal is already aborted. */
+export function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw createAbortError();
+}

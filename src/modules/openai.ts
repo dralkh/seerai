@@ -170,6 +170,7 @@ export interface ChatCompletionOptions {
 }
 
 import { RateLimiter } from "../utils/rateLimiter";
+import { createAbortController } from "./search/env";
 import { requireResolvedModel, resolveModel } from "./chat/modelResolver";
 import type { ModelRef, ResolvedModel } from "./chat/providerTypes";
 import { createCliProvider, resolveCliContext } from "./chat/cli/cliProvider";
@@ -180,6 +181,13 @@ export class OpenAIService {
 
   private currentController: any = null;
   private isAborted: boolean = false;
+
+  /**
+   * Turn-scoped controller covering the whole send flow (RAG retrieval and
+   * indexing included), not just the streaming completion. Stopping a turn
+   * aborts in-flight embedding requests too.
+   */
+  private turnController: AbortController | null = null;
 
   private getPrefs() {
     Zotero.debug(`[seerai] Config Prefix: ${config.prefsPrefix}`);
@@ -212,6 +220,16 @@ export class OpenAIService {
    */
   abortRequest(): boolean {
     this.isAborted = true;
+    let aborted = false;
+    if (this.turnController) {
+      try {
+        this.turnController.abort();
+        aborted = true;
+      } catch (e) {
+        // AbortController.abort() may not be available
+      }
+      this.turnController = null;
+    }
     if (this.currentController) {
       try {
         this.currentController.abort();
@@ -219,10 +237,12 @@ export class OpenAIService {
         // AbortController.abort() may not be available
       }
       this.currentController = null;
-      Zotero.debug("[seerai] Request aborted by user");
-      return true;
+      aborted = true;
     }
-    return false;
+    if (aborted) {
+      Zotero.debug("[seerai] Request aborted by user");
+    }
+    return aborted;
   }
 
   /**
@@ -231,6 +251,22 @@ export class OpenAIService {
   resetAbortState(): void {
     this.isAborted = false;
     this.currentController = null;
+    this.turnController = null;
+  }
+
+  /**
+   * Start a new chat turn and return its abort signal (undefined when
+   * AbortController is unavailable). Pass the signal to long-running
+   * pre-completion work (RAG retrieval/indexing) so Stop aborts it.
+   */
+  beginTurn(): AbortSignal | undefined {
+    try {
+      this.turnController = createAbortController();
+      return this.turnController.signal;
+    } catch {
+      this.turnController = null;
+      return undefined;
+    }
   }
 
   private isReasoningModel(model: string): boolean {

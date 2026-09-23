@@ -1074,7 +1074,8 @@ export const agentTools: ToolDefinition[] = [
           },
           min_score: {
             type: "number",
-            description: "Minimum relevance score 0-100 (default: 30)",
+            description:
+              "Minimum relevance score 0-100. Omit to use the configured Smart Context minimum score; 0 disables the filter.",
           },
           sources: {
             type: "array",
@@ -1220,7 +1221,8 @@ export const agentTools: ToolDefinition[] = [
           },
           min_score: {
             type: "number",
-            description: "Minimum similarity score 0-100 (default: 30)",
+            description:
+              "Minimum similarity score 0-100. Omit to use the configured Smart Context minimum score; 0 disables the filter.",
           },
           scope: {
             type: "string",

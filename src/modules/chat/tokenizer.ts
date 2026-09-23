@@ -117,16 +117,35 @@ export function isTokenizerAvailable(): boolean {
 }
 
 /**
- * Trim text to roughly maxTokens using the shared token counter, preferring a
+ * Trim text to at most maxTokens using the shared token counter, preferring a
  * paragraph boundary near the cut point so the result stays readable.
+ *
+ * Token density varies within a document (e.g. a CJK section followed by
+ * English), so a single length-ratio cut can overshoot the budget. The result
+ * is therefore re-counted and hard-trimmed until it actually fits.
  */
 export function truncateToTokenBudget(text: string, maxTokens: number): string {
   if (maxTokens <= 0) return "";
   const tokens = countTokens(text);
   if (tokens <= maxTokens || tokens <= 0) return text;
+
   const ratio = maxTokens / tokens;
   let cut = Math.max(1, Math.floor(text.length * ratio));
   const boundary = text.lastIndexOf("\n\n", cut);
   if (boundary > cut * 0.7) cut = boundary;
-  return text.substring(0, cut);
+  let result = text.substring(0, cut);
+
+  // Recount and shrink until the budget is actually respected. The loop is
+  // bounded; each pass removes at least ~3% and typically converges in 1-3.
+  let guard = 0;
+  while (guard < 24 && result.length > 0) {
+    const resultTokens = countTokens(result);
+    if (resultTokens <= maxTokens) break;
+    const shrink = (maxTokens / resultTokens) * 0.97;
+    const nextLength = Math.max(1, Math.floor(result.length * shrink));
+    result = result.substring(0, nextLength);
+    guard++;
+  }
+
+  return result;
 }

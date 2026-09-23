@@ -21,7 +21,7 @@ import { getVectorStore, VectorStore } from "../rag/vectorStore";
 import { bm25Search, mergeHybridResults } from "../rag/bm25";
 import { crossEncodeRerank, isRerankerConfigured } from "../rag/reranker";
 import { getRAGConfig } from "../rag/retrievalEngine";
-import { countLibraryRegularItems } from "../rag/bulkIndexer";
+import { countScopeItems, enumerateScopeItems } from "../rag/bulkIndexer";
 import { chunkPaperContent } from "../rag/chunker";
 import { Assistant } from "../../assistant";
 
@@ -93,17 +93,21 @@ async function resolveSearchScope(
       }
     }
   } else if (scope === "collection" && collectionId) {
-    const collection = Zotero.Collections.get(collectionId);
+    const collection = await Zotero.Collections.getAsync(collectionId);
     if (!collection) return null;
-    const childIds = collection.getChildItems(true);
+    // Shared scope enumeration: recursive subcollections + PDF/text
+    // attachments, matching what bulk indexing covers.
+    const childIds = await enumerateScopeItems({
+      kind: "collection",
+      id: collectionId,
+      label: collection.name,
+    });
     for (const childId of childIds) {
       if (
         libraryId !== undefined &&
         !(await itemBelongsToLibrary(childId, libraryId))
       )
         continue;
-      const child = Zotero.Items.get(childId);
-      if (!child || !child.isRegularItem()) continue;
       totalInScope++;
       const entry = await store.getIndexEntry(childId);
       if (!entry) continue;
@@ -111,9 +115,13 @@ async function resolveSearchScope(
       titles.set(childId, entry.title || `Item ${childId}`);
     }
   } else if (libraryId !== undefined) {
-    // Library scope: count regular items at the DB level (cheap for large
+    // Library scope: count indexable items at the DB level (cheap for large
     // libraries) and search only the indexed subset.
-    totalInScope = await countLibraryRegularItems(libraryId);
+    totalInScope = await countScopeItems({
+      kind: "library",
+      id: libraryId,
+      label: "",
+    });
     const indexedIds = await store.getIndexedItemIds();
     for (const id of indexedIds) {
       if (!(await itemBelongsToLibrary(id, libraryId))) continue;
@@ -147,6 +155,45 @@ async function itemBelongsToLibrary(
   } catch {
     return false;
   }
+}
+
+/**
+ * Drop indexed items whose stored vectors came from a different embedding
+ * pipeline — comparing them against a query embedded with the current model is
+ * meaningless even at equal dimensions. Chat retrieval re-indexes such items;
+ * tool/MCP search has no re-index path, so it excludes them and reports how
+ * many were skipped.
+ */
+async function filterFreshEmbeddingIds(
+  ids: number[],
+  embeddingService: ReturnType<typeof getEmbeddingService>,
+): Promise<{ fresh: number[]; stale: number }> {
+  const store = getVectorStore();
+  const model = embeddingService.getConfiguredModel() || undefined;
+  const fingerprint = embeddingService.getConfigFingerprint() || undefined;
+  if (!model && !fingerprint) return { fresh: ids, stale: 0 };
+
+  const fresh: number[] = [];
+  let stale = 0;
+  for (const id of ids) {
+    try {
+      const entry = await store.getIndexEntry(id);
+      const modelMismatch =
+        !!model && !!entry?.embeddingModel && entry.embeddingModel !== model;
+      const fingerprintMismatch =
+        !!fingerprint &&
+        !!entry?.embeddingFingerprint &&
+        entry.embeddingFingerprint !== fingerprint;
+      if (modelMismatch || fingerprintMismatch) {
+        stale++;
+        continue;
+      }
+      fresh.push(id);
+    } catch {
+      fresh.push(id);
+    }
+  }
+  return { fresh, stale };
 }
 
 export async function executeSemanticSearch(
@@ -216,13 +263,15 @@ export async function executeSemanticSearch(
 
     const { itemIds, titles, totalInScope } = scopeResult;
 
-    const indexedIds: number[] = [];
+    const indexedCandidates: number[] = [];
     const store = getVectorStore();
     for (const id of itemIds) {
       if (await store.isIndexed(id)) {
-        indexedIds.push(id);
+        indexedCandidates.push(id);
       }
     }
+    const { fresh: indexedIds, stale: staleModelCount } =
+      await filterFreshEmbeddingIds(indexedCandidates, embeddingService);
 
     if (indexedIds.length === 0) {
       return {
@@ -401,13 +450,17 @@ export async function executeSemanticSearch(
       unindexedCount > 0
         ? ` ${unindexedCount} of ${totalInScope} scoped item(s) are not indexed yet — run "Index Entire Library" / "Index Current Collection" in seerai Preferences → Vector Index to include them.`
         : "";
+    const staleModelHint =
+      staleModelCount > 0
+        ? ` ${staleModelCount} indexed item(s) use a different embedding model and were skipped — re-index them to include them.`
+        : "";
     await store.saveIndex();
     return {
       success: true,
       data: results,
       summary:
         `Semantically searched ${indexedIds.length} papers` +
-        ` for "${query}"${methodInfo}. Found ${results.results.length} relevant passages${passthroughNote}.${indexHint}`,
+        ` for "${query}"${methodInfo}. Found ${results.results.length} relevant passages${passthroughNote}.${indexHint}${staleModelHint}`,
     };
   } catch (error) {
     Zotero.debug(`[seerai] Tool: semantic_search error: ${error}`);
@@ -831,8 +884,11 @@ export async function executeSearchSimilar(
       };
     }
 
-    // Exclude the source item from results
-    const searchIds = scopeResult.itemIds.filter((id) => id !== item_id);
+    // Exclude the source item from results, then drop items indexed with a
+    // different embedding pipeline (their vectors aren't comparable).
+    const candidateIds = scopeResult.itemIds.filter((id) => id !== item_id);
+    const { fresh: searchIds, stale: staleModelCount } =
+      await filterFreshEmbeddingIds(candidateIds, embeddingService);
     if (searchIds.length === 0) {
       return {
         success: true,
@@ -936,7 +992,10 @@ export async function executeSearchSimilar(
       },
       summary:
         `Found ${similar.length} papers similar to "${sourceTitle.substring(0, 60)}" ` +
-        `from ${totalSearched} indexed items.`,
+        `from ${totalSearched} indexed items.` +
+        (staleModelCount > 0
+          ? ` ${staleModelCount} indexed item(s) use a different embedding model and were skipped — re-index them to include them.`
+          : ""),
     };
   } catch (error) {
     Zotero.debug(`[seerai] Tool: search_similar error: ${error}`);

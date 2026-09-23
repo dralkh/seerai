@@ -7,13 +7,14 @@
 
 import { config } from "../../../../package.json";
 import { ChatStateManager } from "../stateManager";
+import { isAbortError, throwIfAborted } from "../../search/env";
 import { getEmbeddingService } from "./embeddingService";
 import { chunkPaperContent, chunkDocument } from "./chunker";
 import { getVectorStore, VectorStore } from "./vectorStore";
 import { mergeHybridResults, invalidateBm25Cache } from "./bm25";
 import { crossEncodeRerank, isRerankerConfigured } from "./reranker";
-import { isTokenizerAvailable } from "../tokenizer";
 import { traverseCitationGraph } from "./citationGraph";
+import { truncateToTokenBudget } from "../tokenizer";
 import {
   isEvalEnabled,
   loadGroundTruth,
@@ -185,17 +186,32 @@ async function rewriteQueryForRetrieval(
 
 // ─── Content extractor type alias ──────────────────────────────────────────────
 
-type ContentExtractorFn = (itemId: number) => Promise<{
+/** Extracted, indexable content for one Zotero item. */
+export interface RAGIndexContent {
   abstract?: string;
   notes?: string[];
   pdfText?: string;
   title?: string;
   authors?: string[];
   date?: string;
-} | null>;
+}
+
+type ContentExtractorFn = (itemId: number) => Promise<RAGIndexContent | null>;
 
 type EmbeddingServiceType = ReturnType<typeof getEmbeddingService>;
 type VectorStoreType = ReturnType<typeof getVectorStore>;
+
+/**
+ * Content hash used for staleness detection. Shared by on-demand indexing and
+ * bulk planning so a "fresh" decision means the same thing in both paths.
+ */
+export function ragContentHash(content: RAGIndexContent): string {
+  return VectorStore.contentHash(
+    (content.abstract || "") +
+      (content.notes?.join("") || "") +
+      (content.pdfText || ""),
+  );
+}
 
 type IndexItem = { itemId: number; reason: string };
 
@@ -211,10 +227,12 @@ async function indexItemsInWaves(
   embeddingService: EmbeddingServiceType,
   vectorStore: VectorStoreType,
   ragConfig: RAGConfig,
+  signal?: AbortSignal,
 ): Promise<number> {
   let succeeded = 0;
 
   for (let i = 0; i < items.length; i += MAX_CONCURRENT_ITEM_INDEXING) {
+    if (signal?.aborted) break;
     const wave = items.slice(i, i + MAX_CONCURRENT_ITEM_INDEXING);
     const results = await Promise.allSettled(
       wave.map(async ({ itemId, reason }) => {
@@ -227,20 +245,28 @@ async function indexItemsInWaves(
           embeddingService,
           vectorStore,
           ragConfig,
+          undefined,
+          signal,
         );
       }),
     );
 
+    let aborted = false;
     for (let j = 0; j < results.length; j++) {
       if (results[j].status === "fulfilled") {
         succeeded++;
       } else {
         const err = (results[j] as PromiseRejectedResult).reason;
+        if (isAbortError(err)) {
+          aborted = true;
+          continue;
+        }
         Zotero.debug(
           `[seerai] RAG: failed to index item ${wave[j].itemId}: ${err}`,
         );
       }
     }
+    if (aborted) break;
   }
 
   return succeeded;
@@ -257,6 +283,7 @@ async function collectItemsToIndex(
   vectorStore: VectorStoreType,
   contentExtractor: ContentExtractorFn,
   embeddingModel?: string,
+  embeddingFingerprint?: string,
 ): Promise<IndexItem[]> {
   const itemsToIndex: IndexItem[] = [];
 
@@ -271,13 +298,18 @@ async function collectItemsToIndex(
         const currentModified = zItem?.dateModified;
         const indexEntry = await vectorStore.getIndexEntry(itemId);
 
-        // Embedding model switched — stored vectors come from another model
-        // and can't be compared meaningfully (even at equal dimensions).
-        if (
-          embeddingModel &&
-          indexEntry?.embeddingModel &&
-          indexEntry.embeddingModel !== embeddingModel
-        ) {
+        // Embedding pipeline switched (provider/endpoint/dimensions) — stored
+        // vectors come from another space and can't be compared meaningfully,
+        // even at equal dimensions or the same model name.
+        const fingerprintChanged =
+          !!embeddingFingerprint &&
+          !!indexEntry?.embeddingFingerprint &&
+          indexEntry.embeddingFingerprint !== embeddingFingerprint;
+        const modelChanged =
+          !!embeddingModel &&
+          !!indexEntry?.embeddingModel &&
+          indexEntry.embeddingModel !== embeddingModel;
+        if (fingerprintChanged || modelChanged) {
           itemsToIndex.push({ itemId, reason: "embedding-model-changed" });
           continue;
         }
@@ -329,10 +361,12 @@ async function performDenseSearch(
   topK: number,
   minScore: number,
   onProgress?: RAGProgressCallback,
+  signal?: AbortSignal,
 ): Promise<{
   allDenseChunks: RetrievedChunk[];
   baseEmbedding: number[] | null;
 }> {
+  throwIfAborted(signal);
   onProgress?.({
     step: "embedding-query",
     message:
@@ -346,9 +380,10 @@ async function performDenseSearch(
 
   const variantEmbeddings = await Promise.all(
     queryVariants.map((v) =>
-      embeddingService
-        .getQueryEmbedding(v)
-        .catch(() => null as number[] | null),
+      embeddingService.getQueryEmbedding(v, { signal }).catch((e) => {
+        if (isAbortError(e)) throw e;
+        return null as number[] | null;
+      }),
     ),
   );
 
@@ -371,7 +406,10 @@ async function performDenseSearch(
   }
 
   if (allDenseChunks.length === 0) {
-    const baseEmb = await embeddingService.getQueryEmbedding(baseQuery);
+    throwIfAborted(signal);
+    const baseEmb = await embeddingService.getQueryEmbedding(baseQuery, {
+      signal,
+    });
     baseEmbedding = baseEmb;
     const result = await vectorStore.searchSimilar(
       baseEmb,
@@ -416,6 +454,7 @@ async function handleDimensionMismatch(
   ragConfig: RAGConfig,
   topK: number,
   minScore: number,
+  signal?: AbortSignal,
 ): Promise<{
   searchResult: VectorSearchResult;
   itemsReindexed: number;
@@ -480,7 +519,19 @@ async function handleDimensionMismatch(
       embeddingService,
       vectorStore,
       ragConfig,
+      signal,
     );
+
+    if (signal?.aborted) {
+      return {
+        searchResult: {
+          chunks: [],
+          dimensionMismatch: false,
+          mismatchedItemIds: [],
+        },
+        itemsReindexed,
+      };
+    }
 
     Zotero.debug(
       "[seerai] RAG: retrying search after dimension-mismatch re-index",
@@ -518,6 +569,7 @@ async function assembleTieredContext(
   topK: number,
   useAdaptive: boolean,
   onProgress?: RAGProgressCallback,
+  signal?: AbortSignal,
 ): Promise<{
   finalContext: string;
   selectedChunks: RetrievedChunk[];
@@ -560,7 +612,11 @@ async function assembleTieredContext(
     );
   } else if (passthroughTokens <= effectiveBudget * 0.85) {
     // ── Tier 2: Passthrough is large — give RAG a minimum budget ──────────
-    const ragMinBudget = Math.max(effectiveBudget * 0.15, 8000);
+    // The floor must never exceed what the budget actually holds.
+    const ragMinBudget = Math.min(
+      Math.max(effectiveBudget * 0.15, 8000),
+      effectiveBudget * 0.5,
+    );
     const passthroughBudget = effectiveBudget - ragMinBudget;
 
     const assembled = assembleContext(rankedResults, ragMinBudget, itemTitles);
@@ -608,7 +664,9 @@ async function assembleTieredContext(
       try {
         const ptTexts = passthroughChunks.map((c) => c.text);
 
-        const ptEmbeddings = await embeddingService.getEmbeddings(ptTexts);
+        const ptEmbeddings = await embeddingService.getEmbeddings(ptTexts, {
+          signal,
+        });
 
         const ptResults: RetrievedChunk[] = passthroughChunks.map(
           (chunk, i) => ({
@@ -722,7 +780,10 @@ async function assembleTieredContext(
           step: "embedding-passthrough",
           message: `Passthrough embedding failed — trimming to fit budget`,
         });
-        const ragMinBudget = Math.max(effectiveBudget * 0.3, 8000);
+        const ragMinBudget = Math.min(
+          Math.max(effectiveBudget * 0.3, 8000),
+          effectiveBudget * 0.5,
+        );
         const passthroughBudget = effectiveBudget - ragMinBudget;
 
         const assembled = assembleContext(
@@ -864,7 +925,10 @@ Return a JSON object: {"sub_queries": ["query 1", "query 2", ...]}
 Query: {query}
 `;
 
-async function decomposeQuery(query: string): Promise<string[]> {
+async function decomposeQuery(
+  query: string,
+  signal?: AbortSignal,
+): Promise<string[]> {
   if (query.length < 40) return [query];
 
   const comparisonKeywords = [
@@ -888,17 +952,20 @@ async function decomposeQuery(query: string): Promise<string[]> {
   try {
     const { OpenAIService } = await import("../../openai");
     const service = new OpenAIService();
-    const response = await service.chatCompletion([
-      {
-        role: "system",
-        content:
-          "You are a research assistant. Always respond with valid JSON only.",
-      },
-      {
-        role: "user",
-        content: DECOMPOSITION_PROMPT.replace("{query}", query),
-      },
-    ]);
+    const response = await service.chatCompletion(
+      [
+        {
+          role: "system",
+          content:
+            "You are a research assistant. Always respond with valid JSON only.",
+        },
+        {
+          role: "user",
+          content: DECOMPOSITION_PROMPT.replace("{query}", query),
+        },
+      ],
+      { signal },
+    );
     const parsed = JSON.parse(response);
     if (parsed.sub_queries?.length > 1 && parsed.sub_queries.length <= 3) {
       Zotero.debug(
@@ -924,14 +991,20 @@ const HYDE_SYSTEM_PROMPT =
  * Uses the configured chat model to produce a short answer that is then embedded
  * as a search query instead of the raw user query.
  */
-async function generateHyDE(query: string): Promise<string | null> {
+async function generateHyDE(
+  query: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
   try {
     const { OpenAIService } = await import("../../openai");
     const service = new OpenAIService();
-    const response = await service.chatCompletion([
-      { role: "system", content: HYDE_SYSTEM_PROMPT },
-      { role: "user", content: query },
-    ]);
+    const response = await service.chatCompletion(
+      [
+        { role: "system", content: HYDE_SYSTEM_PROMPT },
+        { role: "user", content: query },
+      ],
+      { signal },
+    );
 
     if (response && response.trim().length > 20) {
       Zotero.debug(
@@ -978,8 +1051,10 @@ async function generateChunkContexts(
   fullText: string,
   title: string,
   authors: string[],
+  signal?: AbortSignal,
 ): Promise<string[]> {
   try {
+    throwIfAborted(signal);
     const { OpenAIService } = await import("../../openai");
     const service = new OpenAIService();
 
@@ -992,14 +1067,17 @@ async function generateChunkContexts(
       .replace("{fullDocumentText}", fullText)
       .replace("{chunkTexts}", chunkDescriptions);
 
-    const response = await service.chatCompletion([
-      {
-        role: "system",
-        content:
-          "You are a research assistant. Always respond with valid JSON only.",
-      },
-      { role: "user", content: prompt },
-    ]);
+    const response = await service.chatCompletion(
+      [
+        {
+          role: "system",
+          content:
+            "You are a research assistant. Always respond with valid JSON only.",
+        },
+        { role: "user", content: prompt },
+      ],
+      { signal },
+    );
 
     const parsed = JSON.parse(response);
     if (
@@ -1015,6 +1093,8 @@ async function generateChunkContexts(
 
     return parsed.contexts as string[];
   } catch (e) {
+    // Abort must stop the indexing pass, not silently degrade to raw chunks.
+    if (isAbortError(e)) throw e;
     Zotero.debug(`[seerai] RAG: contextual retrieval generation failed: ${e}`);
     return [];
   }
@@ -1062,6 +1142,7 @@ export async function retrieveContext(
   const ragConfig = getRAGConfig();
   const embeddingService = getEmbeddingService();
   const vectorStore = getVectorStore();
+  const signal = options?.signal;
 
   const topK = options?.topK ?? ragConfig.topK;
   const maxTokens = options?.maxTokens ?? ragConfig.tokenThreshold;
@@ -1072,6 +1153,22 @@ export async function retrieveContext(
   const onProgress = options?.onProgress;
 
   let itemsIndexedOnDemand = 0;
+
+  const emptyResult = (): RetrievalResult => ({
+    context: "",
+    chunks: [],
+    stats: {
+      totalChunksSearched: 0,
+      chunksRetrieved: 0,
+      tokensUsed: 0,
+      itemsIndexedOnDemand,
+      queryTimeMs: Date.now() - startTime,
+    },
+  });
+
+  // An aborted turn returns an empty result instead of throwing: the caller is
+  // already stopping, and a thrown AbortError would surface as a chat error.
+  if (signal?.aborted) return emptyResult();
 
   Zotero.debug(
     `[seerai] RAG retrieval: query="${query.substring(0, 80)}...", ` +
@@ -1153,6 +1250,7 @@ export async function retrieveContext(
     vectorStore,
     contentExtractor,
     embeddingService.getConfiguredModel() || undefined,
+    embeddingService.getConfigFingerprint() || undefined,
   );
 
   if (itemsToIndex.length > 0) {
@@ -1173,7 +1271,10 @@ export async function retrieveContext(
       embeddingService,
       vectorStore,
       ragConfig,
+      signal,
     );
+
+    if (signal?.aborted) return emptyResult();
 
     onProgress?.({
       step: "indexing",
@@ -1210,7 +1311,8 @@ export async function retrieveContext(
       step: "embedding-query",
       message: "Generating hypothetical answer for better retrieval...",
     });
-    hydeDoc = await generateHyDE(query);
+    hydeDoc = await generateHyDE(query, signal);
+    if (signal?.aborted) return emptyResult();
     if (hydeDoc) {
       onProgress?.({
         step: "embedding-query",
@@ -1239,11 +1341,13 @@ export async function retrieveContext(
   let baseEmbedding: number[] | null;
 
   if (options?.queryDecomposition ?? ragConfig.queryDecomposition) {
-    const subQueries = await decomposeQuery(baseQuery);
+    const subQueries = await decomposeQuery(baseQuery, signal);
+    if (signal?.aborted) return emptyResult();
     const allResults: RetrievedChunk[] = [];
     let firstEmbedding: number[] | null = null;
 
     for (const subQuery of subQueries) {
+      if (signal?.aborted) return emptyResult();
       const result = await performDenseSearch(
         [subQuery],
         subQuery,
@@ -1253,6 +1357,7 @@ export async function retrieveContext(
         Math.ceil(topK / subQueries.length),
         minScore,
         onProgress,
+        signal,
       ).catch((e) => {
         Zotero.debug(`[seerai] RAG: sub-query search failed: ${e}`);
         return { allDenseChunks: [] as RetrievedChunk[], baseEmbedding: null };
@@ -1281,6 +1386,7 @@ export async function retrieveContext(
       topK,
       minScore,
       onProgress,
+      signal,
     ).catch((e) => {
       Zotero.debug(`[seerai] RAG: failed to embed query: ${e}`);
       return { allDenseChunks: [] as RetrievedChunk[], baseEmbedding: null };
@@ -1322,8 +1428,11 @@ export async function retrieveContext(
       ragConfig,
       topK,
       minScore,
+      signal,
     );
   itemsIndexedOnDemand += dimReindexed;
+
+  if (signal?.aborted) return emptyResult();
 
   if (searchResult.dimensionMismatch) {
     Zotero.debug(
@@ -1577,6 +1686,7 @@ export async function retrieveContext(
       topK,
       useAdaptive,
       onProgress,
+      signal,
     );
 
   markPhase("assemble");
@@ -1673,30 +1783,22 @@ export async function retrieveContext(
  */
 async function indexSingleItem(
   itemId: number,
-  contentExtractor: (itemId: number) => Promise<{
-    abstract?: string;
-    notes?: string[];
-    pdfText?: string;
-    title?: string;
-    authors?: string[];
-    date?: string;
-  } | null>,
+  contentExtractor: ContentExtractorFn,
   embeddingService: ReturnType<typeof getEmbeddingService>,
   vectorStore: ReturnType<typeof getVectorStore>,
   ragConfig: RAGConfig,
+  precomputedContent?: RAGIndexContent,
+  signal?: AbortSignal,
 ): Promise<boolean> {
-  const content = await contentExtractor(itemId);
+  throwIfAborted(signal);
+  const content = precomputedContent ?? (await contentExtractor(itemId));
   if (!content) {
     Zotero.debug(`[seerai] RAG: no content to index for item ${itemId}`);
     return false;
   }
 
   // Generate content hash for staleness detection
-  const contentHash = VectorStore.contentHash(
-    (content.abstract || "") +
-      (content.notes?.join("") || "") +
-      (content.pdfText || ""),
-  );
+  const contentHash = ragContentHash(content);
 
   // Chunk the document
   const { chunks, parentWindows } = chunkPaperContent(itemId, content, {
@@ -1723,6 +1825,7 @@ async function indexSingleItem(
       fullText,
       content.title || `Item ${itemId}`,
       content.authors || [],
+      signal,
     );
     if (contexts.length === chunks.length) {
       for (let i = 0; i < chunks.length; i++) {
@@ -1740,8 +1843,9 @@ async function indexSingleItem(
   }
 
   // Embed all chunks in batch
+  throwIfAborted(signal);
   const texts = chunks.map((c) => c.text);
-  const embeddings = await embeddingService.getEmbeddings(texts);
+  const embeddings = await embeddingService.getEmbeddings(texts, { signal });
 
   // Store in vector store
   const model = embeddingService.getConfiguredModel() || "unknown";
@@ -1760,6 +1864,7 @@ async function indexSingleItem(
     publicationYear,
     content.title,
     firstCreator,
+    embeddingService.getConfigFingerprint() || undefined,
   );
 
   Zotero.debug(
@@ -1787,8 +1892,18 @@ export interface BulkIndexOptions {
   onProgress?: (progress: BulkIndexProgress) => void;
   /** Polled between waves; return true to stop after the current wave. */
   isCancelled?: () => boolean;
+  /**
+   * Aborts in-flight embedding requests as soon as the job is cancelled, so a
+   * stop doesn't wait for the current wave's HTTP calls to finish.
+   */
+  signal?: AbortSignal;
   /** Items indexed in parallel (capped at MAX_CONCURRENT_ITEM_INDEXING). */
   concurrency?: number;
+  /**
+   * Content already extracted by a planning pass (e.g. bulk content-hash
+   * checks), keyed by itemId — avoids extracting every item twice.
+   */
+  precomputed?: Map<number, RAGIndexContent>;
 }
 
 /**
@@ -1823,7 +1938,7 @@ export async function indexItemsNow(
   options.onProgress?.({ ...progress });
 
   for (let i = 0; i < itemIds.length; i += concurrency) {
-    if (options.isCancelled?.()) {
+    if (options.isCancelled?.() || options.signal?.aborted) {
       progress.skipped += total - progress.done;
       options.onProgress?.({ ...progress });
       Zotero.debug(
@@ -1841,10 +1956,13 @@ export async function indexItemsNow(
           embeddingService,
           vectorStore,
           ragConfig,
+          options.precomputed?.get(itemId),
+          options.signal,
         ),
       ),
     );
 
+    let aborted = false;
     results.forEach((result, index) => {
       if (result.status === "fulfilled") {
         if (result.value) {
@@ -1853,14 +1971,27 @@ export async function indexItemsNow(
           // No extractable content (no PDF text/abstract/notes) — not an error.
           progress.skipped++;
         }
+        progress.done++;
+      } else if (isAbortError(result.reason)) {
+        // Cancelled mid-request — not a failure, the job is stopping.
+        aborted = true;
       } else {
         progress.failed++;
+        progress.done++;
         Zotero.debug(
           `[seerai] RAG bulk: failed to index item ${wave[index]}: ${result.reason}`,
         );
       }
-      progress.done++;
     });
+
+    if (aborted) {
+      progress.skipped += total - progress.done;
+      options.onProgress?.({ ...progress });
+      Zotero.debug(
+        `[seerai] RAG bulk: aborted mid-wave after ${progress.done}/${total} items`,
+      );
+      return progress;
+    }
 
     try {
       const lastItem = Zotero.Items.get(wave[wave.length - 1]);
@@ -1961,11 +2092,11 @@ function assembleContext(
     if (tokensUsed + chunkTokens + attributionTokens > maxTokens) {
       // Try to fit partial chunk if it's significantly over budget
       if (tokensUsed < maxTokens * 0.5) {
-        // We're less than half full — include a truncated version
+        // We're less than half full — include a token-accurate truncation
         const remainingTokens = maxTokens - tokensUsed - attributionTokens;
-        const truncatedText = result.chunk.text.substring(
-          0,
-          Math.floor(remainingTokens * 3.2),
+        const truncatedText = truncateToTokenBudget(
+          result.chunk.text,
+          remainingTokens,
         );
         if (truncatedText.length > 100) {
           selectedChunks.push({
@@ -2032,6 +2163,60 @@ function assembleContext(
 // ─── Utility: check if RAG should activate ──────────────────────────────────
 
 /**
+ * Safety margin reserved on top of the output reservation when fitting content
+ * into a model window. Shared by retrieval budgeting, the raw-context trim, and
+ * the pre-flight check so the three can't disagree (previously RAG reserved 3%
+ * while pre-flight reserved 10%, so "budgeted" content could still fail).
+ */
+export function contextSafetyMargin(contextLength: number): number {
+  return Math.ceil(contextLength * 0.1);
+}
+
+/** Reserved for the non-context parts of the system prompt (instructions, tools, skills). */
+const SYSTEM_PROMPT_OVERHEAD_TOKENS = 5000;
+
+/**
+ * Fit an assembled context string into a model window, trimming it when it
+ * doesn't fit. Used as the final guard on every chat path (raw context,
+ * retrieval that found nothing or failed, and retrieval output) so an
+ * over-sized selection can't turn into a hard "Context too large" failure.
+ */
+export function fitContextToModelWindow(params: {
+  context: string;
+  contextLength: number;
+  reservedOutputTokens: number;
+  historyTokens: number;
+  userMessageTokens: number;
+  systemPromptOverhead?: number;
+}): { context: string; budget: number; truncated: boolean } {
+  const safetyMargin = contextSafetyMargin(params.contextLength);
+  // History is capped to the same 20%/40k budget used when building messages,
+  // so a long conversation can't drive the content budget to zero.
+  const historyTokens = Math.min(
+    params.historyTokens,
+    Math.min(params.contextLength * 0.2, 40000),
+  );
+  const budget = Math.max(
+    0,
+    params.contextLength -
+      params.reservedOutputTokens -
+      safetyMargin -
+      historyTokens -
+      (params.systemPromptOverhead ?? SYSTEM_PROMPT_OVERHEAD_TOKENS) -
+      params.userMessageTokens,
+  );
+  const contextTokens = ChatStateManager.countTokens(params.context);
+  if (contextTokens <= budget) {
+    return { context: params.context, budget, truncated: false };
+  }
+  return {
+    context: truncateToTokenBudget(params.context, budget),
+    budget,
+    truncated: true,
+  };
+}
+
+/**
  * Compute token budget from the model's context window.
  *
  * Formula:
@@ -2052,9 +2237,7 @@ export function computeTokenBudget(
   webResultTokens: number,
   reservedOutputTokens: number = 4096,
 ): TokenBudget {
-  const safetyMargin = isTokenizerAvailable()
-    ? Math.ceil(contextLength * 0.03)
-    : Math.ceil(contextLength * 0.12);
+  const safetyMargin = contextSafetyMargin(contextLength);
   const availableForContent = Math.max(
     0,
     contextLength -
@@ -2305,23 +2488,28 @@ function trimToTokenBudget(text: string, budgetTokens: number): string {
   const currentTokens = ChatStateManager.countTokens(text);
   if (currentTokens <= budgetTokens) return text;
 
-  // Estimate characters to keep (3.2 chars per token, matching countTokens)
-  const targetChars = Math.floor(budgetTokens * 3.2);
-  let trimmed = text.substring(0, targetChars);
+  // Reserve room for the trim notice itself, then truncate token-accurately
+  // (density varies within a document, so a char estimate alone can overshoot).
+  const notice = "\n\n[... content trimmed to fit context window budget ...]";
+  const noticeTokens = ChatStateManager.countTokens(notice);
+  let trimmed = truncateToTokenBudget(
+    text,
+    Math.max(0, budgetTokens - noticeTokens),
+  );
 
   // Try to cut at a paragraph break
   const lastParagraph = trimmed.lastIndexOf("\n\n");
-  if (lastParagraph > targetChars * 0.7) {
+  if (lastParagraph > trimmed.length * 0.7) {
     trimmed = trimmed.substring(0, lastParagraph);
   } else {
     // Try sentence boundary
     const lastSentence = trimmed.lastIndexOf(". ");
-    if (lastSentence > targetChars * 0.7) {
+    if (lastSentence > trimmed.length * 0.7) {
       trimmed = trimmed.substring(0, lastSentence + 1);
     }
   }
 
-  return trimmed + "\n\n[... content trimmed to fit context window budget ...]";
+  return trimmed + notice;
 }
 
 // ─── Cosine Similarity (for in-memory passthrough scoring) ──────────────────
