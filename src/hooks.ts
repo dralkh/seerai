@@ -22,6 +22,10 @@ import {
   stopBackgroundIndexer,
   enqueueForIndexing,
 } from "./modules/chat/rag/backgroundIndexer";
+import {
+  formatBulkIndexStatus,
+  indexItemsForRAG,
+} from "./modules/chat/rag/bulkIndexer";
 
 const ocrService = new OcrService();
 
@@ -223,6 +227,22 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
       menu.appendChild(removeFromSRMenu);
     }
 
+    // Index for Smart Context menu item
+    const indexRagMenuId = "seerai-index-rag";
+    let indexRagMenu = win.document.getElementById(
+      indexRagMenuId,
+    ) as XUL.MenuItem;
+    if (!indexRagMenu) {
+      indexRagMenu = win.document.createXULElement("menuitem") as XUL.MenuItem;
+      indexRagMenu.setAttribute("id", indexRagMenuId);
+      indexRagMenu.setAttribute("label", "Index for Smart Context");
+      indexRagMenu.setAttribute("class", "menuitem-iconic");
+      indexRagMenu.addEventListener("command", async () => {
+        await indexSelectedItemsForRAG();
+      });
+      menu.appendChild(indexRagMenu);
+    }
+
     // Handle visibility
     menu.addEventListener("popupshowing", () => {
       const items = Zotero.getActiveZoteroPane().getSelectedItems();
@@ -283,6 +303,16 @@ async function onMainWindowLoad(win: _ZoteroTypes.MainWindow): Promise<void> {
       // Generate Tags Visibility
       // Show for regular items (same as "Extract with OCR" roughly, but broader)
       generateTagsMenuItem.hidden = !isRegularSelection;
+
+      // Index for Smart Context: regular items and PDF/text attachments
+      const hasIndexableItems = items.some(
+        (item) =>
+          item.isRegularItem() ||
+          (item.isAttachment() &&
+            (item.attachmentContentType === "application/pdf" ||
+              (item.attachmentContentType || "").startsWith("text/"))),
+      );
+      indexRagMenu.hidden = !hasIndexableItems;
     });
   }
 
@@ -500,6 +530,57 @@ async function searchPdfsForSelectedItems() {
   pw.changeHeadline("Search Complete");
   pw.addDescription(`${succeeded} found, ${notFound + failed} not found`);
   pw.startCloseTimer(3000);
+}
+
+/**
+ * Pre-index the selected items for Smart Context (RAG), with a progress window.
+ */
+async function indexSelectedItemsForRAG() {
+  const items = Zotero.getActiveZoteroPane().getSelectedItems();
+  const indexable = items.filter(
+    (item) =>
+      item.isRegularItem() ||
+      (item.isAttachment() &&
+        (item.attachmentContentType === "application/pdf" ||
+          (item.attachmentContentType || "").startsWith("text/"))),
+  );
+  if (indexable.length === 0) {
+    ztoolkit.log("Smart Context indexing: no indexable items selected");
+    return;
+  }
+
+  const progressWindow = new ztoolkit.ProgressWindow("SeerAI Smart Context", {
+    closeOnClick: true,
+    closeTime: -1,
+  });
+  const progressLine = progressWindow
+    .createLine({
+      text: `Indexing ${indexable.length} item(s)...`,
+      progress: 0,
+    })
+    .show();
+
+  try {
+    await indexItemsForRAG(
+      indexable.map((item) => item.id),
+      (status) => {
+        progressLine.changeLine({
+          text: formatBulkIndexStatus(status),
+          progress:
+            status.total > 0
+              ? Math.round((status.done / status.total) * 100)
+              : 0,
+        });
+      },
+    );
+    progressWindow.startCloseTimer(6000);
+  } catch (e) {
+    progressLine.changeLine({
+      text: `Indexing failed: ${(e as Error).message}`,
+      type: "fail",
+    });
+    progressWindow.startCloseTimer(8000);
+  }
 }
 
 /**

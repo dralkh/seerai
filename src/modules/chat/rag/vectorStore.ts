@@ -467,6 +467,7 @@ export class VectorStore {
     }
 
     // ── All dimensions match — perform cosine similarity search ────────────
+    const effectiveMinScore = resolveMinScore(minScore);
     const candidates: RetrievedChunk[] = [];
     let totalChunksSearched = 0;
     let topScoreBelowThreshold = -Infinity;
@@ -487,10 +488,10 @@ export class VectorStore {
       for (const chunk of entry.chunks) {
         totalChunksSearched++;
         const score = cosineSimilarity(queryEmbedding, chunk.embedding);
-        if (score > topScoreBelowThreshold && score < minScore) {
+        if (score > topScoreBelowThreshold && score < effectiveMinScore) {
           topScoreBelowThreshold = score;
         }
-        if (score >= minScore) {
+        if (score >= effectiveMinScore) {
           candidates.push({
             chunk,
             score,
@@ -507,7 +508,7 @@ export class VectorStore {
     if (candidates.length === 0 && totalChunksSearched > 0) {
       Zotero.debug(
         `[seerai] RAG search: 0 results from ${totalChunksSearched} chunks across ${itemIds.length} items ` +
-          `(top score ${topScoreBelowThreshold.toFixed(4)} below threshold ${minScore})` +
+          `(top score ${topScoreBelowThreshold.toFixed(4)} below threshold ${effectiveMinScore})` +
           (entriesWithNoChunks > 0
             ? `; ${entriesWithNoChunks} items have 0 chunks`
             : ""),
@@ -626,6 +627,16 @@ export class VectorStore {
  * Compute cosine similarity between two vectors.
  * Returns a value in [-1, 1] where 1 means identical direction.
  */
+/**
+ * Normalize a minimum-score filter. A non-positive value means "no lower
+ * bound": cosine similarity is in [-1, 1], and some providers (e.g.
+ * mistral-embed) return low or negative scores for relevant passages, so
+ * filtering at 0 dropped every candidate even when the user set min score 0.
+ */
+export function resolveMinScore(minScore: number): number {
+  return minScore > 0 ? minScore : -Infinity;
+}
+
 function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length) {
     // Dimension mismatch should be caught by searchSimilar() early detection.

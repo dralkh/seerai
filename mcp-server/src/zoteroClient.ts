@@ -77,6 +77,10 @@ export class ZoteroClient {
         method,
         headers: {
           "Content-Type": "application/json",
+          // Zotero 10 drops requests that look browser-originated unless this
+          // header is present. Node fetch isn't browser-like, but proxies and
+          // embedded runtimes can add an Origin/UA, so opt in explicitly.
+          "Zotero-Allowed-Request": "1",
         },
         signal: controller.signal,
       };

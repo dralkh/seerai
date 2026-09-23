@@ -1,6 +1,14 @@
 import { getPref, setPref } from "../../../utils/prefs";
 import { createSvgIcon, type IconName } from "./icons";
 import { ensureMcpServerOnDisk } from "../cli/mcpBridge";
+import {
+  cancelBulkIndex,
+  formatBulkIndexStatus,
+  indexItemsForRAG,
+  indexScopeForRAG,
+  isBulkIndexRunning,
+  type BulkIndexStatus,
+} from "../rag/bulkIndexer";
 
 // Renders the Seer-AI preference sections (MCP, data management, OCR, web
 // search, RAG, etc.) as styled HTML that matches the AI providers / default
@@ -968,4 +976,184 @@ export function renderEvaluationSettings(
     ),
   );
   body.appendChild(actions);
+}
+
+// ---------------------------------------------------------------------------
+// Vector Index (bulk pre-indexing)
+// ---------------------------------------------------------------------------
+
+function getActiveCollection(): Zotero.Collection | null {
+  const pane = Zotero.getActiveZoteroPane() as any;
+  if (!pane) return null;
+  if (typeof pane.getSelectedCollections === "function") {
+    const collections = pane.getSelectedCollections() || [];
+    return collections.length === 1 ? collections[0] : null;
+  }
+  try {
+    return pane.getSelectedCollection?.() || null;
+  } catch {
+    return null;
+  }
+}
+
+function getActiveLibraryID(): number | undefined {
+  const pane = Zotero.getActiveZoteroPane() as any;
+  if (!pane) return undefined;
+  if (typeof pane.getSelectedLibraryIDs === "function") {
+    const ids = pane.getSelectedLibraryIDs() || [];
+    return ids.length === 1 ? ids[0] : undefined;
+  }
+  try {
+    const id = pane.getSelectedLibraryID?.();
+    return typeof id === "number" ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function renderRagIndexSettings(
+  doc: Document,
+  container: HTMLElement,
+): void {
+  const body = sectionShell(
+    doc,
+    container,
+    "Vector Index",
+    "Pre-build embeddings for a collection or library so Smart Context and MCP semantic_search cover every document, not just previously-chatted ones.",
+  );
+
+  body.appendChild(
+    helpText(
+      doc,
+      "Indexing runs in the background with the configured embedding model and skips items that are already up to date. Re-run after switching embedding models.",
+    ),
+  );
+
+  const progressLabel = el(doc, "p", "seerai-settings-help");
+  progressLabel.textContent = "Idle.";
+  const progressBar = el(doc, "progress");
+  progressBar.max = 100;
+  progressBar.value = 0;
+  progressBar.style.width = "100%";
+  progressBar.style.display = "none";
+
+  const actions = el(doc, "div", "seerai-inline-actions");
+  const collectionBtn = button(
+    doc,
+    "Index Current Collection",
+    "primary",
+    () => {
+      const collection = getActiveCollection();
+      if (!collection) {
+        doc.defaultView?.alert(
+          "Select a single collection in your Zotero library first.",
+        );
+        return;
+      }
+      void run(`collection "${collection.name}"`, () =>
+        indexScopeForRAG(
+          {
+            kind: "collection",
+            id: collection.id,
+            label: collection.name,
+          },
+          onProgress,
+        ),
+      );
+    },
+    "database",
+  );
+  const libraryBtn = button(
+    doc,
+    "Index Entire Library",
+    "secondary",
+    () => {
+      const libraryID = getActiveLibraryID() ?? Zotero.Libraries.userLibraryID;
+      const library = Zotero.Libraries.get(libraryID);
+      const libraryName = library ? library.name : String(libraryID);
+      void run(`library "${libraryName}"`, () =>
+        indexScopeForRAG(
+          { kind: "library", id: libraryID, label: libraryName },
+          onProgress,
+        ),
+      );
+    },
+    "library",
+  );
+  const selectedBtn = button(
+    doc,
+    "Index Selected Items",
+    "secondary",
+    () => {
+      const items =
+        Zotero.getActiveZoteroPane()
+          ?.getSelectedItems()
+          .filter((i) => i.isRegularItem()) || [];
+      if (items.length === 0) {
+        doc.defaultView?.alert(
+          "Select one or more regular items in your Zotero library first.",
+        );
+        return;
+      }
+      void run(`${items.length} selected item(s)`, () =>
+        indexItemsForRAG(
+          items.map((item) => item.id),
+          onProgress,
+        ),
+      );
+    },
+    "folder",
+  );
+  const cancelBtn = button(
+    doc,
+    "Cancel",
+    "danger",
+    () => {
+      cancelBulkIndex();
+    },
+    "stop",
+  );
+  cancelBtn.disabled = true;
+  actions.append(collectionBtn, libraryBtn, selectedBtn, cancelBtn);
+  body.append(actions, progressBar, progressLabel);
+
+  const setRunning = (running: boolean) => {
+    collectionBtn.disabled = running;
+    libraryBtn.disabled = running;
+    selectedBtn.disabled = running;
+    cancelBtn.disabled = !running;
+    progressBar.style.display = running ? "" : "none";
+  };
+
+  const onProgress = (status: BulkIndexStatus) => {
+    progressLabel.textContent = formatBulkIndexStatus(status);
+    if (status.phase === "enumerating") {
+      progressBar.removeAttribute("value");
+    } else if (status.total > 0) {
+      progressBar.value = Math.round((status.done / status.total) * 100);
+    }
+    if (status.phase === "done" || status.phase === "cancelled") {
+      if (status.phase === "done") progressBar.value = 100;
+      setRunning(false);
+    }
+  };
+
+  const run = async (label: string, fn: () => Promise<BulkIndexStatus>) => {
+    setRunning(true);
+    progressBar.value = 0;
+    progressLabel.textContent = `Starting ${label}...`;
+    try {
+      await fn();
+    } catch (e) {
+      progressLabel.textContent = `Indexing failed: ${(e as Error).message}`;
+      setRunning(false);
+    }
+  };
+
+  // Reflect a bulk index that is already running (e.g. started from the item
+  // context menu) when the preferences pane opens.
+  if (isBulkIndexRunning()) {
+    setRunning(true);
+    progressLabel.textContent = "Indexing already in progress...";
+  }
 }

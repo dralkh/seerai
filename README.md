@@ -41,7 +41,7 @@
   </a>
 </p>
 
-**seerai** is an intelligent research assistant plugin for Zotero 9 that integrates AI-powered chat, advanced search, structured data extraction, and systematic review workflows directly into your research workflow. Chat with your papers, extract structured data, run PRISMA-style reviews, and accelerate your literature review with a local-first, privacy-focused design.
+**seerai** is an intelligent research assistant plugin for Zotero 9/10 that integrates AI-powered chat, advanced search, structured data extraction, and systematic review workflows directly into your research workflow. Chat with your papers, extract structured data, run PRISMA-style reviews, and accelerate your literature review with a local-first, privacy-focused design.
 
 ---
 
@@ -101,7 +101,8 @@ npm run build
 
 ### Semantic Search & Discovery
 
-- **RAG (Retrieval-Augmented Generation)**: Per-context embeddings with chunking, vector store, and semantic retrieval for large documents.
+- **RAG (Retrieval-Augmented Generation)**: Per-context embeddings with chunking, vector store, and semantic retrieval for large documents. Parent items (books) and directly-selected PDF attachments are indexed and retrieved the same way.
+- **Bulk Vector Indexing**: Pre-build embeddings for a whole collection or library from **Preferences → Vector Index** (`Index Current Collection`, `Index Entire Library`, `Index Selected Items`) or right-click → **Index for Smart Context**, with progress, cancellation, and automatic skipping of up-to-date items.
 - **Web Search**: Integrated Firecrawl, Tavily, and You.com support for finding high-quality full-text content.
 - **Federated Scholarly Search**: Search across 11 providers at once — Semantic Scholar, arXiv, PubMed, bioRxiv, medRxiv, IACR, Europe PMC, CORE, BASE, Zenodo, and HAL — with cross-source deduplication and rank fusion.
   - **Smart Modes**: One-click presets (Broad, Biomedical, Preprints, Cryptography, Repositories) target the right provider sets, or pick sources manually.
@@ -209,7 +210,7 @@ End-to-end systematic review workflow built directly into Zotero:
     - 48-96g Vram - Qwen3.5 122B A10B / Mistral Medium 3.5 / NVIDIA Nemotron 3 Super /
     - 128g Vram - MiniMax-M3 / MiMo-V2.5-Pro / GLM-5.2 / Kimi K2.6 / DeepSeek V4 Pro / Nemotron 3 Ultra / Qwen3.5 397B A17B / DeepSeek-V4-Flash
 
-- **Local CLI Agents**: Route chat through a CLI you already have installed and logged in — **Codex**, **Claude Code**, **Antigravity**, or **GitHub Copilot**. seerai stores no credentials; it reuses the CLI's own session.
+- **Local CLI Agents**: Route chat through a CLI you already have installed and logged in — **Codex**, **Claude Code**, **Antigravity**, **Cursor Agent** (`cursor-agent`), or **GitHub Copilot**. seerai stores no credentials; it reuses the CLI's own session.
 - **CLI MCP Harness**: Local CLI agents can optionally connect to the bundled seerai MCP server so they can read and act on your Zotero library while you chat.
 - **Capability-Based Routing**: Assign separate models per capability — chat, embeddings, image, video, text-to-speech, and speech-to-text — and route each request to the right endpoint automatically.
 - **Smart Rate Limiting**: Per-model configuration for concurrency, RPM, and TPM to prevent provider errors.
@@ -335,7 +336,7 @@ This mode requires sophisticated models with strong tool/function-calling capabi
 ### Prerequisites
 
 - Node.js 18+
-- Zotero 9
+- Zotero 9 or 10
 
 ### Project Structure
 
@@ -349,7 +350,7 @@ seerai/
 │   │   ├── chat/          # Chat engine & state
 │   │   │   ├── rag/       # RAG pipeline (chunker, embeddings, retrieval, vector store)
 │   │   │   ├── tools/     # Agentic tool system (search, note, table, web, workspace, skills, etc.)
-│   │   │   ├── cli/       # Local CLI providers (Codex, Claude, Antigravity, Copilot)
+│   │   │   ├── cli/       # Local CLI providers (Codex, Claude, Antigravity, Cursor, Copilot)
 │   │   │   ├── skills/    # Agent skills registry
 │   │   │   └── workspace/ # File workspace (editor, sidebar, git CLI, diff viewer, store)
 │   │   ├── search/        # Federated scholarly search (11 providers, query IR + compilers)

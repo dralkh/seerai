@@ -1,4 +1,6 @@
 import { defineConfig } from "zotero-plugin-scaffold";
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import pkg from "./package.json";
 import path from "path";
 
@@ -25,6 +27,34 @@ export default defineConfig({
     bumpp: {
       tag: "%s",
       commit: "chore(publish): release %s",
+    },
+    hooks: {
+      // The scaffold only uploads the XPI. Attach the bundled MCP server, the
+      // built manifest, and the update manifest to the versioned release too
+      // (best-effort: skipped/failed when the release doesn't exist locally).
+      "release:done": (ctx: any) => {
+        const tag = String(ctx.release.bumpp.tag).replaceAll(
+          "%s",
+          String(ctx.version),
+        );
+        const assets = [
+          ".scaffold/build/addon/manifest.json",
+          "seerai-mcp.cjs",
+          ".scaffold/build/update.json",
+        ].filter((file) => existsSync(file));
+        if (assets.length === 0) return;
+        try {
+          execFileSync(
+            "gh",
+            ["release", "upload", tag, ...assets, "--clobber"],
+            { stdio: "inherit" },
+          );
+        } catch (error) {
+          process.stderr.write(
+            `[release] Failed to upload extra assets: ${error}\n`,
+          );
+        }
+      },
     },
   },
 

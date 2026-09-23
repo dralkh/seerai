@@ -21,6 +21,7 @@ import { getVectorStore, VectorStore } from "../rag/vectorStore";
 import { bm25Search, mergeHybridResults } from "../rag/bm25";
 import { crossEncodeRerank, isRerankerConfigured } from "../rag/reranker";
 import { getRAGConfig } from "../rag/retrievalEngine";
+import { countLibraryRegularItems } from "../rag/bulkIndexer";
 import { chunkPaperContent } from "../rag/chunker";
 import { Assistant } from "../../assistant";
 
@@ -63,9 +64,14 @@ async function resolveSearchScope(
   collectionId: number | undefined,
   libraryId: number | undefined,
   config: AgentConfig,
-): Promise<{ itemIds: number[]; titles: Map<number, string> } | null> {
+): Promise<{
+  itemIds: number[];
+  titles: Map<number, string>;
+  totalInScope: number;
+} | null> {
   const itemIds: number[] = [];
   const titles = new Map<number, string>();
+  let totalInScope = 0;
   const store = getVectorStore();
 
   if (scope === "context") {
@@ -80,6 +86,7 @@ async function resolveSearchScope(
           item.id === 0 ||
           (await itemBelongsToLibrary(item.id, libraryId))
         ) {
+          totalInScope++;
           itemIds.push(item.id);
           titles.set(item.id, item.displayName);
         }
@@ -90,33 +97,44 @@ async function resolveSearchScope(
     if (!collection) return null;
     const childIds = collection.getChildItems(true);
     for (const childId of childIds) {
-      const entry = await store.getIndexEntry(childId);
-      if (!entry) continue;
       if (
         libraryId !== undefined &&
         !(await itemBelongsToLibrary(childId, libraryId))
       )
         continue;
+      const child = Zotero.Items.get(childId);
+      if (!child || !child.isRegularItem()) continue;
+      totalInScope++;
+      const entry = await store.getIndexEntry(childId);
+      if (!entry) continue;
       itemIds.push(childId);
       titles.set(childId, entry.title || `Item ${childId}`);
     }
-  } else {
-    const allIds = await store.getIndexedItemIds();
-    for (const id of allIds) {
-      if (
-        libraryId !== undefined &&
-        !(await itemBelongsToLibrary(id, libraryId))
-      )
-        continue;
+  } else if (libraryId !== undefined) {
+    // Library scope: count regular items at the DB level (cheap for large
+    // libraries) and search only the indexed subset.
+    totalInScope = await countLibraryRegularItems(libraryId);
+    const indexedIds = await store.getIndexedItemIds();
+    for (const id of indexedIds) {
+      if (!(await itemBelongsToLibrary(id, libraryId))) continue;
       itemIds.push(id);
       const entry = await store.getIndexEntry(id);
       titles.set(id, entry?.title || `Item ${id}`);
     }
+  } else {
+    // No explicit library — search every indexed item.
+    const allIds = await store.getIndexedItemIds();
+    for (const id of allIds) {
+      itemIds.push(id);
+      const entry = await store.getIndexEntry(id);
+      titles.set(id, entry?.title || `Item ${id}`);
+    }
+    totalInScope = itemIds.length;
   }
 
-  if (itemIds.length === 0) return null;
+  if (itemIds.length === 0 && totalInScope === 0) return null;
 
-  return { itemIds, titles };
+  return { itemIds, titles, totalInScope };
 }
 
 async function itemBelongsToLibrary(
@@ -142,10 +160,15 @@ export async function executeSemanticSearch(
       library_id: userLibraryId,
       collection_id: userCollectionId,
       top_k = 5,
-      min_score = 30,
+      min_score,
       sources,
       include_full_text,
     } = params;
+
+    // Fall back to the configured RAG min score (0-1) rather than a hard-coded
+    // 0.3, so the tool matches Smart Context behavior. 0 disables the filter.
+    const effectiveMinScore =
+      min_score !== undefined ? min_score / 100 : getRAGConfig().minScore;
 
     const library_id =
       userLibraryId ??
@@ -191,7 +214,7 @@ export async function executeSemanticSearch(
       };
     }
 
-    const { itemIds, titles } = scopeResult;
+    const { itemIds, titles, totalInScope } = scopeResult;
 
     const indexedIds: number[] = [];
     const store = getVectorStore();
@@ -206,10 +229,15 @@ export async function executeSemanticSearch(
         success: true,
         data: {
           query,
-          total_searched: itemIds.length,
+          total_searched: 0,
+          total_in_scope: totalInScope,
+          indexed_in_scope: 0,
           results: [],
         },
-        summary: `No indexed items found in scope (${itemIds.length} items total). Index items first by sending a message with them in context.`,
+        summary:
+          `No indexed items in scope (${totalInScope} item${totalInScope === 1 ? "" : "s"} total). ` +
+          `Pre-index them from seerai Preferences → Vector Index ("Index Entire Library" / "Index Current Collection"), ` +
+          `or right-click the items → "Index for Smart Context".`,
       };
     }
 
@@ -227,7 +255,7 @@ export async function executeSemanticSearch(
       queryEmbedding,
       effectiveTopK * 2,
       indexedIds,
-      min_score / 100,
+      effectiveMinScore,
     );
 
     let denseResults = searchResult.chunks;
@@ -260,6 +288,8 @@ export async function executeSemanticSearch(
     const results: SemanticSearchResultData = {
       query,
       total_searched: indexedIds.length,
+      total_in_scope: totalInScope,
+      indexed_in_scope: indexedIds.length,
       results: [],
     };
 
@@ -366,13 +396,18 @@ export async function executeSemanticSearch(
     )
       ? ". Includes table/file/topic context items"
       : "";
+    const unindexedCount = Math.max(0, totalInScope - indexedIds.length);
+    const indexHint =
+      unindexedCount > 0
+        ? ` ${unindexedCount} of ${totalInScope} scoped item(s) are not indexed yet — run "Index Entire Library" / "Index Current Collection" in seerai Preferences → Vector Index to include them.`
+        : "";
     await store.saveIndex();
     return {
       success: true,
       data: results,
       summary:
         `Semantically searched ${indexedIds.length} papers` +
-        ` for "${query}"${methodInfo}. Found ${results.results.length} relevant passages${passthroughNote}.`,
+        ` for "${query}"${methodInfo}. Found ${results.results.length} relevant passages${passthroughNote}.${indexHint}`,
     };
   } catch (error) {
     Zotero.debug(`[seerai] Tool: semantic_search error: ${error}`);
@@ -431,13 +466,15 @@ export async function executeKeywordSearch(
       };
     }
 
-    const { itemIds, titles } = scopeResult;
+    const { itemIds, titles, totalInScope } = scopeResult;
 
     const bm25Results = await bm25Search(query, itemIds, effectiveTopK * 2);
 
     const results: KeywordSearchResultData = {
       query,
       total_searched: itemIds.length,
+      total_in_scope: totalInScope,
+      indexed_in_scope: itemIds.length,
       results: [],
     };
 
@@ -474,6 +511,11 @@ export async function executeKeywordSearch(
       });
     }
 
+    const unindexedCount = Math.max(0, totalInScope - itemIds.length);
+    const indexHint =
+      unindexedCount > 0
+        ? ` ${unindexedCount} of ${totalInScope} scoped item(s) are not indexed yet — index them from seerai Preferences → Vector Index.`
+        : "";
     return {
       success: true,
       data: results,
@@ -481,7 +523,7 @@ export async function executeKeywordSearch(
         `BM25 keyword search across ${itemIds.length} papers ` +
         `for "${query}". Found ${results.results.length} results. ` +
         `(Tip: use semantic_search for conceptual understanding, ` +
-        `not just exact word matches.)`,
+        `not just exact word matches.)${indexHint}`,
     };
   } catch (error) {
     Zotero.debug(`[seerai] Tool: keyword_search error: ${error}`);
@@ -641,11 +683,14 @@ export async function executeSearchSimilar(
     const {
       item_id,
       top_k = 5,
-      min_score = 30,
+      min_score,
       scope = "library",
       library_id: userLibraryId,
       collection_id: userCollectionId,
     } = params;
+
+    const effectiveMinScore =
+      min_score !== undefined ? min_score / 100 : getRAGConfig().minScore;
 
     const library_id =
       userLibraryId ??
@@ -807,7 +852,7 @@ export async function executeSearchSimilar(
       avgEmbedding,
       effectiveTopK * 3,
       searchIds,
-      min_score / 100,
+      effectiveMinScore,
     );
     let totalSearched = searchIds.length;
 
@@ -828,7 +873,7 @@ export async function executeSearchSimilar(
         avgEmbedding,
         effectiveTopK * 3,
         remainingIds,
-        min_score / 100,
+        effectiveMinScore,
       );
       if (searchResult.dimensionMismatch) {
         return {

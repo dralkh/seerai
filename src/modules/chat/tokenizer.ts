@@ -115,3 +115,18 @@ export function isTokenizerAvailable(): boolean {
   ensureInitialized();
   return _initError === null;
 }
+
+/**
+ * Trim text to roughly maxTokens using the shared token counter, preferring a
+ * paragraph boundary near the cut point so the result stays readable.
+ */
+export function truncateToTokenBudget(text: string, maxTokens: number): string {
+  if (maxTokens <= 0) return "";
+  const tokens = countTokens(text);
+  if (tokens <= maxTokens || tokens <= 0) return text;
+  const ratio = maxTokens / tokens;
+  let cut = Math.max(1, Math.floor(text.length * ratio));
+  const boundary = text.lastIndexOf("\n\n", cut);
+  if (boundary > cut * 0.7) cut = boundary;
+  return text.substring(0, cut);
+}

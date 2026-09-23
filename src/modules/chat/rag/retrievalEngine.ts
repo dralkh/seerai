@@ -256,6 +256,7 @@ async function collectItemsToIndex(
   paperItemIds: number[],
   vectorStore: VectorStoreType,
   contentExtractor: ContentExtractorFn,
+  embeddingModel?: string,
 ): Promise<IndexItem[]> {
   const itemsToIndex: IndexItem[] = [];
 
@@ -269,6 +270,17 @@ async function collectItemsToIndex(
         const zItem = Zotero.Items.get(itemId);
         const currentModified = zItem?.dateModified;
         const indexEntry = await vectorStore.getIndexEntry(itemId);
+
+        // Embedding model switched — stored vectors come from another model
+        // and can't be compared meaningfully (even at equal dimensions).
+        if (
+          embeddingModel &&
+          indexEntry?.embeddingModel &&
+          indexEntry.embeddingModel !== embeddingModel
+        ) {
+          itemsToIndex.push({ itemId, reason: "embedding-model-changed" });
+          continue;
+        }
 
         if (
           currentModified &&
@@ -416,23 +428,25 @@ async function handleDimensionMismatch(
   let itemsReindexed = 0;
 
   if (baseEmbedding && paperItemIds.length > 0) {
-    const index = await vectorStore.getIndexEntry(paperItemIds[0]);
     const queryDim = baseEmbedding.length;
-    if (index && queryDim > 0 && index.dimensions !== queryDim) {
-      const mismatchedIds: number[] = [];
+    // Scan every scoped item — previously this only inspected the first item,
+    // so a mixed store (e.g. after switching embedding models) reported
+    // "0 passages" without ever repairing the mismatched items.
+    const mismatchedIds: number[] = [];
+    if (queryDim > 0) {
       for (const itemId of paperItemIds) {
         const entry = await vectorStore.getIndexEntry(itemId);
         if (entry && entry.dimensions !== queryDim) {
           mismatchedIds.push(itemId);
         }
       }
-      if (mismatchedIds.length > 0) {
-        searchResult = {
-          chunks: [],
-          dimensionMismatch: true,
-          mismatchedItemIds: mismatchedIds,
-        };
-      }
+    }
+    if (mismatchedIds.length > 0) {
+      searchResult = {
+        chunks: [],
+        dimensionMismatch: true,
+        mismatchedItemIds: mismatchedIds,
+      };
     }
   }
 
@@ -1138,6 +1152,7 @@ export async function retrieveContext(
     paperItemIds,
     vectorStore,
     contentExtractor,
+    embeddingService.getConfiguredModel() || undefined,
   );
 
   if (itemsToIndex.length > 0) {
@@ -1669,11 +1684,11 @@ async function indexSingleItem(
   embeddingService: ReturnType<typeof getEmbeddingService>,
   vectorStore: ReturnType<typeof getVectorStore>,
   ragConfig: RAGConfig,
-): Promise<void> {
+): Promise<boolean> {
   const content = await contentExtractor(itemId);
   if (!content) {
     Zotero.debug(`[seerai] RAG: no content to index for item ${itemId}`);
-    return;
+    return false;
   }
 
   // Generate content hash for staleness detection
@@ -1693,7 +1708,7 @@ async function indexSingleItem(
 
   if (chunks.length === 0) {
     Zotero.debug(`[seerai] RAG: no chunks produced for item ${itemId}`);
-    return;
+    return false;
   }
 
   if (ragConfig.contextualRetrieval) {
@@ -1753,6 +1768,111 @@ async function indexSingleItem(
       `${chunks.filter((c) => c.source === "note").length} note, ` +
       `${chunks.filter((c) => c.source === "abstract").length} abstract)`,
   );
+  return true;
+}
+
+// ─── Bulk indexing ───────────────────────────────────────────────────────────
+
+/** Progress snapshot emitted while bulk-indexing a set of items. */
+export interface BulkIndexProgress {
+  total: number;
+  done: number;
+  indexed: number;
+  failed: number;
+  skipped: number;
+  currentTitle?: string;
+}
+
+export interface BulkIndexOptions {
+  onProgress?: (progress: BulkIndexProgress) => void;
+  /** Polled between waves; return true to stop after the current wave. */
+  isCancelled?: () => boolean;
+  /** Items indexed in parallel (capped at MAX_CONCURRENT_ITEM_INDEXING). */
+  concurrency?: number;
+}
+
+/**
+ * Index an explicit list of items (already filtered/deduplicated by the
+ * caller) with the same pipeline as on-demand RAG indexing, reporting
+ * progress and honoring cancellation between waves.
+ */
+export async function indexItemsNow(
+  itemIds: number[],
+  contentExtractor: ContentExtractorFn,
+  options: BulkIndexOptions = {},
+): Promise<BulkIndexProgress> {
+  const embeddingService = getEmbeddingService();
+  const vectorStore = getVectorStore();
+  const ragConfig = getRAGConfig();
+
+  const total = itemIds.length;
+  const concurrency = Math.max(
+    1,
+    Math.min(
+      options.concurrency ?? MAX_CONCURRENT_ITEM_INDEXING,
+      MAX_CONCURRENT_ITEM_INDEXING,
+    ),
+  );
+  const progress: BulkIndexProgress = {
+    total,
+    done: 0,
+    indexed: 0,
+    failed: 0,
+    skipped: 0,
+  };
+  options.onProgress?.({ ...progress });
+
+  for (let i = 0; i < itemIds.length; i += concurrency) {
+    if (options.isCancelled?.()) {
+      progress.skipped += total - progress.done;
+      options.onProgress?.({ ...progress });
+      Zotero.debug(
+        `[seerai] RAG bulk: cancelled after ${progress.done}/${total} items`,
+      );
+      return progress;
+    }
+
+    const wave = itemIds.slice(i, i + concurrency);
+    const results = await Promise.allSettled(
+      wave.map((itemId) =>
+        indexSingleItem(
+          itemId,
+          contentExtractor,
+          embeddingService,
+          vectorStore,
+          ragConfig,
+        ),
+      ),
+    );
+
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        if (result.value) {
+          progress.indexed++;
+        } else {
+          // No extractable content (no PDF text/abstract/notes) — not an error.
+          progress.skipped++;
+        }
+      } else {
+        progress.failed++;
+        Zotero.debug(
+          `[seerai] RAG bulk: failed to index item ${wave[index]}: ${result.reason}`,
+        );
+      }
+      progress.done++;
+    });
+
+    try {
+      const lastItem = Zotero.Items.get(wave[wave.length - 1]);
+      progress.currentTitle =
+        (lastItem?.getField("title") as string) || undefined;
+    } catch {
+      // ignore title lookup failures
+    }
+    options.onProgress?.({ ...progress });
+  }
+
+  return progress;
 }
 
 // ─── Re-ranking ──────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**seerai** is an intelligent research assistant plugin for Zotero 8/9 that integrates AI-powered chat, federated scholarly search, RAG, OCR, systematic review, cloud storage, an agent skills library, and structured data extraction into the research workflow. The repo is a monorepo containing:
+**seerai** is an intelligent research assistant plugin for Zotero 8–10 that integrates AI-powered chat, federated scholarly search, RAG, OCR, systematic review, cloud storage, an agent skills library, and structured data extraction into the research workflow. The repo is a monorepo containing:
 
 - **Zotero Plugin** (`src/`, `addon/`) — runs inside Zotero's Firefox-based runtime (NOT Node.js)
 - **MCP Server** (`mcp-server/`) — standalone Node.js server exposing Zotero tools via Model Context Protocol
@@ -38,7 +38,7 @@ cd mcp-server && npm run start    # Run compiled MCP server
 | ------------------ | ------------------------------------------------------------ |
 | Language           | TypeScript                                                   |
 | Build              | esbuild (target: firefox128), zotero-plugin-scaffold v0.8    |
-| Plugin Runtime     | Zotero 8/9 (Firefox 128-based SpiderMonkey engine)           |
+| Plugin Runtime     | Zotero 8–10 (Firefox 128/140-based SpiderMonkey engine)      |
 | Validation         | Zod v4 (plugin), Zod v3 (MCP server)                         |
 | Plugin Toolkit     | zotero-plugin-toolkit v5 (^5.1.0-beta.13)                    |
 | Types              | zotero-types v4 (^4.1.0-beta.8)                              |
@@ -61,7 +61,7 @@ seerai/
 │   │   ├── zoteroPane.css      # Plugin pane styles
 │   │   └── icons/
 │   ├── locale/                 # Fluent l10n (en-US, zh-CN)
-│   ├── manifest.json           # WebExtension manifest (Zotero 8–9)
+│   ├── manifest.json           # WebExtension manifest (Zotero 8–10, max 10.0.*)
 │   └── prefs.js                # Default prefs for dev environment
 ├── src/
 │   ├── index.ts                # Entry point: registers addon on Zotero global
@@ -112,6 +112,7 @@ seerai/
 │   │   │   │   ├── retrievalEngine.ts  # Full RAG pipeline orchestration
 │   │   │   │   ├── bm25.ts            # BM25 keyword search + hybrid RRF merging
 │   │   │   │   ├── backgroundIndexer.ts # Background RAG indexing worker
+│   │   │   │   ├── bulkIndexer.ts      # Collection/library pre-indexing + progress/cancel
 │   │   │   │   ├── citationGraph.ts    # Citation-graph traversal for RAG
 │   │   │   │   ├── evaluator.ts       # RAG evaluation / ground-truth scoring
 │   │   │   │   ├── reranker.ts        # Cross-encoder reranker (Jina / Cohere)
@@ -160,6 +161,7 @@ seerai/
 │   │   │   │   ├── antigravityAgent.ts  # Antigravity CLI
 │   │   │   │   ├── hermesAgent.ts       # Hermes (Nous) CLI
 │   │   │   │   ├── openclawAgent.ts     # OpenClaw gateway CLI
+│   │   │   │   ├── cursorAgent.ts       # Cursor Agent CLI (`cursor-agent`)
 │   │   │   │   ├── mcpBridge.ts         # Bundled MCP server bridge for CLI harnesses
 │   │   │   │   ├── harnessPrompt.ts     # System prompt for CLI agentic turns
 │   │   │   │   ├── toolActivityBridge.ts # Live tool-activity surfacing from harnesses
@@ -263,6 +265,11 @@ seerai/
 │   ├── modelRouting.test.ts / modelResolver.test.ts / modelDiscovery.test.ts
 │   ├── providerPresets.test.ts
 │   ├── agentSkills.test.ts / agentStabilization.test.ts
+│   ├── cliHarness.test.ts      # CLI agent registry, args, MCP bridge
+│   ├── ragRetrievalFixes.test.ts # Score thresholds, context truncation, bulk status
+│   ├── bulkIndexerZotero.test.ts # Bulk scope enumeration (runs inside Zotero)
+│   ├── embeddingLocalServerZotero.test.ts # Real HTTP embedding → retrieval E2E
+│   ├── ragPipelineZotero.test.ts # Full retrieval pipeline with a stubbed embedder
 │   ├── queryCompiler.test.ts / queryThreading.test.ts
 │   ├── scholarly*.test.ts      # Federated search (http, fixtures, search, live)
 │   └── systematicReview*.test.ts
@@ -419,6 +426,18 @@ chunker.ts → embeddingService.ts → vectorStore.ts → retrievalEngine.ts
 - Triggered when context tokens exceed `ragTokenThreshold` pref (default 64K)
 - Features: BM25+RRF hybrid retrieval, MMR diversity, query expansion, multi-query, HyDE, contextual retrieval, sentence-window retrieval, query decomposition, citation-graph traversal, cross-encoder reranking (Jina/Cohere), correction loops
 - Configurable via many prefs under `rag*` namespace (see `addon/prefs.js`)
+- **Bulk pre-indexing** (`bulkIndexer.ts`): `indexScopeForRAG()` / `indexItemsForRAG()` enumerate a collection/library or explicit items, skip fresh vectors (content hash, `dateModified`, embedding-model change), and index in waves via `indexItemsNow()` in `retrievalEngine.ts`, reporting `BulkIndexStatus` and honoring cancellation. Library scopes enumerate/count regular items with a DB query (`countLibraryRegularItems`) so large libraries aren't loaded item-by-item. UI: Preferences → **Vector Index** section (`integrationSettings.ts:renderRagIndexSettings`) and the item context menu **Index for Smart Context** (`hooks.ts`).
+- **Attachments are first-class RAG items**: `Assistant.extractContentForRAG` accepts attachment IDs directly (parent metadata is borrowed for the title), and `expandContextItemsForRAG` keeps directly-selected PDFs as searchable items. Selected parent books no longer inject raw full text ahead of retrieval — when retrieval yields nothing the raw context is trimmed to the model window (`truncateToTokenBudget` in `tokenizer.ts`) with a visible warning.
+- **Score filtering**: `minScore <= 0` means "no lower bound" (`resolveMinScore` in `vectorStore.ts`); cosine similarity is in [-1, 1] and some providers (mistral-embed) return negative scores for relevant passages.
+- **Embedding-model changes invalidate vectors**: `collectItemsToIndex` marks entries stale when `embeddingModel` differs, and dimension-mismatch repair scans every scoped item (not just the first).
+
+### Zotero 10 Compatibility
+
+- `addon/manifest.json` declares `strict_max_version: "10.0.*"`. Zotero 10 enforces it (`extensions.strictCompatibility=false` no longer bypasses the check for WebExtension add-ons).
+- Zotero 10 removed the singular selection getters (`ZoteroPane.getSelectedCollection()`, `getSelectedLibraryID()`, …) — they now throw. Use the plural getters (`getSelectedCollections()`, `getSelectedLibraryIDs()`) with a feature-detect fallback to the singular ones for Zotero 8/9. See `Assistant.resolveSelectionScope` and `integrationSettings.ts:getActiveCollection`.
+- `Zotero.FullText.indexItems()` and `Zotero.Utilities.Internal.exec/subprocess` still exist in Zotero 10 (verified against the 10.0 branch).
+- The local HTTP server now drops browser-like requests unless they send a `Zotero-Allowed-Request` header; the bundled MCP client (`mcp-server/src/zoteroClient.ts`) sends it. In-process `fetch` from Zotero is also browser-like, so in-Zotero tests must register endpoints under `/test/…` (explicitly exempt) — see `test/embeddingLocalServerZotero.test.ts`.
+- The HTTP server port is not readable via `Zotero.Prefs.get("httpServer.port", true)` in tests; read `Zotero.Server.port` (and `Zotero.Server.init(0)` to start it on an ephemeral port when the default is taken).
 
 ### Web Search Providers
 
@@ -447,7 +466,7 @@ Models are addressed by a `ModelRef` (provider + local model id) and resolved at
 
 ### Local CLI Providers
 
-`src/modules/chat/cli/` lets seerai delegate a chat turn to a **locally installed agent CLI** instead of an HTTP API. Supported: **Codex** (OpenAI), **Claude Code**, **Antigravity**, **Hermes (Nous)**, **OpenClaw**. (GitHub Copilot's adapter file still exists but is not currently registered.)
+`src/modules/chat/cli/` lets seerai delegate a chat turn to a **locally installed agent CLI** instead of an HTTP API. Supported: **Codex** (OpenAI), **Claude Code**, **Antigravity**, **Hermes (Nous)**, **OpenClaw**, **Cursor Agent** (`cursor-agent`). (GitHub Copilot's adapter file still exists but is not currently registered.)
 
 - seerai stores **no credentials** — it inherits whatever login session the CLI already holds.
 - Each CLI is described by a `CliAgentDef` (`cliTypes.ts`): binary name, one-shot args, stream format (`json-lines` | `raw-text`), line parser, auth-failure patterns, optional `prepare()` and live `listModels`.

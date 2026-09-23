@@ -5,13 +5,13 @@
 
 import {
   PLACEHOLDER_TRIGGERS,
-  PlaceholderType,
+  type PlaceholderType,
   extractPlaceholders,
   searchPrompts,
 } from "./promptLibrary";
 
 // Re-export PlaceholderType for convenience
-export { PlaceholderType } from "./promptLibrary";
+export type { PlaceholderType } from "./promptLibrary";
 import { getTableStore } from "./tableStore";
 import { getMessageStore } from "./messageStore";
 import { config } from "../../../package.json";

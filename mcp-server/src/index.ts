@@ -53,7 +53,10 @@ const ACTIVE_TOOLS = filterToolsByProfile(
   process.env.SEERAI_MCP_TOOL_PROFILE,
 );
 
-function toMcpInputSchema(name: string, inputSchema: any): Record<string, unknown> {
+function toMcpInputSchema(
+  name: string,
+  inputSchema: any,
+): Record<string, unknown> {
   const schema = zodToJsonSchema(inputSchema, {
     name,
     $refStrategy: "none",
@@ -63,7 +66,11 @@ function toMcpInputSchema(name: string, inputSchema: any): Record<string, unknow
     const definitionName = schema.$ref.replace("#/definitions/", "");
     const definitions = schema.definitions as Record<string, unknown>;
     const definition = definitions[definitionName];
-    if (definition && typeof definition === "object" && !Array.isArray(definition)) {
+    if (
+      definition &&
+      typeof definition === "object" &&
+      !Array.isArray(definition)
+    ) {
       return definition as Record<string, unknown>;
     }
   }

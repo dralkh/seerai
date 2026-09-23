@@ -12,6 +12,7 @@ import {
   renderEvaluationSettings,
   renderMcpSettings,
   renderOcrSettings,
+  renderRagIndexSettings,
   renderRagRerankerSettings,
   renderSemanticScholarSettings,
   renderWebSearchSettings,
@@ -102,6 +103,7 @@ function initIntegrationSettingsUI() {
     ["ragreranker-settings", renderRagRerankerSettings],
     ["advancedretrieval-settings", renderAdvancedRetrievalSettings],
     ["evaluation-settings", renderEvaluationSettings],
+    ["ragindex-settings", renderRagIndexSettings],
   ];
   for (const [suffix, render] of sections) {
     const container = doc.getElementById(

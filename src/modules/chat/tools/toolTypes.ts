@@ -1163,6 +1163,10 @@ export interface SemanticSearchParams {
 export interface SemanticSearchResultData {
   query: string;
   total_searched: number;
+  /** Total regular items in the requested scope (indexed or not). */
+  total_in_scope?: number;
+  /** Scope items that have vectors and were actually searched. */
+  indexed_in_scope?: number;
   results: Array<{
     title: string;
     item_id: number;
@@ -1187,6 +1191,10 @@ export interface KeywordSearchParams {
 export interface KeywordSearchResultData {
   query: string;
   total_searched: number;
+  /** Total regular items in the requested scope (indexed or not). */
+  total_in_scope?: number;
+  /** Scope items that have vectors and were actually searched. */
+  indexed_in_scope?: number;
   results: Array<{
     title: string;
     item_id: number;

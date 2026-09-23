@@ -9,7 +9,10 @@ function setPrefValue(key: string, value: boolean | string | number): void {
 }
 
 describe("Web search provider preferences", function () {
+  let originalZotero: unknown;
+
   before(function () {
+    originalZotero = (globalThis as any).Zotero;
     (globalThis as any).Zotero = {
       Prefs: {
         get(pref: string, global?: boolean) {
@@ -21,6 +24,10 @@ describe("Web search provider preferences", function () {
       },
       debug() {},
     };
+  });
+
+  after(function () {
+    (globalThis as any).Zotero = originalZotero;
   });
 
   beforeEach(function () {

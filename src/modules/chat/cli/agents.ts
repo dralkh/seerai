@@ -4,6 +4,7 @@ import { claudeAgentDef } from "./claudeAgent";
 import { antigravityAgentDef } from "./antigravityAgent";
 import { hermesAgentDef } from "./hermesAgent";
 import { openclawAgentDef } from "./openclawAgent";
+import { cursorAgentDef } from "./cursorAgent";
 
 // Supported terminal harnesses. Copilot (copilotAgent.ts) is intentionally not
 // registered for now — the file is kept so it can be re-added easily.
@@ -13,6 +14,7 @@ const CLI_AGENTS: CliAgentDef[] = [
   antigravityAgentDef,
   hermesAgentDef,
   openclawAgentDef,
+  cursorAgentDef,
 ];
 
 const BY_ID = new Map(CLI_AGENTS.map((agent) => [agent.id, agent]));

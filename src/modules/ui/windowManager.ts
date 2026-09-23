@@ -8,6 +8,7 @@
 // Window state
 let detachedWindow: Window | null = null;
 let isDetached = false;
+let savePositionTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Get config reference from addon
 const getConfig = () => addon.data.config;
@@ -43,7 +44,7 @@ export class DetachedWindowManager {
    */
   static initialize(): void {
     try {
-      const wasDetached = Zotero.Prefs.get(getPrefDetached()) as boolean;
+      const wasDetached = Zotero.Prefs.get(getPrefDetached(), true) as boolean;
       if (wasDetached) {
         // Auto-detach on startup if it was detached before
         this.detach();
@@ -64,12 +65,14 @@ export class DetachedWindowManager {
 
     try {
       // Get saved position or use defaults
-      const x = (Zotero.Prefs.get(getPrefWindowX()) as number) || 100;
-      const y = (Zotero.Prefs.get(getPrefWindowY()) as number) || 100;
+      const x = (Zotero.Prefs.get(getPrefWindowX(), true) as number) || 100;
+      const y = (Zotero.Prefs.get(getPrefWindowY(), true) as number) || 100;
       const width =
-        (Zotero.Prefs.get(getPrefWindowWidth()) as number) || DEFAULT_WIDTH;
+        (Zotero.Prefs.get(getPrefWindowWidth(), true) as number) ||
+        DEFAULT_WIDTH;
       const height =
-        (Zotero.Prefs.get(getPrefWindowHeight()) as number) || DEFAULT_HEIGHT;
+        (Zotero.Prefs.get(getPrefWindowHeight(), true) as number) ||
+        DEFAULT_HEIGHT;
 
       // Open the detached window
       const mainWindow = Zotero.getMainWindow();
@@ -83,16 +86,20 @@ export class DetachedWindowManager {
 
       if (detachedWindow) {
         isDetached = true;
-        Zotero.Prefs.set(getPrefDetached(), true);
+        Zotero.Prefs.set(getPrefDetached(), true, true);
 
         // Save position on window move/resize
         detachedWindow.addEventListener("unload", () => {
           this.onWindowClose();
         });
 
-        // Track window position changes
+        // Track window position changes. Debounced: a live resize fires
+        // continuously and each save does four synchronous pref writes.
         detachedWindow.addEventListener("resize", () => {
-          this.saveWindowPosition();
+          this.scheduleSaveWindowPosition();
+        });
+        detachedWindow.addEventListener("move", () => {
+          this.scheduleSaveWindowPosition();
         });
 
         Zotero.debug("[seerai] Window detached successfully");
@@ -115,6 +122,7 @@ export class DetachedWindowManager {
       return;
     }
 
+    this.clearSavePositionTimer();
     this.saveWindowPosition();
 
     if (detachedWindow && !detachedWindow.closed) {
@@ -123,7 +131,7 @@ export class DetachedWindowManager {
 
     isDetached = false;
     detachedWindow = null;
-    Zotero.Prefs.set(getPrefDetached(), false);
+    Zotero.Prefs.set(getPrefDetached(), false, true);
 
     Zotero.debug("[seerai] Window attached back to sidebar");
 
@@ -158,13 +166,35 @@ export class DetachedWindowManager {
    * Handle window close event
    */
   private static onWindowClose(): void {
+    this.clearSavePositionTimer();
     this.saveWindowPosition();
     isDetached = false;
     detachedWindow = null;
-    Zotero.Prefs.set(getPrefDetached(), false);
+    Zotero.Prefs.set(getPrefDetached(), false, true);
 
     // Trigger sidebar refresh
     this.notifySidebarStateChange();
+  }
+
+  /**
+   * Debounced position save — a live resize/move fires events continuously and
+   * each save performs four synchronous pref writes.
+   */
+  private static scheduleSaveWindowPosition(): void {
+    if (savePositionTimer !== null) {
+      clearTimeout(savePositionTimer);
+    }
+    savePositionTimer = setTimeout(() => {
+      savePositionTimer = null;
+      this.saveWindowPosition();
+    }, 250);
+  }
+
+  private static clearSavePositionTimer(): void {
+    if (savePositionTimer !== null) {
+      clearTimeout(savePositionTimer);
+      savePositionTimer = null;
+    }
   }
 
   /**
@@ -173,10 +203,14 @@ export class DetachedWindowManager {
   private static saveWindowPosition(): void {
     if (detachedWindow && !detachedWindow.closed) {
       try {
-        Zotero.Prefs.set(getPrefWindowX(), detachedWindow.screenX);
-        Zotero.Prefs.set(getPrefWindowY(), detachedWindow.screenY);
-        Zotero.Prefs.set(getPrefWindowWidth(), detachedWindow.outerWidth);
-        Zotero.Prefs.set(getPrefWindowHeight(), detachedWindow.outerHeight);
+        Zotero.Prefs.set(getPrefWindowX(), detachedWindow.screenX, true);
+        Zotero.Prefs.set(getPrefWindowY(), detachedWindow.screenY, true);
+        Zotero.Prefs.set(getPrefWindowWidth(), detachedWindow.outerWidth, true);
+        Zotero.Prefs.set(
+          getPrefWindowHeight(),
+          detachedWindow.outerHeight,
+          true,
+        );
       } catch (e) {
         Zotero.debug(`[seerai] Error saving window position: ${e}`);
       }
