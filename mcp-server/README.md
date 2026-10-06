@@ -29,7 +29,7 @@ Add to your config file:
 
 ### 3. Start Zotero
 
-Make sure Zotero 8 or 9 is running with the Seer-AI plugin installed (.xpi file).
+Make sure Zotero 8–10 is running with the Seer-AI plugin installed (.xpi file).
 
 ### 4. Restart Claude Desktop
 
@@ -40,7 +40,7 @@ Claude will now have access to all Zotero tools!
 ## Requirements
 
 - **Node.js 18+** installed
-- **Zotero 8/9** with Seer-AI plugin running
+- **Zotero 8–10** with Seer-AI plugin running
 
 ## Verify Connection
 
