@@ -16,6 +16,12 @@ import {
   parseCursorModels,
 } from "../src/modules/chat/cli/cursorAgent";
 import {
+  antigravityAgentDef,
+  parseAntigravityEventLine,
+  parseAntigravityModels,
+  resolveAntigravityModelSlug,
+} from "../src/modules/chat/cli/antigravityAgent";
+import {
   formatToolNotice,
   isSeeraiTool,
 } from "../src/modules/chat/cli/toolNotice";
@@ -273,6 +279,159 @@ describe("CLI harness integration", function () {
         "--verbose",
       ]);
       assert.include(claude.join(" "), "--model opus");
+    });
+
+    it("Antigravity uses stream-json stdin and gates permissions on agentic mode", function () {
+      const chat = antigravityAgentDef.buildArgs({ agentic: false });
+      assert.deepEqual(chat, [
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+      ]);
+      const agentic = antigravityAgentDef.buildArgs({
+        agentic: true,
+        model: "gemini-3.8-flash-low",
+        reasoningEffort: "high",
+      });
+      assert.includeMembers(agentic, [
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--dangerously-skip-permissions",
+        "--model",
+        "gemini-3.8-flash-low",
+        "--effort",
+        "high",
+      ]);
+      // The prompt travels as one NDJSON user event on stdin — not in argv.
+      const envelope = antigravityAgentDef.wrapStdin!('hello "world"');
+      assert.deepEqual(JSON.parse(envelope), {
+        event: "user",
+        message: { content: 'hello "world"' },
+      });
+      assert.isTrue(envelope.endsWith("\n"));
+    });
+
+    it("Antigravity model ids resolve to agy slugs (legacy labels mapped)", function () {
+      assert.equal(
+        resolveAntigravityModelSlug("Gemini 3.5 Flash (Medium)"),
+        "gemini-3.8-flash-medium",
+      );
+      assert.equal(
+        resolveAntigravityModelSlug("gemini-3.7-flash-high"),
+        "gemini-3.7-flash-high",
+      );
+      assert.isUndefined(resolveAntigravityModelSlug("default"));
+      assert.isUndefined(resolveAntigravityModelSlug("Some Unknown Label"));
+    });
+  });
+
+  describe("parseAntigravityEventLine", function () {
+    function line(obj: unknown): CliParseResult[] {
+      return parseAntigravityEventLine(JSON.stringify(obj));
+    }
+
+    it("streams text deltas and ignores init", function () {
+      assert.deepEqual(
+        kinds(line({ event: "init", init: { model: "gemini-3.8-flash-low" } })),
+        ["ignore"],
+      );
+      assert.deepEqual(
+        line({
+          event: "step_update",
+          step_update: {
+            step_index: 1,
+            state: "ACTIVE",
+            step_type: "agent_response",
+            text_delta: "PONG",
+          },
+        }),
+        [{ kind: "text-delta", text: "PONG" }],
+      );
+    });
+
+    it("surfaces tool steps as start/complete", function () {
+      const started = line({
+        event: "step_update",
+        step_update: {
+          step_index: 2,
+          state: "ACTIVE",
+          step_type: "tool",
+          tool_name: "run_command",
+        },
+      });
+      assert.deepEqual(kinds(started), ["tool-start"]);
+      assert.equal((started[0] as { name?: string }).name, "run_command");
+
+      const completed = line({
+        event: "step_update",
+        step_update: {
+          step_index: 2,
+          state: "DONE",
+          step_type: "tool",
+          tool_name: "run_command",
+          tool_info: {
+            name: "run_command",
+            parameters: { CommandLine: "git status" },
+            output: "clean",
+          },
+        },
+      });
+      assert.deepEqual(kinds(completed), ["tool-complete"]);
+      assert.equal((completed[0] as { detail?: string }).detail, "git status");
+    });
+
+    it("maps the result envelope to text or an error", function () {
+      assert.deepEqual(
+        line({
+          event: "result",
+          result: { status: "SUCCESS", response: "done" },
+        }),
+        [{ kind: "text", text: "done" }],
+      );
+      assert.deepEqual(
+        line({
+          event: "result",
+          result: { status: "ERROR", error: "boom" },
+        }),
+        [{ kind: "error", message: "boom" }],
+      );
+      // Post-turn steps can fail after a valid answer; keep the text.
+      assert.deepEqual(
+        line({
+          event: "result",
+          result: { status: "ERROR", response: "PONG", error: "503" },
+        }),
+        [{ kind: "text", text: "PONG" }],
+      );
+    });
+
+    it("ignores malformed and unknown events", function () {
+      assert.deepEqual(parseAntigravityEventLine("not json"), [
+        { kind: "ignore" },
+      ]);
+      assert.deepEqual(line({ event: "future_thing" }), [{ kind: "ignore" }]);
+    });
+  });
+
+  describe("parseAntigravityModels", function () {
+    it("parses slug/label rows and skips CLI banners", function () {
+      assert.deepEqual(
+        parseAntigravityModels(
+          "Fetching available models...\n" +
+            "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n" +
+            "claude-opus-4-6-thinking   Claude Opus 4.6 (Thinking)\n",
+        ),
+        [
+          { id: "gemini-3.8-flash-high", label: "Gemini 3.8 Flash (High)" },
+          {
+            id: "claude-opus-4-6-thinking",
+            label: "Claude Opus 4.6 (Thinking)",
+          },
+        ],
+      );
     });
   });
 

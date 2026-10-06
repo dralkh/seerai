@@ -1,4 +1,5 @@
 import { config } from "../../../../package.json";
+import { getPref } from "../../../utils/prefs";
 
 // Low-level helper for delegating a chat turn to a locally installed agent
 // CLI (e.g. Codex). We never reimplement the CLI's OAuth: we spawn the binary
@@ -7,6 +8,12 @@ import { config } from "../../../../package.json";
 // Streaming model: prefer Gecko Subprocess pipe readers for real stdout
 // streaming. The older exec + temp-file tailer remains as a fallback for Zotero
 // builds where Subprocess.sys.mjs is unavailable.
+//
+// Binary resolution: GUI-launched Zotero (especially on macOS) inherits a
+// minimal PATH, so we search the user's common install dirs ourselves —
+// including version-manager bins (nvm/fnm/mise/asdf/n) that are normally only
+// added by an interactive shell rc. This keeps detection and spawns working
+// without relying on the user's dotfiles.
 
 const POLL_INTERVAL_MS = 120;
 
@@ -45,12 +52,31 @@ export function isCliExecAvailable(): boolean {
 
 export function getEnvVar(name: string): string | undefined {
   try {
-    const svc = (Components as any).classes[
-      "@mozilla.org/process/environment;1"
-    ].getService((Components as any).interfaces.nsIEnvironment);
+    const svc =
+      (globalThis as any).Services?.env ||
+      (Components as any).classes[
+        "@mozilla.org/process/environment;1"
+      ].getService((Components as any).interfaces.nsIEnvironment);
     return svc.exists(name) ? svc.get(name) : undefined;
   } catch {
     return undefined;
+  }
+}
+
+export function getUserHomeDir(): string | undefined {
+  return getEnvVar("HOME") || getEnvVar("USERPROFILE");
+}
+
+function isExecutableFile(path: string): boolean {
+  try {
+    const cu = (globalThis as any).ChromeUtils;
+    if (typeof cu?.importESModule !== "function") return false;
+    const { FileUtils } = cu.importESModule(
+      "resource://gre/modules/FileUtils.sys.mjs",
+    );
+    return new FileUtils.File(path).isExecutable();
+  } catch {
+    return false;
   }
 }
 
@@ -63,38 +89,190 @@ function shellEscape(value: string): string {
 // shellenv) load. We do NOT use an interactive shell (`-i`): many ~/.zshrc
 // files run tty-dependent setup (stty, tmux auto-attach) that aborts without a
 // terminal. Instead we explicitly prepend the common per-user bin dirs that an
-// interactive rc would normally add — that's where GUI-launched Zotero
-// otherwise loses tools like codex/claude (installed under ~/.local/bin) while
-// still finding ones on the base/brew PATH (gemini).
-function resolveShell(): { shell: string; flag: string; login: boolean } {
-  if (Zotero.isWin) return { shell: "cmd.exe", flag: "/c", login: false };
-  const shell = getEnvVar("SHELL") || "/bin/sh";
-  return { shell, flag: "-lc", login: true };
+// interactive rc would normally add — plus any version-manager node bins found
+// on disk (nvm/fnm/mise/…), which rc-based setups would otherwise hide from a
+// GUI-launched Zotero.
+function resolveShell(): { shell: string; flag: string } {
+  if (Zotero.isWin) {
+    const candidates = [
+      getEnvVar("ComSpec"),
+      getEnvVar("COMSPEC"),
+      "C:\\Windows\\System32\\cmd.exe",
+      "C:\\Windows\\SysWOW64\\cmd.exe",
+    ];
+    for (const candidate of candidates) {
+      if (candidate && isExecutableFile(candidate)) {
+        return { shell: candidate, flag: "/c" };
+      }
+    }
+    return { shell: "cmd.exe", flag: "/c" };
+  }
+  const candidates = [getEnvVar("SHELL"), "/bin/zsh", "/bin/bash", "/bin/sh"];
+  for (const candidate of candidates) {
+    if (candidate && isExecutableFile(candidate)) {
+      return { shell: candidate, flag: "-lc" };
+    }
+  }
+  return { shell: "/bin/sh", flag: "-lc" };
 }
 
-// Prepended to PATH inside every command (the shell expands $HOME). Covers the
-// usual places agent CLIs land that aren't on the minimal GUI/launchd PATH.
-const UNIX_PATH_DIRS = [
-  "$HOME/.local/bin",
-  "$HOME/bin",
-  "$HOME/.npm-global/bin",
-  "$HOME/.yarn/bin",
-  "$HOME/.bun/bin",
-  "$HOME/.deno/bin",
-  "$HOME/.volta/bin",
-  "$HOME/.cargo/bin",
-  "$HOME/go/bin",
-  "$HOME/.asdf/shims",
-  "$HOME/.local/share/mise/shims",
-  "$HOME/n/bin",
+// Relative to $HOME; covers npm/yarn/bun/deno/cargo installs and shims.
+const HOME_BIN_DIRS = [
+  ".local/bin",
+  "bin",
+  ".npm-global/bin",
+  ".npm-packages/bin",
+  ".yarn/bin",
+  ".config/yarn/global/node_modules/.bin",
+  ".bun/bin",
+  ".deno/bin",
+  ".volta/bin",
+  ".cargo/bin",
+  "go/bin",
+  ".asdf/shims",
+  ".nodenv/shims",
+  ".anyenv/envs/nodenv/shims",
+  ".local/share/mise/shims",
+  "Library/pnpm",
+  ".local/share/pnpm",
+  "n/bin",
+];
+
+const ABSOLUTE_BIN_DIRS = [
   "/opt/homebrew/bin",
   "/opt/homebrew/sbin",
   "/usr/local/bin",
+  "/usr/local/sbin",
+  "/home/linuxbrew/.linuxbrew/bin",
+  "/snap/bin",
 ];
 
-function pathPrefixStatement(): string {
+function compareVersionsDesc(a: string, b: string): number {
+  const parse = (value: string) =>
+    value
+      .replace(/^v/i, "")
+      .split(/[.+-]/)
+      .map((part) => parseInt(part, 10) || 0);
+  const pa = parse(a);
+  const pb = parse(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pb[i] || 0) - (pa[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return b.localeCompare(a);
+}
+
+// Version-manager layouts: <root>/<version>/<leaf> holds the node/npm bins.
+const VERSION_MANAGER_LAYOUTS: Array<{ parts: string[]; leaf: string[] }> = [
+  { parts: [".nvm", "versions", "node"], leaf: ["bin"] },
+  {
+    parts: [".local", "share", "fnm", "node-versions"],
+    leaf: ["installation", "bin"],
+  },
+  {
+    parts: ["Library", "Application Support", "fnm", "node-versions"],
+    leaf: ["installation", "bin"],
+  },
+  { parts: ["n", "versions", "node"], leaf: ["bin"] },
+  { parts: [".local", "share", "mise", "installs", "node"], leaf: ["bin"] },
+  { parts: [".asdf", "installs", "nodejs"], leaf: ["bin"] },
+];
+
+async function discoverVersionManagerBins(home: string): Promise<string[]> {
+  const dirs: string[] = [];
+  for (const layout of VERSION_MANAGER_LAYOUTS) {
+    const root = PathUtils.join(home, ...layout.parts);
+    try {
+      if (!(await IOUtils.exists(root))) continue;
+      const children = await IOUtils.getChildren(root);
+      const versions = children
+        .map((child) => PathUtils.filename(child))
+        .filter((name) => /^v?\d/.test(name))
+        .sort(compareVersionsDesc);
+      for (const version of versions) {
+        dirs.push(PathUtils.join(root, version, ...layout.leaf));
+      }
+    } catch {
+      // Unreadable layout — skip.
+    }
+  }
+  return dirs;
+}
+
+let _pathDirsCache: { at: number; dirs: string[] } | null = null;
+const PATH_DIRS_CACHE_MS = 30_000;
+
+/** All directories searched for CLI binaries, most specific first. */
+export async function getCliPathDirs(): Promise<string[]> {
+  const now = Date.now();
+  if (_pathDirsCache && now - _pathDirsCache.at < PATH_DIRS_CACHE_MS) {
+    return _pathDirsCache.dirs;
+  }
+  const dirs: string[] = [];
+  const extra = String(getPref("cliExtraPath") || "");
+  for (const part of extra.split(Zotero.isWin ? ";" : ":")) {
+    if (part.trim()) dirs.push(part.trim());
+  }
+  const home = getUserHomeDir();
+  if (home) {
+    dirs.push(...(await discoverVersionManagerBins(home)));
+    dirs.push(
+      ...HOME_BIN_DIRS.map((rel) => PathUtils.join(home, ...rel.split("/"))),
+    );
+  }
+  if (!Zotero.isWin) dirs.push(...ABSOLUTE_BIN_DIRS);
+  const seen = new Set<string>();
+  const unique = dirs.filter((dir) => {
+    if (!dir || seen.has(dir)) return false;
+    seen.add(dir);
+    return true;
+  });
+  _pathDirsCache = { at: now, dirs: unique };
+  return unique;
+}
+
+export function clearCliPathCache(): void {
+  _pathDirsCache = null;
+}
+
+/** Build the `export PATH=…` prefix prepended to every shell invocation. */
+export async function buildPathPrefixStatement(): Promise<string> {
   if (Zotero.isWin) return "";
-  return `export PATH="${UNIX_PATH_DIRS.join(":")}:$PATH"; `;
+  const dirs = await getCliPathDirs();
+  const pathValue = [...dirs.map(shellEscape), '"$PATH"'].join(":");
+  return `export PATH=${pathValue}; `;
+}
+
+/**
+ * Resolve a CLI binary to an absolute path without a shell. Returns null when
+ * nothing executable is found; callers may still fall back to a shell probe.
+ */
+export async function findCliBinary(bin: string): Promise<string | null> {
+  if (!bin) return null;
+  const direct =
+    PathUtils.isAbsolute(bin) ||
+    bin.includes("/") ||
+    (Zotero.isWin && bin.includes("\\"));
+  if (direct) return isExecutableFile(bin) ? bin : null;
+  // Copy — the cached list must not be mutated with the app PATH on every call.
+  const dirs = [...(await getCliPathDirs())];
+  const envPath = getEnvVar("PATH");
+  if (envPath) {
+    dirs.push(...envPath.split(Zotero.isWin ? ";" : ":"));
+  }
+  const names = Zotero.isWin
+    ? [`${bin}.cmd`, `${bin}.exe`, `${bin}.bat`, bin]
+    : [bin];
+  const seen = new Set<string>();
+  for (const dir of dirs) {
+    if (!dir || seen.has(dir)) continue;
+    seen.add(dir);
+    for (const name of names) {
+      const candidate = PathUtils.join(dir, name);
+      if (isExecutableFile(candidate)) return candidate;
+    }
+  }
+  return null;
 }
 
 function cliDir(sub: string): string {
@@ -179,12 +357,17 @@ export interface CliCaptureResult {
   stdout: string;
   stderr: string;
   exitCode: number | null;
+  /** Resolved absolute path of the binary, when found during the probe. */
+  resolvedPath?: string;
+  /** True when the probe was abandoned because the shell exceeded the timeout. */
+  timedOut?: boolean;
 }
 
 /**
  * Run a CLI command to completion and capture its output. Used for fast probes
- * (version / login status). No stdin. Uses a login shell so the binary resolves
- * on the user's PATH.
+ * (version / login status). No stdin. The binary is resolved to an absolute
+ * path first (version managers included) and a login shell is still used so
+ * environment set up by the user's dotfiles is visible.
  */
 export async function runCliCapture(
   bin: string,
@@ -198,6 +381,8 @@ export async function runCliCapture(
       "Local CLI execution requires Zotero.Utilities.Internal.exec, which is not available in this environment.",
     );
   }
+  const resolved = await findCliBinary(bin);
+  const command0 = resolved || bin;
   const id = nextId();
   const tmp = cliDir("tmp");
   await ensureDir(tmp);
@@ -211,21 +396,35 @@ export async function runCliCapture(
       ? (await IOUtils.writeUTF8(inPath, stdinText),
         ` < ${shellEscape(inPath)}`)
       : "";
-  const invocation = `${shellEscape(bin)} ${args.map(shellEscape).join(" ")}`;
+  const invocation = `${shellEscape(command0)} ${args.map(shellEscape).join(" ")}`;
   const { shell, flag } = resolveShell();
+  const pathPrefix = await buildPathPrefixStatement();
   const eo = shellEscape(outPath);
   const ee = shellEscape(errPath);
   const eexit = shellEscape(exitPath);
   const command = Zotero.isWin
     ? `${invocation}${redirectIn} > ${eo} 2> ${ee} & echo !errorlevel! > ${eexit}`
-    : `${pathPrefixStatement()}{ ${invocation}${redirectIn} ; } > ${eo} 2> ${ee} ; echo $? > ${eexit}`;
+    : `${pathPrefix}{ ${invocation}${redirectIn} ; } > ${eo} 2> ${ee} ; echo $? > ${eexit}`;
 
-  // Race the exec against the timeout so a slow/hanging interactive shell
-  // (e.g. a heavy ~/.zshrc) can't block detection forever — we return whatever
-  // the probe wrote so far.
+  Zotero.debug(
+    `[seerai] runCliCapture: ${shell} ${flag} "${command.slice(0, 240)}"`,
+  );
+
+  // Race the exec against the timeout so a slow/hanging shell (e.g. a heavy
+  // ~/.zshrc) can't block detection forever — we return whatever the probe
+  // wrote so far. `execFn` can throw synchronously (e.g. an unresolvable
+  // shell path); capture that instead of letting it escape the race.
   let timedOut = false;
+  let execError: unknown = null;
+  const execPromise = (async () => {
+    try {
+      await execFn(shell, [flag, command]);
+    } catch (e) {
+      execError = e;
+    }
+  })();
   await Promise.race([
-    Promise.resolve(execFn(shell, [flag, command])).catch(() => {}),
+    execPromise,
     new Promise<void>((resolve) =>
       setTimeout(() => {
         timedOut = true;
@@ -241,10 +440,17 @@ export async function runCliCapture(
     void IOUtils.remove(p).catch(() => {});
   }
   const parsed = exitRaw.trim() ? parseInt(exitRaw.trim(), 10) : null;
+  if (execError && !stdout && !stderr) {
+    Zotero.debug(
+      `[seerai] runCliCapture exec failed for ${command0}: ${execError}`,
+    );
+  }
   return {
     stdout: stdout.trim(),
-    stderr: stderr.trim(),
+    stderr: (stderr || (execError ? String(execError) : "")).trim(),
     exitCode: timedOut ? null : isNaN(parsed as number) ? null : parsed,
+    resolvedPath: resolved || undefined,
+    timedOut,
   };
 }
 
@@ -286,9 +492,6 @@ export function runCli(options: CliRunOptions): {
   // or to nothing when neither tool is present (graceful, buffered fallback).
   // Safe to prepend even for CLIs that manage their own buffering.
   const sbPrefix = Zotero.isWin ? "" : "${SB}";
-  const cliInvocation = `${envPrefix(options.env)}${sbPrefix}${shellEscape(options.bin)} ${options.args
-    .map(shellEscape)
-    .join(" ")}`;
 
   const unbufferInit = Zotero.isWin
     ? ""
@@ -296,16 +499,39 @@ export function runCli(options: CliRunOptions): {
 
   const { shell, flag } = resolveShell();
 
-  function buildStreamingCommand(): string {
+  // Resolve the binary to an absolute path and assemble the PATH prefix once
+  // per run; both generators await this before building their command line.
+  async function resolveInvocation(): Promise<{
+    pathPrefix: string;
+    cliInvocation: string;
+  }> {
+    const resolved = await findCliBinary(options.bin);
+    if (!resolved) {
+      Zotero.debug(
+        `[seerai] runCli: ${options.bin} not found in known install dirs; falling back to shell PATH lookup`,
+      );
+    }
+    return {
+      pathPrefix: await buildPathPrefixStatement(),
+      cliInvocation: `${envPrefix(options.env)}${sbPrefix}${shellEscape(
+        resolved || options.bin,
+      )} ${options.args.map(shellEscape).join(" ")}`,
+    };
+  }
+
+  function buildStreamingCommand(
+    pathPrefix: string,
+    cliInvocation: string,
+  ): string {
     const ep = shellEscape(promptPath);
     const ecwd = shellEscape(cwd);
     if (Zotero.isWin) {
       return `cd /d ${ecwd} && ${cliInvocation} < ${ep}`;
     }
-    return `${unbufferInit}${pathPrefixStatement()}cd ${ecwd} && ${cliInvocation} < ${ep}`;
+    return `${unbufferInit}${pathPrefix}cd ${ecwd} && ${cliInvocation} < ${ep}`;
   }
 
-  function buildCommand(): string {
+  function buildCommand(pathPrefix: string, cliInvocation: string): string {
     const ep = shellEscape(promptPath);
     const eo = shellEscape(outPath);
     const ee = shellEscape(errPath);
@@ -317,7 +543,7 @@ export function runCli(options: CliRunOptions): {
       // consumption of the stream.
       return `cd /d ${ecwd} && ${cliInvocation} < ${ep} > ${eo} 2> ${ee} & echo !errorlevel! > ${eexit}`;
     }
-    return `${unbufferInit}${pathPrefixStatement()}cd ${ecwd} && { ${cliInvocation} < ${ep} > ${eo} 2> ${ee} & } ; p=$! ; echo $p > ${epid} ; wait $p ; echo $? > ${eexit}`;
+    return `${unbufferInit}${pathPrefix}cd ${ecwd} && { ${cliInvocation} < ${ep} > ${eo} 2> ${ee} & } ; p=$! ; echo $p > ${epid} ; wait $p ; echo $? > ${eexit}`;
   }
 
   async function cleanup(): Promise<void> {
@@ -351,7 +577,10 @@ export function runCli(options: CliRunOptions): {
     if (pid === null) return;
     try {
       if (Zotero.isWin) {
-        await execFn("cmd.exe", ["/c", `taskkill /PID ${pid} /T /F`]);
+        await execFn(resolveShell().shell, [
+          "/c",
+          `taskkill /PID ${pid} /T /F`,
+        ]);
       } else {
         await execFn("/bin/sh", [
           "-c",
@@ -372,7 +601,8 @@ export function runCli(options: CliRunOptions): {
     await ensureDir(cwd);
     await IOUtils.writeUTF8(promptPath, options.stdinText);
 
-    const command = buildStreamingCommand();
+    const { pathPrefix, cliInvocation } = await resolveInvocation();
+    const command = buildStreamingCommand(pathPrefix, cliInvocation);
     Zotero.debug(
       `[seerai] runCli: streaming via Subprocess: ${shell} ${flag} "${command.slice(0, 200)}"`,
     );
@@ -427,7 +657,8 @@ export function runCli(options: CliRunOptions): {
     await ensureDir(cwd);
     await IOUtils.writeUTF8(promptPath, options.stdinText);
 
-    const command = buildCommand();
+    const { pathPrefix, cliInvocation } = await resolveInvocation();
+    const command = buildCommand(pathPrefix, cliInvocation);
     Zotero.debug(
       `[seerai] runCli: ${shell} ${flag} "${command.slice(0, 200)}"`,
     );

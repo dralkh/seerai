@@ -25,6 +25,7 @@ import {
 import { getTableStore } from "../tableStore";
 import { PersistedPdfDiscovery, TableConfig } from "../tableTypes";
 import { runConcurrentTasks } from "../../../utils/concurrentRunner";
+import { getChildAttachmentIds } from "../../../utils/zoteroItem";
 
 /**
  * Unified table tool dispatcher
@@ -159,7 +160,7 @@ async function findTable(tableId: string | undefined): Promise<any | null> {
 }
 
 function hasPdfAttachment(item: Zotero.Item): boolean {
-  const attachments = item.getAttachments() || [];
+  const attachments = getChildAttachmentIds(item);
   return attachments.some((attId: number) => {
     const attachment = Zotero.Items.get(attId);
     return (

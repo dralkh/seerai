@@ -52,6 +52,9 @@ pref("agentMaxContentLength", 50000);
 pref("agentMaxIterations", 50);
 pref("agentAutoOcr", true);
 pref("enableExperimentalAgentTools", false);
+// Extra directories (colon/semicolon-separated) to search for local CLI
+// binaries, in addition to the built-in homebrew/npm/version-manager locations.
+pref("cliExtraPath", "");
 pref("selectionMode", "default"); // "lock", "default", or "explore"
 pref("searchAutoAiInsights", true); // Automatically generate AI insights after search
 pref(

@@ -176,6 +176,147 @@ import type { ModelRef, ResolvedModel } from "./chat/providerTypes";
 import { createCliProvider, resolveCliContext } from "./chat/cli/cliProvider";
 import { formatToolNotice } from "./chat/cli/toolNotice";
 
+const TRANSIENT_HTTP_STATUSES = new Set([429, 500, 502, 503, 504]);
+const MAX_TRANSIENT_RETRIES = 2;
+
+function providerDisplayName(
+  resolved: ResolvedModel | undefined,
+  url?: string,
+): string {
+  const name = resolved?.provider?.name?.trim();
+  if (name) return name;
+  const lower = String(url || "").toLowerCase();
+  if (lower.includes("generativelanguage.googleapis.com"))
+    return "Google Gemini";
+  if (lower.includes("openai.com")) return "OpenAI";
+  if (lower.includes("anthropic")) return "Anthropic";
+  if (lower.includes("openrouter")) return "OpenRouter";
+  return "API";
+}
+
+/**
+ * Pull the human-readable message out of a provider error body. Handles both
+ * the OpenAI shape (`{"error":{"message":…}}`) and Google's native/REST shape
+ * (`[{"error":{"code":503,"message":…,"status":"UNAVAILABLE"}}]`).
+ */
+export function extractProviderErrorMessage(body: string): string | undefined {
+  const text = String(body || "").trim();
+  if (!text) return undefined;
+  try {
+    const parsed = JSON.parse(text);
+    const first = Array.isArray(parsed) ? parsed[0] : parsed;
+    if (first && typeof first === "object") {
+      const rec = first as Record<string, unknown>;
+      const err =
+        rec.error && typeof rec.error === "object"
+          ? (rec.error as Record<string, unknown>)
+          : rec;
+      if (typeof err.message === "string" && err.message.trim()) {
+        return err.message.trim();
+      }
+    }
+  } catch {
+    // Not JSON — fall through to the raw text.
+  }
+  return text.slice(0, 500);
+}
+
+/**
+ * Build a provider-attributed error message. Before this, every failed request
+ * (Gemini included) was reported as "OpenAI API Error", which made provider
+ * outages look like a misconfigured/incorrectly-routed plugin.
+ */
+export function formatProviderError(
+  resolved: ResolvedModel | undefined,
+  url: string | undefined,
+  status: number,
+  statusText: string,
+  body: string,
+): string {
+  const label = providerDisplayName(resolved, url);
+  const model = resolved?.model?.modelId;
+  const message = extractProviderErrorMessage(body) || statusText;
+  const context = [
+    model ? `model ${model}` : undefined,
+    `HTTP ${status}${statusText ? ` ${statusText}` : ""}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  let hint = "";
+  if (status === 503 || /overloaded|high demand|UNAVAILABLE/i.test(message)) {
+    hint =
+      " The model is temporarily overloaded — retry in a moment or switch chat models.";
+  } else if (status === 429) {
+    hint = " Rate limit reached — wait a moment or switch chat models.";
+  }
+  return `${label} error (${context}): ${message}${hint}`;
+}
+
+function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort);
+  });
+}
+
+/**
+ * fetch() with bounded retries for transient provider failures (429/5xx).
+ * Successful and non-retryable responses are returned untouched; only the
+ * response body of a discarded retryable response is drained.
+ */
+async function fetchWithTransientRetry(
+  url: string,
+  init: () => RequestInit,
+  signal: AbortSignal | undefined,
+  label: string,
+): Promise<Response> {
+  let attempt = 0;
+  for (;;) {
+    let response: Response;
+    try {
+      response = await fetch(url, init());
+    } catch (error) {
+      if ((error as Error)?.name === "AbortError") throw error;
+      if (attempt >= MAX_TRANSIENT_RETRIES) throw error;
+      attempt++;
+      const wait = 800 * attempt + Math.floor(Math.random() * 250);
+      Zotero.debug(
+        `[seerai] ${label}: network error, retry ${attempt}/${MAX_TRANSIENT_RETRIES} in ${wait}ms`,
+      );
+      await sleepWithAbort(wait, signal);
+      continue;
+    }
+    if (
+      !TRANSIENT_HTTP_STATUSES.has(response.status) ||
+      attempt >= MAX_TRANSIENT_RETRIES
+    ) {
+      return response;
+    }
+    try {
+      await response.text();
+    } catch {
+      // Ignore — the response is being discarded anyway.
+    }
+    attempt++;
+    const wait = 800 * attempt + Math.floor(Math.random() * 250);
+    Zotero.debug(
+      `[seerai] ${label}: HTTP ${response.status}, retry ${attempt}/${MAX_TRANSIENT_RETRIES} in ${wait}ms`,
+    );
+    await sleepWithAbort(wait, signal);
+  }
+}
+
 export class OpenAIService {
   // Active AbortController for current request (may not be available in Zotero)
 
@@ -405,22 +546,33 @@ export class OpenAIService {
         `[seerai] Starting chat completion with model ${model} at ${endpoint}`,
       );
 
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(resolved?.headers || {
-            Authorization: `Bearer ${prefs.apiKey}`,
-          }),
-        },
-        body: JSON.stringify(requestBody),
-        ...(signal ? { signal } : {}),
-      });
+      const response = await fetchWithTransientRetry(
+        endpoint,
+        () => ({
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(resolved?.headers || {
+              Authorization: `Bearer ${prefs.apiKey}`,
+            }),
+          },
+          body: JSON.stringify(requestBody),
+          ...(signal ? { signal } : {}),
+        }),
+        signal,
+        `chat completion (${providerDisplayName(resolved, endpoint)})`,
+      );
 
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          `OpenAI API Error: ${response.statusText} - ${errorText}`,
+          formatProviderError(
+            resolved,
+            endpoint,
+            response.status,
+            response.statusText,
+            errorText,
+          ),
         );
       }
 
@@ -619,21 +771,32 @@ export class OpenAIService {
         delete requestBody.reasoning_effort;
       }
 
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(configOverride?.headers ||
-            resolved?.headers || { Authorization: `Bearer ${apiKey}` }),
-        },
-        body: JSON.stringify(requestBody),
-        ...(signal ? { signal } : {}),
-      });
+      const response = await fetchWithTransientRetry(
+        endpoint,
+        () => ({
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(configOverride?.headers ||
+              resolved?.headers || { Authorization: `Bearer ${apiKey}` }),
+          },
+          body: JSON.stringify(requestBody),
+          ...(signal ? { signal } : {}),
+        }),
+        signal,
+        `chat stream (${providerDisplayName(resolved, endpoint)})`,
+      );
 
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
-          `OpenAI API Error: ${response.statusText} - ${errorText}`,
+          formatProviderError(
+            resolved,
+            endpoint,
+            response.status,
+            response.statusText,
+            errorText,
+          ),
         );
       }
 

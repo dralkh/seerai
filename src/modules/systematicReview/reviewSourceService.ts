@@ -1,4 +1,5 @@
 import { ReviewCancellationSignal } from "./cancellation";
+import { getChildAttachmentIds, getChildNoteIds } from "../../utils/zoteroItem";
 
 export interface ReviewSourceSummary {
   kind: "pdf" | "same_title_note" | "notes" | "abstract";
@@ -479,8 +480,7 @@ export async function getReviewSourceDocument(
 ): Promise<ReviewSourceDocument> {
   const title = normalize((item.getField("title") as string) || "");
   const abstract = ((item.getField("abstractNote") as string) || "").trim();
-  const notes = item
-    .getNotes()
+  const notes = getChildNoteIds(item)
     .map((noteId) => Zotero.Items.get(noteId))
     .filter(Boolean)
     .map((note) => ({
@@ -516,7 +516,7 @@ export async function getReviewSourceDocument(
       .map((note) => `[Full-text note: ${note.title}]\n${note.text}`)
       .join("\n\n");
   } else if (preference === "auto" || preference === "pdf") {
-    for (const id of item.getAttachments()) {
+    for (const id of getChildAttachmentIds(item)) {
       const attachment = Zotero.Items.get(id);
       if (
         !attachment ||
@@ -625,7 +625,7 @@ export function findSameTitleNoteAbstract(
   if (!item) return empty;
   const title = normalize((item.getField("title") as string) || "");
   if (!title) return empty;
-  const noteIds = item.getNotes();
+  const noteIds = getChildNoteIds(item);
   if (!noteIds.length) return empty;
   for (const noteId of noteIds) {
     const note = Zotero.Items.get(noteId);
@@ -679,7 +679,7 @@ export async function resolveItemAbstract(
       noteIds: noteHit.noteIds,
     };
   }
-  for (const id of item.getAttachments()) {
+  for (const id of getChildAttachmentIds(item)) {
     const attachment = Zotero.Items.get(id);
     if (!attachment || attachment.attachmentContentType !== "application/pdf") {
       continue;

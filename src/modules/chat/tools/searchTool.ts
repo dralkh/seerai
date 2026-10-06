@@ -21,6 +21,7 @@ import {
 import { semanticScholarService } from "../../semanticScholar";
 import { Assistant } from "../../assistant";
 import { getChatStateManager } from "../stateManager";
+import { getChildAttachmentIds } from "../../../utils/zoteroItem";
 import {
   ScholarlyPaper,
   ScholarlyProviderId,
@@ -626,12 +627,10 @@ export async function executeImportPaper(
       const existing = await findExistingImportedItem(paper);
       if (existing) {
         await addExistingItemToCollection(existing, target_collection_id);
-        const hasPdf = existing
-          .getAttachments()
-          .some(
-            (id) =>
-              Zotero.Items.get(id)?.attachmentContentType === "application/pdf",
-          );
+        const hasPdf = getChildAttachmentIds(existing).some(
+          (id) =>
+            Zotero.Items.get(id)?.attachmentContentType === "application/pdf",
+        );
         const importResult: ImportPaperResult = {
           item_id: existing.id,
           title: (existing.getField("title") as string) || paper.title,

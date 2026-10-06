@@ -4,6 +4,7 @@
  */
 
 import { VisionMessageContentPart } from "../openai";
+import { getChildAttachmentIds } from "../../utils/zoteroItem";
 
 // Supported image MIME types for vision models
 const SUPPORTED_IMAGE_TYPES = [
@@ -32,15 +33,15 @@ export async function getImageAttachments(
 ): Promise<Zotero.Item[]> {
   const images: Zotero.Item[] = [];
 
-  // Get parent item if this is an attachment
-  let targetItem = item;
-  if (item.isAttachment() && item.parentID) {
-    const parent = Zotero.Items.get(item.parentID);
-    if (parent) targetItem = parent as Zotero.Item;
+  // Get parent item if this is an attachment (a standalone attachment has no
+  // children; getAttachments() would throw on it).
+  let targetItem: Zotero.Item | false | null = item;
+  if (item.isAttachment()) {
+    targetItem = item.parentID ? Zotero.Items.get(item.parentID) : null;
   }
 
   // Get all attachments
-  const attachmentIDs = targetItem.getAttachments();
+  const attachmentIDs = getChildAttachmentIds(targetItem);
   for (const attachmentID of attachmentIDs) {
     const attachment = Zotero.Items.get(attachmentID);
     if (attachment && isImageAttachment(attachment)) {

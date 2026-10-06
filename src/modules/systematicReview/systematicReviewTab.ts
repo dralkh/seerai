@@ -31,6 +31,7 @@ import {
 } from "./types";
 import { getSRStore } from "./store";
 import { getSRService } from "./service";
+import { getChildAttachmentIds } from "../../utils/zoteroItem";
 import {
   buildGapCsv,
   buildGapMarkdown,
@@ -384,7 +385,7 @@ function cacheItemMeta(id: number): ItemMeta {
       }
     }
     if (!abstract && zItem) {
-      const attachmentIds = zItem.getAttachments();
+      const attachmentIds = getChildAttachmentIds(zItem);
       for (const attId of attachmentIds) {
         const att = Zotero.Items.get(attId);
         if (att && att.attachmentContentType === "application/pdf") {
@@ -577,7 +578,9 @@ function selectItemInZotero(itemId: number): void {
 async function openFirstPdfAttachment(itemId: number): Promise<boolean> {
   const item = Zotero.Items.get(itemId);
   if (!item) return false;
-  const attachmentIds = item.getAttachments();
+  const attachmentIds = item.isAttachment()
+    ? [item.id]
+    : getChildAttachmentIds(item);
   for (const attachId of attachmentIds) {
     const attachment = Zotero.Items.get(attachId);
     if (

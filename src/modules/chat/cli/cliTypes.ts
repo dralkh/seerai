@@ -124,6 +124,12 @@ export interface CliAgentDef {
    */
   stdinPrompt?: boolean;
   /**
+   * Optional transform applied to the prompt before it is written to stdin.
+   * Used by stream-json protocols that wrap each prompt in a transport
+   * envelope (e.g. Antigravity's `{"event":"user","message":{…}}` NDJSON).
+   */
+  wrapStdin?: (prompt: string) => string;
+  /**
    * Optional: register seerai's MCP server (research tools) with this harness
    * for an agentic turn. Returns CLI args to append (e.g. Claude `--mcp-config`,
    * Codex `-c mcp_servers…`), and may write a config file into the workspace.

@@ -6,6 +6,10 @@
 import { GenerateItemTagsParams, ToolResult, AgentConfig } from "./toolTypes";
 import { openAIService, OpenAIMessage, ToolDefinition } from "../../openai";
 import { getActiveModelConfig } from "../modelConfig";
+import {
+  getChildAttachmentIds,
+  getChildNoteIds,
+} from "../../../utils/zoteroItem";
 
 /**
  * Strip HTML tags from a string
@@ -34,12 +38,18 @@ export async function executeGenerateItemTags(
         error: `Item with ID ${item_id} not found`,
       };
     }
+    if (!item.isRegularItem()) {
+      return {
+        success: false,
+        error: `generate_item_tags requires a regular item (item ${item_id} is a ${item.itemType}).`,
+      };
+    }
 
     Zotero.debug(`[seerai] Tool: generate_item_tags for item ${item_id}`);
 
     // Get source content (notes or PDF text)
     let sourceText = "";
-    const noteIds = item.getNotes();
+    const noteIds = getChildNoteIds(item);
 
     if (noteIds.length > 0) {
       for (const noteId of noteIds) {
@@ -50,7 +60,7 @@ export async function executeGenerateItemTags(
         }
       }
     } else {
-      const attachments = item.getAttachments();
+      const attachments = getChildAttachmentIds(item);
       for (const attId of attachments) {
         const att = Zotero.Items.get(attId);
         if (att && att.attachmentContentType === "application/pdf") {

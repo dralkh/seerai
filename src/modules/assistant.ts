@@ -112,6 +112,7 @@ import {
 } from "./webSearchProvider";
 import { getTheme } from "../utils/theme";
 import { getPref, setPref } from "../utils/prefs";
+import { getChildAttachmentIds, getChildNoteIds } from "../utils/zoteroItem";
 import {
   runConcurrentTasks,
   formatTaskStats,
@@ -1409,6 +1410,21 @@ export class Assistant {
     const stateManager = getChatStateManager();
     const options = stateManager.getOptions();
 
+    // Directly-selected attachment (e.g. a PDF in the item tree): read its own
+    // indexed/extractable text. Regular-item APIs (getNotes/getAttachments)
+    // throw on attachments, so this must come first.
+    if (item.isAttachment()) {
+      const attachmentText = await Assistant.getAttachmentTextForRAG(
+        item,
+        autoIndex,
+      );
+      if (!attachmentText) return null;
+      return maxLength > 0
+        ? attachmentText.substring(0, maxLength)
+        : attachmentText;
+    }
+    if (!item.isRegularItem()) return null;
+
     if (options.includeNotesOnly) {
       Zotero.debug(
         "[seerai] includeNotesOnly is enabled, skipping PDF extraction",
@@ -1424,7 +1440,7 @@ export class Assistant {
 
     // Step 1: Always collect all notes
     if (includeAllNotes) {
-      const noteIds = item.getNotes();
+      const noteIds = getChildNoteIds(item);
       for (const noteId of noteIds) {
         const note = Zotero.Items.get(noteId);
         if (note) {
@@ -1481,7 +1497,7 @@ export class Assistant {
       options.includeNotesOnly;
 
     if (!skipPdf) {
-      const attachmentIds = item.getAttachments();
+      const attachmentIds = getChildAttachmentIds(item);
 
       for (const attId of attachmentIds) {
         const att = Zotero.Items.get(attId);
@@ -1690,7 +1706,7 @@ export class Assistant {
       const notes: string[] = [];
       let hasSameTitleNote = false;
       const itemTitleLower = (title || "").toLowerCase().trim();
-      const noteIds = zoteroItem.getNotes();
+      const noteIds = getChildNoteIds(zoteroItem);
       for (const noteId of noteIds) {
         const note = Zotero.Items.get(noteId);
         if (note) {
@@ -1739,7 +1755,7 @@ export class Assistant {
             `they are indexed separately; parent entry keeps abstract/notes only`,
         );
       } else {
-        const attachmentIds = zoteroItem.getAttachments();
+        const attachmentIds = getChildAttachmentIds(zoteroItem);
         for (const attId of attachmentIds) {
           const att = await Zotero.Items.getAsync(attId);
           if (!att || att.attachmentContentType !== "application/pdf") continue;
@@ -2499,7 +2515,7 @@ export class Assistant {
 
     if (!targetItem.isRegularItem()) return notes;
 
-    const noteIDs = targetItem.getNotes();
+    const noteIDs = getChildNoteIds(targetItem);
     for (const id of noteIDs) {
       const noteItem = Zotero.Items.get(id);
       if (noteItem) {
@@ -15820,7 +15836,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
               type: "click",
               listener: async (e: Event) => {
                 e.stopPropagation();
-                const attachmentIds = paperItem.getAttachments();
+                const attachmentIds = getChildAttachmentIds(paperItem);
                 for (const attachId of attachmentIds) {
                   const attachment = Zotero.Items.get(attachId);
                   if (
@@ -16364,7 +16380,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       concurrency: maxConcurrent,
       maxRetries: 3,
       executor: async (task) => {
-        const noteIds = task.item.getNotes();
+        const noteIds = getChildNoteIds(task.item);
         let content = "";
 
         if (noteIds.length > 0) {
@@ -16596,7 +16612,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       concurrency: maxConcurrent,
       maxRetries: 3,
       executor: async (task) => {
-        const noteIds = task.item.getNotes();
+        const noteIds = getChildNoteIds(task.item);
         let content = "";
 
         if (noteIds.length > 0) {
@@ -16898,7 +16914,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       if (!item || !item.isRegularItem()) continue;
 
       // Check if has PDF already
-      const attachments = item.getAttachments() || [];
+      const attachments = getChildAttachmentIds(item);
       const hasPdf = attachments.some((attId: number) => {
         const att = Zotero.Items.get(attId);
         return (
@@ -17587,7 +17603,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
       if (!item) throw new Error("Item not found");
 
       // Get PDF attachments
-      const attachmentIds = item.getAttachments();
+      const attachmentIds = getChildAttachmentIds(item);
       let pdfText = "";
 
       for (const attId of attachmentIds) {
@@ -17730,7 +17746,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
       // Get note content for this item
       let noteContent = "";
-      const childNotes = item.getNotes();
+      const childNotes = getChildNoteIds(item);
       for (const noteId of childNotes) {
         const noteItem = Zotero.Items.get(noteId);
         if (noteItem) {
@@ -17741,7 +17757,7 @@ Format in clean Markdown with clear headings. Be analytical and substantive, not
 
       // Try to get PDF text if no notes
       if (!noteContent.trim()) {
-        const attachmentIds = item.getAttachments();
+        const attachmentIds = getChildAttachmentIds(item);
         for (const attId of attachmentIds) {
           const att = Zotero.Items.get(attId);
           if (att && att.attachmentContentType === "application/pdf") {
@@ -17979,7 +17995,7 @@ Task: ${columnPrompt}`;
 
       // Get source content (notes or PDF text)
       let sourceText = "";
-      const noteIds = item.getNotes();
+      const noteIds = getChildNoteIds(item);
 
       if (noteIds.length > 0) {
         // Get content from notes
@@ -17992,7 +18008,7 @@ Task: ${columnPrompt}`;
         }
       } else {
         // Try to get PDF text
-        const attachments = item.getAttachments();
+        const attachments = getChildAttachmentIds(item);
         for (const attId of attachments) {
           const att = Zotero.Items.get(attId);
           if (att && att.attachmentContentType === "application/pdf") {
@@ -18264,7 +18280,7 @@ Call the generate_tags function with an array of 3-7 high-quality tags.`;
         }
       }
     } else {
-      const attachments = item.getAttachments();
+      const attachments = getChildAttachmentIds(item);
       for (const attId of attachments) {
         const att = Zotero.Items.get(attId);
         if (att && att.attachmentContentType === "application/pdf") {
@@ -18430,8 +18446,8 @@ You MUST call the generate_tags function.`;
 
     // Check for item and its notes/PDF (fresh data, not stale row data)
     const item = Zotero.Items.get(row.paperId);
-    const attachments = item?.getAttachments() || [];
-    const notes = item?.getNotes() || [];
+    const attachments = getChildAttachmentIds(item);
+    const notes = getChildNoteIds(item);
     const hasNotes = notes.length > 0;
     const hasPDF = attachments.some((attId: number) => {
       const att = Zotero.Items.get(attId);
@@ -19314,7 +19330,7 @@ You MUST call the generate_tags function.`;
   ): Promise<string> {
     // Check if there's already a note with matching title (prioritize OCR notes)
     if (ocrService.hasExistingNote(item)) {
-      const noteIds = item.getNotes();
+      const noteIds = getChildNoteIds(item);
       if (noteIds.length > 0) {
         Zotero.debug(`[seerai] Using existing note for item ${item.id}`);
         return this.generateColumnContent(item, col, noteIds);
@@ -19344,7 +19360,7 @@ You MUST call the generate_tags function.`;
     await new Promise((r) => setTimeout(r, 500));
 
     // Get the newly created note IDs
-    const newNoteIds = item.getNotes();
+    const newNoteIds = getChildNoteIds(item);
     if (newNoteIds.length === 0) {
       throw new Error("DataLabs processing completed but no note was created");
     }
@@ -19961,7 +19977,7 @@ You MUST call the generate_tags function.`;
                       )
                       .join(", ") || "Unknown";
                   const year = (item.getField("year") as string) || "";
-                  const noteIDs = item.getNotes();
+                  const noteIDs = getChildNoteIds(item);
                   const persistedData = generatedData[paperId] || {};
 
                   // Build row data
@@ -20872,7 +20888,7 @@ You MUST call the generate_tags function.`;
           }
           // Double Click: Open PDF
           else if (e.detail === 2) {
-            const attachmentIds = item.getAttachments();
+            const attachmentIds = getChildAttachmentIds(item);
             for (const attachId of attachmentIds) {
               const attachment = Zotero.Items.get(attachId);
               if (
@@ -20950,7 +20966,7 @@ You MUST call the generate_tags function.`;
           const hasNotes = row.noteIds && row.noteIds.length > 0;
           const itemForIndicator = Zotero.Items.get(row.paperId);
           const attachmentsForIndicator =
-            itemForIndicator?.getAttachments() || [];
+            getChildAttachmentIds(itemForIndicator);
           const hasPDFForIndicator = attachmentsForIndicator.some(
             (attId: number) => {
               const att = Zotero.Items.get(attId);
@@ -21165,7 +21181,7 @@ You MUST call the generate_tags function.`;
           const hasNotes = row.noteIds && row.noteIds.length > 0;
 
           const item = Zotero.Items.get(row.paperId);
-          const attachments = item?.getAttachments() || [];
+          const attachments = getChildAttachmentIds(item);
           const hasPDF = attachments.some((attId: number) => {
             const att = Zotero.Items.get(attId);
             return (
@@ -21285,7 +21301,7 @@ You MUST call the generate_tags function.`;
                 await new Promise((r) => setTimeout(r, 500));
 
                 // Now generate content using the new notes
-                const newNoteIds = item.getNotes();
+                const newNoteIds = getChildNoteIds(item);
                 if (newNoteIds.length > 0) {
                   // CRITICAL: Update row.noteIds so subsequent clicks know we have notes
                   row.noteIds = newNoteIds;
@@ -21546,7 +21562,7 @@ You MUST call the generate_tags function.`;
                 }
 
                 // Update the row's noteIds and sources count
-                row.noteIds = item.getNotes();
+                row.noteIds = getChildNoteIds(item);
                 row.data["sources"] = String(row.noteIds.length);
 
                 // Show "Generate" button now that we have a note
@@ -22175,7 +22191,7 @@ You MUST call the generate_tags function.`;
           {};
 
         // Get note count for sources column
-        const noteIDs = item.getNotes();
+        const noteIDs = getChildNoteIds(item);
         const doi = (item.getField("DOI") as string) || "";
 
         // Build the complete row with all data
@@ -26531,7 +26547,7 @@ ${lengthConstraint}`;
       const parentItem = Zotero.Items.get(parentItemId);
       if (!parentItem || !parentItem.isRegularItem()) return null;
 
-      const noteIDs = parentItem.getNotes();
+      const noteIDs = getChildNoteIds(parentItem);
       for (const noteID of noteIDs) {
         const note = Zotero.Items.get(noteID);
         if (note) {

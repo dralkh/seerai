@@ -102,19 +102,20 @@ export const providerPresets: ProviderPreset[] = [
     defaultModel: "default",
     verifiedCapabilities: ["chat", "reasoning"],
     notes:
-      "Uses your locally installed Antigravity CLI (`agy`) — Google's replacement for the deprecated Gemini CLI. Run `agy` once in a terminal to sign in with Google (stored in your system keyring), then click Detect. `default` uses agy's currently selected model; pick a specific model (Gemini 3 / Claude / GPT-OSS) to set it via agy's settings. No API key is stored by seerai.",
+      "Uses your locally installed Antigravity CLI (`agy`) — Google's replacement for the deprecated Gemini CLI. Run `agy` once in a terminal to sign in with Google (stored in your system keyring), then click Detect. `default` uses agy's currently selected model; pick a specific model to pin it with `agy --model`. No API key is stored by seerai.",
     catalogModels: [
       { id: "default", capabilities: ["chat", "reasoning"] },
-      { id: "Gemini 3.1 Pro (High)", capabilities: ["chat", "reasoning"] },
-      { id: "Gemini 3.1 Pro (Low)", capabilities: ["chat", "reasoning"] },
-      { id: "Gemini 3.5 Flash (High)", capabilities: ["chat", "reasoning"] },
-      { id: "Gemini 3.5 Flash (Medium)", capabilities: ["chat"] },
+      { id: "gemini-3.8-flash-high", capabilities: ["chat", "reasoning"] },
+      { id: "gemini-3.8-flash-medium", capabilities: ["chat", "reasoning"] },
+      { id: "gemini-3.8-flash-low", capabilities: ["chat"] },
+      { id: "gemini-3.1-pro-high", capabilities: ["chat", "reasoning"] },
+      { id: "gemini-3.1-pro-low", capabilities: ["chat", "reasoning"] },
+      { id: "claude-sonnet-4-6", capabilities: ["chat", "reasoning"] },
       {
-        id: "Claude Sonnet 4.6 (Thinking)",
+        id: "claude-opus-4-6-thinking",
         capabilities: ["chat", "reasoning"],
       },
-      { id: "Claude Opus 4.6 (Thinking)", capabilities: ["chat", "reasoning"] },
-      { id: "GPT-OSS 120B (Medium)", capabilities: ["chat", "reasoning"] },
+      { id: "gpt-oss-120b-medium", capabilities: ["chat", "reasoning"] },
     ],
   },
   {

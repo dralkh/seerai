@@ -1,4 +1,5 @@
 import { config } from "../../package.json";
+import { getChildAttachmentIds, getChildNoteIds } from "../utils/zoteroItem";
 
 interface DatalabResponse {
   success: boolean;
@@ -91,10 +92,11 @@ export class OcrService {
    * Returns true if such a note exists (meaning we should skip processing).
    */
   public hasExistingNote(parentItem: Zotero.Item): boolean {
+    if (!parentItem?.isRegularItem()) return false;
     const parentTitle = parentItem.getField("title") as string;
     if (!parentTitle) return false;
 
-    const noteIDs = parentItem.getNotes();
+    const noteIDs = getChildNoteIds(parentItem);
     for (const noteID of noteIDs) {
       const note = Zotero.Items.get(noteID);
       if (note) {
@@ -113,7 +115,15 @@ export class OcrService {
    * Returns null if no PDF is found.
    */
   public getFirstPdfAttachment(parentItem: Zotero.Item): Zotero.Item | null {
-    const attachmentIDs = parentItem.getAttachments();
+    if (!parentItem) return null;
+    // A directly-selected PDF attachment is itself the target (regular-item
+    // APIs throw on attachments).
+    if (parentItem.isAttachment()) {
+      return parentItem.attachmentPath?.toLowerCase().endsWith(".pdf")
+        ? parentItem
+        : null;
+    }
+    const attachmentIDs = getChildAttachmentIds(parentItem);
     for (const id of attachmentIDs) {
       const attachment = Zotero.Items.get(id) as Zotero.Item;
       if (

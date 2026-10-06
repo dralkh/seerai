@@ -53,6 +53,7 @@ declare namespace _ZoteroTypes {
       "agentMaxIterations": number;
       "agentAutoOcr": boolean;
       "enableExperimentalAgentTools": boolean;
+      "cliExtraPath": string;
       "selectionMode": string;
       "searchAutoAiInsights": boolean;
       "searchAiInsightsPrompt": string;

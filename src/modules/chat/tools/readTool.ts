@@ -24,6 +24,19 @@ import {
   keysForZoteroItemLike,
   parsePaperIdentifier,
 } from "./paperIdentity";
+import {
+  getChildAttachmentIds,
+  getChildNoteIds,
+  getParentItemTitle,
+} from "../../../utils/zoteroItem";
+
+function safeItemField(item: Zotero.Item, field: string): string {
+  try {
+    return (item.getField(field) as string) || "";
+  } catch {
+    return "";
+  }
+}
 
 async function resolveReadableItem(
   itemId: number | string,
@@ -103,8 +116,10 @@ export async function executeGetItemMetadata(
       };
     }
 
+    const isRegular = item.isRegularItem();
+
     // Get creators
-    const creators = item.getCreators().map((c: any) => ({
+    const creators = (isRegular ? item.getCreators() : []).map((c: any) => ({
       firstName: c.firstName || "",
       lastName: c.lastName || c.name || "",
       creatorType: c.creatorType || "author",
@@ -114,7 +129,7 @@ export async function executeGetItemMetadata(
     const tags = item.getTags().map((t: any) => t.tag);
 
     // Get collections
-    const collectionIDs = item.getCollections();
+    const collectionIDs = isRegular ? item.getCollections() : [];
     const collections: string[] = [];
     for (const collId of collectionIDs) {
       const coll = Zotero.Collections.get(collId);
@@ -123,8 +138,9 @@ export async function executeGetItemMetadata(
       }
     }
 
-    // Check for PDF attachment
-    const attachments = item.getAttachments();
+    // Check for PDF attachment (regular items only — attachment items have no
+    // children, and Zotero throws when getAttachments() is called on them).
+    const attachments = getChildAttachmentIds(item);
     let hasPdf = false;
     for (const attId of attachments) {
       const att = Zotero.Items.get(attId);
@@ -135,25 +151,28 @@ export async function executeGetItemMetadata(
     }
 
     // Count notes
-    const noteIDs = item.getNotes();
-    const notesCount = noteIDs.length;
+    const notesCount = getChildNoteIds(item).length;
 
     const result: GetItemMetadataResult = {
       id: item.id,
-      title: (item.getField("title") || "Untitled") as string,
+      title: (safeItemField(item, "title") ||
+        getParentItemTitle(item) ||
+        "Untitled") as string,
       authors: creators,
-      year: (item.getField("year") ||
-        item.getField("date")?.toString().substring(0, 4) ||
+      year: (safeItemField(item, "year") ||
+        safeItemField(item, "date").toString().substring(0, 4) ||
         "") as string,
-      abstract: (item.getField("abstractNote") || "") as string,
-      doi: (item.getField("DOI") || undefined) as string | undefined,
-      url: (item.getField("url") || undefined) as string | undefined,
-      publication: (item.getField("publicationTitle") ||
-        item.getField("bookTitle") ||
+      abstract: safeItemField(item, "abstractNote") as string,
+      doi: (safeItemField(item, "DOI") || undefined) as string | undefined,
+      url: (safeItemField(item, "url") || undefined) as string | undefined,
+      publication: (safeItemField(item, "publicationTitle") ||
+        safeItemField(item, "bookTitle") ||
         undefined) as string | undefined,
-      volume: (item.getField("volume") || undefined) as string | undefined,
-      issue: (item.getField("issue") || undefined) as string | undefined,
-      pages: (item.getField("pages") || undefined) as string | undefined,
+      volume: (safeItemField(item, "volume") || undefined) as
+        | string
+        | undefined,
+      issue: (safeItemField(item, "issue") || undefined) as string | undefined,
+      pages: (safeItemField(item, "pages") || undefined) as string | undefined,
       tags,
       collections,
       item_type: item.itemType,

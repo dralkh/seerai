@@ -165,11 +165,17 @@ export function createCliProvider(
         }
         // Most CLIs read the prompt from stdin; arg/flag-delivery ones (Hermes,
         // OpenClaw) take it via buildArgs and get an empty stdin instead.
+        // Stream-json transports (Antigravity) wrap stdin in an NDJSON envelope.
         const usesStdin = agent.stdinPrompt !== false;
+        const stdinText = usesStdin
+          ? agent.wrapStdin
+            ? agent.wrapStdin(prompt)
+            : prompt
+          : "";
         const run = runCli({
           bin: agent.bin,
           args,
-          stdinText: usesStdin ? prompt : "",
+          stdinText,
           // Run the harness in the active chat's workspace when known.
           cwd: workspaceDir,
         });
@@ -274,7 +280,9 @@ export function createCliProvider(
               errorEmitted = true;
               yield {
                 type: "error",
-                message: parsed.message,
+                message: isAuthFailureText(agent, parsed.message)
+                  ? agent.loginGuidance
+                  : parsed.message,
                 retryable: false,
               };
             }
