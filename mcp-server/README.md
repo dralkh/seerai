@@ -74,6 +74,46 @@ Should return:
 
 ---
 
+## Optional: Web Research with Parallel (Claude Code)
+
+Use [Claude Code](https://code.claude.com/docs/en/mcp) to combine your Zotero
+library with current web sources. [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp)
+provides free web search and page fetching without a Parallel account or API key.
+Anonymous search uses Fast mode and is rate limited.
+
+After downloading the SeerAI bundle and starting Zotero as above, run these
+commands from your research project directory. Replace the bundle path with its
+absolute path. If `seerai-zotero` is already configured in Claude Code, keep that
+entry and skip the first command.
+
+```bash
+claude mcp add --transport stdio --scope local seerai-zotero -- node "/absolute/path/to/seerai-mcp.cjs"
+claude mcp add --transport http --scope local parallel-search https://search.parallel.ai/mcp --header "User-Agent: seerai"
+```
+
+These entries apply to the current project in Claude Code. They do not configure
+Claude Desktop or change SeerAI's built-in web search provider. The bundled
+`parallel-web` skill uses the separately authenticated Parallel CLI; this MCP
+setup does not require that CLI or its API key.
+
+Start Claude Code in the same directory and run `/mcp` to check that both servers
+are connected. Parallel exposes `web_search` and `web_fetch`; SeerAI exposes
+`search_library` and `read_item_content` for your Zotero papers. Try:
+
+> Use parallel-search to find recent guidance on PRISMA reporting, then fetch the
+> most relevant source. Use seerai-zotero to search my Zotero library for PRISMA
+> papers and read the relevant items. Compare the guidance with my papers and
+> include source URLs and Zotero item IDs. Do not import papers or edit my library.
+
+If Parallel is unavailable or rate limited, retry later or continue with your
+Zotero library. To remove only this optional server from the project:
+
+```bash
+claude mcp remove --scope local parallel-search
+```
+
+---
+
 ## Alternative: Install via npm
 
 ```bash
